@@ -14,7 +14,7 @@ class Nips2018Grid(object):
         pass
 
 
-config = Config(
+grid_config = Config(
     log_name="nips_2018_grid",
     build_env=Nips2018Grid,
     seed=347405995,
@@ -25,7 +25,7 @@ config = Config(
     max_chars=25,
     n_sub_image_examples=0,
     draw_shape_grid=(5, 5),
-    image_shape=(5*14, 5*14),
+    image_shape=(6*14, 6*14),
     sub_image_shape=(14, 14),
     draw_offset="random",
     spacing=(-2, -2),
@@ -57,6 +57,6 @@ config = Config(
 
 
 if __name__ == "__main__":
-    with config:
+    with config.copy(n_train=100, n_val=100):
         obj = Nips2018Grid()
         obj.datasets['train'].visualize()

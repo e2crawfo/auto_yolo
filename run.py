@@ -5,39 +5,8 @@ from dps import cfg
 from dps.config import DEFAULT_CONFIG
 from dps.train import training_loop
 from dps.utils import pdb_postmortem
-import dps.projects.nips_2018 as env_pkg_nips_2018
-import dps.projects.nips_2018.config as alg_module
-
-
-def get_module_specs(*packages):
-    specs = {}
-    for p in packages:
-        update = {
-            name: (loader, name, is_pkg)
-            for loader, name, is_pkg in pkgutil.iter_modules(p.__path__)
-        }
-
-        intersection = specs.keys() & update.keys()
-        assert not intersection, \
-            "Module name overlaps: {}".format(list(intersection))
-        specs.update(update)
-    return specs
-
-
-def get_module_from_spec(spec):
-    return spec[0].find_module(spec[1]).load_module(spec[1])
-
-
-def parse_env_alg(env, alg):
-    env_module_specs = get_module_specs(env_pkg_nips_2018)
-    env_spec = env_module_specs[env]
-    env_module = get_module_from_spec(env_spec)
-    env_config = env_module.config
-
-    alg_config_name = "{}_config".format(alg)
-    alg_config = getattr(alg_module, alg_config_name)
-
-    return env_config, alg_config
+import dps.projects.nips_2018.envs as env_module
+import dps.projects.nips_2018.algs as alg_module
 
 
 def run():
@@ -62,7 +31,8 @@ def run():
 
 
 def _run(env_str, alg_str, _config=None, **kwargs):
-    env_config, alg_config = parse_env_alg(env_str, alg_str)
+    env_config = getattr(env_module, "{}_config".format(env_str))
+    alg_config = getattr(alg_module, "{}_config".format(alg_str))
 
     config = DEFAULT_CONFIG.copy()
     config.update(alg_config)

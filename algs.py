@@ -90,6 +90,7 @@ yolo_rl_config = Config(
         dict(obj_exploration=0.03),
         dict(obj_exploration=0.02),
         dict(obj_exploration=0.01),
-        dict(do_train=False, n_train=16, postprocessing="", preserve_env=False),  # Test on full size images.
+        dict(do_train=False, n_train=16, postprocessing="", preserve_env=False),
+        dict(postprocessing="", preserve_env=False),
     ],
 )
