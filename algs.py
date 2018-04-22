@@ -55,8 +55,8 @@ yolo_rl_config = Config(
 
     n_passthrough_features=100,
 
-    max_hw=0.3,  # Maximum for the bounding box multiplier.
-    min_hw=3.0,  # Minimum for the bounding box multiplier.
+    max_hw=0.3,
+    min_hw=3.0,
 
     box_std=0.0,
     attr_std=0.0,
