@@ -45,27 +45,31 @@ run_kwargs = dict(
     kind="slurm",
     pmem=5000,
     ignore_gpu=False,
-    max_hosts=1,
 )
 
 parser = argparse.ArgumentParser()
-parser.add_argument("kind", choices="long_cedar long_graham short".split())
+parser.add_argument("kind", choices="long_cedar long_graham short_graham short_cedar".split())
 args, _ = parser.parse_known_args()
 kind = args.kind
 
 if kind == "long_cedar":
     kind_args = dict(
-        ppn=16, cpp=1, gpu_set="0,1,2,3", wall_time="6hours",
-        cleanup_time="30mins", slack_time="30mins", n_param_settings=16)
+        max_hosts=1, ppn=16, cpp=1, gpu_set="0,1,2,3", wall_time="6hours",
+        cleanup_time="30mins", slack_time="30mins", n_param_settings=16,)
 
 elif kind == "long_graham":
     kind_args = dict(
-        ppn=8, cpp=1, gpu_set="0,1", wall_time="6hours",
+        max_hosts=2, ppn=8, cpp=1, gpu_set="0,1", wall_time="6hours", project="def-jpineau",
         cleanup_time="30mins", slack_time="30mins", n_param_settings=16)
 
-elif kind == "short":
+elif kind == "short_cedar":
     kind_args = dict(
-        ppn=4, cpp=1, gpu_set="0", wall_time="20mins",
+        max_hosts=1, ppn=4, cpp=1, gpu_set="0", wall_time="20mins",
+        cleanup_time="2mins", slack_time="2mins", n_param_settings=4)
+
+elif kind == "short_graham":
+    kind_args = dict(
+        max_hosts=1, ppn=4, cpp=1, gpu_set="0", wall_time="20mins", project="def-jpineau",
         cleanup_time="2mins", slack_time="2mins", n_param_settings=4)
 
 else:
