@@ -2,7 +2,7 @@ import numpy as np
 
 from dps.utils import Config
 from dps.utils.tf import MLP
-from dps.env.advanced import yolo_rl
+from dps.env.advanced import yolo_rl, air
 
 # Core yolo_rl config, used as a base for all other yolo_rl configs.
 
@@ -10,24 +10,19 @@ yolo_rl_config = Config(
     log_name="yolo_rl",
     get_updater=yolo_rl.get_updater,
 
-    lr_schedule=1e-4,
     batch_size=32,
-
+    lr_schedule=1e-4,
     optimizer_spec="adam",
+    max_grad_norm=1.0,
+
     use_gpu=True,
     gpu_allow_growth=True,
+
     preserve_env=True,
     stopping_criteria="TOTAL_COST,min",
     eval_mode="val",
     threshold=-np.inf,
-    max_grad_norm=1.0,
     max_experiments=None,
-
-    eval_step=1000,
-    display_step=1000,
-    max_steps=1e7,
-    patience=10000,
-    render_step=5000,
 
     render_hook=yolo_rl.YoloRL_RenderHook(),
 
@@ -93,4 +88,55 @@ yolo_rl_config = Config(
         dict(do_train=False, n_train=16, postprocessing="", preserve_env=False),
         dict(postprocessing="", preserve_env=False),
     ],
+)
+
+# Core air config, used as a base for all other air configs.
+
+air_config = Config(
+    log_name="attend_infer_repeat",
+    get_updater=air.get_updater,
+
+    # training loop params
+
+    batch_size=64,
+    lr_schedule=1e-4,
+    optimizer_spec="adam",
+    max_grad_norm=1.0,
+
+    use_gpu=True,
+    gpu_allow_growth=True,
+
+    preserve_env=True,
+    stopping_criteria="loss,min",
+    eval_mode="val",
+    threshold=-np.inf,
+    max_experiments=None,
+
+    verbose_summaries=False,
+
+    render_hook=air.AIR_RenderHook(),
+
+    # model params - based on the values in tf-attend-infer-repeat/training.py
+    max_time_steps=3,
+    rnn_units=256,
+    object_shape=(28, 28),
+    vae_latent_dimensions=50,
+    vae_recognition_units=(512, 256),
+    vae_generative_units=(256, 512),
+    scale_prior_mean=-1.0,  # <- odd value
+    scale_prior_variance=0.05,
+    shift_prior_mean=0.0,
+    shift_prior_variance=1.0,
+    vae_prior_mean=0.0,
+    vae_prior_variance=1.0,
+    # vae_likelihood_std=0.0,
+    vae_likelihood_std=0.3,  # <- an odd value...maybe comes from the output gaussian with std 0.3 used in original paper?
+    scale_hidden_units=64,
+    shift_hidden_units=64,
+    z_pres_hidden_units=64,
+    z_pres_prior_log_odds="Exponential(start=10000.0, end=0.000000001, decay_rate=0.1, decay_steps=3000, log=True)",
+    z_pres_temperature=1.0,
+    stopping_threshold=0.99,
+    cnn=False,
+    cnn_filters=8,
 )

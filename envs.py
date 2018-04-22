@@ -53,10 +53,19 @@ grid_config = Config(
     n_train=25000,
     n_val=1e2,
     n_test=1e2,
+
+    eval_step=1000,
+    display_step=1000,
+    max_steps=1e7,
+    patience=10000,
+    render_step=5000,
 )
 
+grid_fullsize_config = grid_config.copy(
+    postprocessing="",
+)
 
 if __name__ == "__main__":
-    with config.copy(n_train=100, n_val=100):
+    with grid_config.copy(n_train=100, n_val=100):
         obj = Nips2018Grid()
         obj.datasets['train'].visualize()
