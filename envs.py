@@ -1,12 +1,12 @@
 from dps import cfg
-from dps.datasets import GridEMNIST_ObjectDetection
+from dps.datasets import GridEmnistObjectDetection
 from dps.utils import Config
 
 
 class Nips2018Grid(object):
     def __init__(self):
-        train = GridEMNIST_ObjectDetection(n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9))
-        val = GridEMNIST_ObjectDetection(n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.))
+        train = GridEmnistObjectDetection(n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9))
+        val = GridEmnistObjectDetection(n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.))
 
         self.datasets = dict(train=train, val=val)
 
