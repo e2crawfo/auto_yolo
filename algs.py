@@ -49,9 +49,10 @@ yolo_rl_config = Config(
     A=100,
 
     n_passthrough_features=100,
+    n_backbone_features=100,
 
-    max_hw=0.3,
-    min_hw=3.0,
+    min_hw=0.3,
+    max_hw=3.0,
 
     box_std=0.0,
     attr_std=0.0,
