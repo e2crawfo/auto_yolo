@@ -71,6 +71,7 @@ yolo_rl_config = Config(
 
     fixed_values=dict(),
     fixed_weights="",
+    explore_during_val=False,
     order="box obj z attr",
 
     sequential_cfg=dict(
