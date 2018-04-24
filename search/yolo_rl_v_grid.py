@@ -8,7 +8,7 @@ from dps.projects.nips_2018.envs import grid_config as env_config
 from dps.projects.nips_2018.algs import yolo_rl_config as alg_config
 
 distributions = dict(
-    area_weight=list([0.5, 1.0, 1.5, 1.0]),
+    area_weight=list([0.5, 1.0, 1.5, 2.0]),
     nonzero_weight=list([50, 100, 150, 200]),
 )
 
@@ -21,6 +21,7 @@ config.curriculum[-1]['max_experiences'] = 100000000
 config.update(
     render_step=100000,
     eval_step=1000,
+    per_process_gpu_memory_fraction=0.2,
 
     max_experiences=100000,
     patience=10000000,
@@ -30,7 +31,7 @@ config.update(
     nonzero_weight=None,
 )
 
-config.log_name = "{}_VERSUS_{}".format(alg_config.log_name, env_config.log_name)
+config.log_name = "{}_VS_{}".format(alg_config.log_name, env_config.log_name)
 
 print("Forcing creation of first dataset.")
 with config.copy(mock_load=True):

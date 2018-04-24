@@ -13,20 +13,15 @@ def prepare_func():
 
     cfg.area_neighbourhood_size = cfg.neighbourhood_size
     cfg.nonzero_neighbourhood_size = cfg.neighbourhood_size
-
-    if cfg.with_init_stage:
-        cfg.curriculum = [
-            dict(fixed_weights="obj",
-                 fixed_values=dict(obj=1),
-                 max_experiences=100000),
-        ] + cfg.curriculum
+    cfg.kernel_size = (cfg.kernel_size, cfg.kernel_size)
 
 
 distributions = dict(
-    with_init_stage=[True, False],
-    neighbourhood_size=[0, 1, 2, 3],
+    neighbourhood_size=[0, 1],
     local_reconstruction_cost=[True, False],
+    kernel_size=[1, 3],
 )
+distributions['sequential_cfg:on'] = [True, False]
 
 config = DEFAULT_CONFIG.copy()
 
@@ -38,16 +33,14 @@ config.update(
     prepare_func=prepare_func,
     render_step=100000,
     eval_step=1000,
+    per_process_gpu_memory_fraction=0.2,
 
     max_experiences=100000,
     patience=10000000,
     max_steps=1000000,
-
-    area_weight=1.5,
-    nonzero_weight=150,
 )
 
-config.log_name = "{}_VERSUS_{}".format(alg_config.log_name, env_config.log_name)
+config.log_name = "{}_VS_{}".format(alg_config.log_name, env_config.log_name)
 
 print("Forcing creation of first dataset.")
 with config.copy(mock_load=True):

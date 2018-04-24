@@ -35,20 +35,16 @@ yolo_rl_config = Config(
     use_input_attention=False,
     decoder_logit_scale=10.0,
 
-    pixels_per_cell=(12, 12),
+    pixels_per_cell=(8, 8),
 
-    anchor_boxes=[
-        [7, 7],
-        [7, 7]
-    ],
+    anchor_boxes=[[14, 14]],
 
     kernel_size=(1, 1),
 
     n_channels=128,
     n_decoder_channels=128,
     A=100,
-
-    n_passthrough_features=100,
+    n_passthrough_features=0,
     n_backbone_features=100,
 
     min_hw=0.3,
@@ -62,12 +58,13 @@ yolo_rl_config = Config(
 
     # Costs
     use_baseline=True,
-    area_weight=2.,
+    area_weight=1.5,
     nonzero_weight=150.,
 
     local_reconstruction_cost=True,
     area_neighbourhood_size=1,
     nonzero_neighbourhood_size=1,
+    target_area=0.,
 
     fixed_values=dict(),
     fixed_weights="",
@@ -81,6 +78,8 @@ yolo_rl_config = Config(
     ),
 
     curriculum=[
+        # dict(fixed_weights="obj", fixed_values=dict(h=1, w=1, obj=1)),
+        dict(fixed_values=dict(h=1, w=1), obj_exploration=0.3),
         dict(obj_exploration=0.2),
         dict(obj_exploration=0.1),
         dict(obj_exploration=0.05),
