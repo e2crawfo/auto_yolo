@@ -140,4 +140,5 @@ air_config = Config(
     stopping_threshold=0.99,
     cnn=False,
     cnn_filters=8,
+    per_process_gpu_memory_fraction=0.3,
 )

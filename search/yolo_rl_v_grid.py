@@ -16,19 +16,27 @@ config = DEFAULT_CONFIG.copy()
 
 config.update(alg_config)
 config.update(env_config)
-config.curriculum[-1]['max_experiences'] = 100000000
 
 config.update(
     render_step=100000,
     eval_step=1000,
-    per_process_gpu_memory_fraction=0.2,
+    per_process_gpu_memory_fraction=0.3,
 
-    max_experiences=100000,
-    patience=10000000,
-    max_steps=1000000,
+    # max_experiences=100000,
+    patience=5000,
+    max_steps=10000,
 
     area_weight=None,
     nonzero_weight=None,
+
+    curriculum=[
+        dict(obj_exploration=0.2),
+        dict(obj_exploration=0.1),
+        dict(obj_exploration=0.05),
+        dict(obj_exploration=0.03),
+        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
+        dict(postprocessing="", preserve_env=False),
+    ],
 )
 
 config.log_name = "{}_VS_{}".format(alg_config.log_name, env_config.log_name)
@@ -55,8 +63,8 @@ kind = args.kind
 
 if kind == "long_cedar":
     kind_args = dict(
-        max_hosts=1, ppn=16, cpp=1, gpu_set="0,1,2,3", wall_time="6hours",
-        cleanup_time="30mins", slack_time="30mins", n_param_settings=16,)
+        max_hosts=2, ppn=12, cpp=1, gpu_set="0,1,2,3", wall_time="6hours", project="rrg-dprecup",
+        cleanup_time="30mins", slack_time="30mins", n_param_settings=24,)
 
 elif kind == "long_graham":
     kind_args = dict(
@@ -65,8 +73,8 @@ elif kind == "long_graham":
 
 elif kind == "short_cedar":
     kind_args = dict(
-        max_hosts=1, ppn=4, cpp=1, gpu_set="0", wall_time="20mins",
-        cleanup_time="2mins", slack_time="2mins", n_param_settings=4)
+        max_hosts=1, ppn=3, cpp=1, gpu_set="0", wall_time="20mins", project="rrg-dprecup",
+        cleanup_time="2mins", slack_time="2mins", n_param_settings=3)
 
 elif kind == "short_graham":
     kind_args = dict(

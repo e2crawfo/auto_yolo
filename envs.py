@@ -63,6 +63,7 @@ grid_config = Config(
 
 grid_fullsize_config = grid_config.copy(
     postprocessing="",
+    max_time_steps=25,
 )
 
 if __name__ == "__main__":
