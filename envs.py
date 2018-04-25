@@ -20,18 +20,18 @@ grid_config = Config(
     seed=347405995,
 
     # dataset params
-    use_dataset_cache=True,
     min_chars=16,
     max_chars=25,
     n_sub_image_examples=0,
-    draw_shape_grid=(5, 5),
     image_shape=(6*14, 6*14),
     sub_image_shape=(14, 14),
-    draw_offset="random",
-    spacing=(-2, -2),
     characters=list(range(10)),
     sub_image_size_std=0.0,
     colours="white",
+
+    grid_shape=(6, 6),
+    spacing=(-3, -3),
+    random_offset_range=(15, 15),
 
     n_distractors_per_image=0,
 
@@ -56,9 +56,9 @@ grid_config = Config(
 
     eval_step=1000,
     display_step=1000,
+    render_step=5000,
     max_steps=1e7,
     patience=10000,
-    render_step=5000,
 )
 
 grid_fullsize_config = grid_config.copy(

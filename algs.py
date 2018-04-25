@@ -55,11 +55,13 @@ yolo_rl_config = Config(
     z_std=0.1,
     obj_exploration=0.05,
     obj_default=0.5,
+    explore_during_val=False,
 
     # Costs
     use_baseline=True,
-    area_weight=1.5,
-    nonzero_weight=150.,
+    area_weight=0.01,
+    nonzero_weight=1.0,
+    use_rl=True,
 
     local_reconstruction_cost=True,
     area_neighbourhood_size=1,
@@ -68,7 +70,6 @@ yolo_rl_config = Config(
 
     fixed_values=dict(),
     fixed_weights="",
-    explore_during_val=False,
     order="box obj z attr",
 
     sequential_cfg=dict(
@@ -78,15 +79,14 @@ yolo_rl_config = Config(
     ),
 
     curriculum=[
-        # dict(fixed_weights="obj", fixed_values=dict(h=1, w=1, obj=1)),
-        dict(fixed_values=dict(h=1, w=1), obj_exploration=0.3),
+        dict(use_rl=False, fixed_values=dict(obj=1), max_steps=10000, patience=10000),
         dict(obj_exploration=0.2),
         dict(obj_exploration=0.1),
         dict(obj_exploration=0.05),
         dict(obj_exploration=0.03),
         dict(obj_exploration=0.02),
         dict(obj_exploration=0.01),
-        dict(do_train=False, n_train=16, postprocessing="", preserve_env=False),
+        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
         dict(postprocessing="", preserve_env=False),
     ],
 )

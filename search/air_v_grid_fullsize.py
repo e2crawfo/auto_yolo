@@ -21,9 +21,6 @@ config.update(
     max_experiences=10000000,
     patience=10000000,
     max_steps=1000000,
-
-    # Train directly on the large images.
-    postprocessing="",
 )
 
 config.log_name = "{}_VERSUS_{}".format(alg_config.log_name, env_config.log_name)

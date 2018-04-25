@@ -8,8 +8,8 @@ from dps.projects.nips_2018.envs import grid_config as env_config
 from dps.projects.nips_2018.algs import yolo_rl_config as alg_config
 
 distributions = dict(
-    area_weight=list([0.5, 1.0, 1.5, 2.0]),
-    nonzero_weight=list([50, 100, 150, 200]),
+    area_weight=list([0.01, 0.02, 0.04, 0.08, 0.16]),
+    nonzero_weight=list([1, 2, 4, 8, 16]),
 )
 
 config = DEFAULT_CONFIG.copy()
