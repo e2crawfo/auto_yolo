@@ -34,11 +34,11 @@ config.update(
 config.log_name = "{}_VS_{}".format(alg_config.log_name, env_config.log_name)
 
 print("Forcing creation of first dataset.")
-with config.copy(mock_load=True):
+with config.copy():
     cfg.build_env()
 
 print("Forcing creation of second dataset.")
-with config.copy(config.curriculum[-1], mock_load=True):
+with config.copy(config.curriculum[-1]):
     cfg.build_env()
 
 run_kwargs = dict(
