@@ -1,15 +1,25 @@
 import clify
 import argparse
+import numpy as np
 
 from dps import cfg
 from dps.config import DEFAULT_CONFIG
 
 from dps.projects.nips_2018.envs import grid_config as env_config
 from dps.projects.nips_2018.algs import yolo_rl_config as alg_config
+from dps.train import PolynomialScheduleHook
+
+
+fragment = [
+    dict(obj_exploration=0.2,),
+    dict(obj_exploration=0.1,),
+    dict(obj_exploration=0.05,),
+    dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
+]
+
 
 distributions = dict(
-    area_weight=list([0.01, 0.02, 0.04, 0.08, 0.16]),
-    nonzero_weight=list([1, 2, 4, 8, 16]),
+    area_weight=list(np.linspace(0.1, 1.0, 24))
 )
 
 config = DEFAULT_CONFIG.copy()
@@ -30,13 +40,17 @@ config.update(
     nonzero_weight=None,
 
     curriculum=[
-        dict(obj_exploration=0.2),
-        dict(obj_exploration=0.1),
-        dict(obj_exploration=0.05),
-        dict(obj_exploration=0.03),
-        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
-        dict(postprocessing="", preserve_env=False),
+        dict(do_train=False),
     ],
+
+    hooks=[
+        PolynomialScheduleHook(
+            attr_name="nonzero_weight",
+            query_name="best_COST_reconstruction",
+            base_configs=fragment, tolerance=10,
+            initial_value=30,
+            scale=10, power=1.0)
+    ]
 )
 
 config.log_name = "{}_VS_{}".format(alg_config.log_name, env_config.log_name)

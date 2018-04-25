@@ -47,7 +47,7 @@ grid_config = Config(
 
     postprocessing="random",
     n_samples_per_image=4,
-    tile_shape=(42, 42),
+    tile_shape=(32, 32),
     preserve_env=True,
 
     n_train=25000,
