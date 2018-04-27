@@ -1,5 +1,5 @@
 from dps import cfg
-from dps.datasets import GridEmnistObjectDetection
+from dps.datasets import GridEmnistObjectDetection, EmnistObjectDetection
 from dps.utils import Config
 
 
@@ -7,6 +7,17 @@ class Nips2018Grid(object):
     def __init__(self):
         train = GridEmnistObjectDetection(n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9))
         val = GridEmnistObjectDetection(n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.))
+
+        self.datasets = dict(train=train, val=val)
+
+    def close(self):
+        pass
+
+
+class Nips2018Scatter(object):
+    def __init__(self):
+        train = EmnistObjectDetection(n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9))
+        val = EmnistObjectDetection(n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.))
 
         self.datasets = dict(train=train, val=val)
 
@@ -22,11 +33,11 @@ grid_config = Config(
     # dataset params
     min_chars=16,
     max_chars=25,
-    n_sub_image_examples=0,
+    n_patch_examples=0,
     image_shape=(6*14, 6*14),
-    sub_image_shape=(14, 14),
+    patch_shape=(14, 14),
     characters=list(range(10)),
-    sub_image_size_std=0.0,
+    patch_size_std=0.0,
     colours="white",
 
     grid_shape=(6, 6),
@@ -62,11 +73,44 @@ grid_config = Config(
 )
 
 grid_fullsize_config = grid_config.copy(
+    log_name="nips_2018_gridfullsize",
     postprocessing="",
     max_time_steps=25,
 )
 
+scatter_white_config = grid_config.copy(
+    log_name="nips_2018_scatter_white",
+    build_env=Nips2018Scatter,
+    max_overlap=196/2,
+    min_chars=15,
+    max_chars=15,
+    tile_shape=(40, 40),
+)
+
+scatter_colour_config = scatter_white_config.copy(
+    log_name="nips_2018_scatter_colour",
+    build_env=Nips2018Scatter,
+    colours="red blue green cyan yellow magenta",
+)
+
+scatter_white_config_28x28 = grid_config.copy(
+    log_name="nips_2018_scatter_white_28x28",
+    build_env=Nips2018Scatter,
+    object_shape=(28, 28),
+    colours="white",
+    min_chars=15,
+    max_chars=15,
+    max_overlap=2*196,
+    patch_shape=(28, 28),
+    tile_shape=(40, 40),
+    image_shape=(100, 100),
+)
+
+scatter_colour_config_28x28 = scatter_white_config_28x28.copy(
+    log_name="nips_2018_scatter_colour_28x28",
+    colours="red blue green cyan yellow magenta",
+)
+
 if __name__ == "__main__":
-    with grid_config.copy(n_train=100, n_val=100):
-        obj = Nips2018Grid()
-        obj.datasets['train'].visualize()
+    with scatter_colour_config.copy(n_train=100, n_val=100):
+        obj = Nips2018Scatter()
