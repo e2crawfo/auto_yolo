@@ -62,7 +62,7 @@ yolo_rl_config = Config(
 
     # Costs
     area_weight=1.0,
-    hw_weight=0.0,
+    hw_weight=None,
     nonzero_weight=1.0,
     rl_weight=1.0,
 
@@ -86,27 +86,11 @@ yolo_rl_config = Config(
     ),
 
     curriculum=[
-        dict(obj_exploration=1.0, rl_weight=0.0),
+        dict(max_steps=5000, rl_weight=None, area_weight=None, fixed_values=dict(h=8/14, w=8/14, cell_x=0.5, cell_y=0.5, obj=1.0)),
+        dict(max_steps=5000, rl_weight=None, area_weight=None, fixed_values=dict(obj=1.0)),
         dict(obj_exploration=0.2),
         dict(obj_exploration=0.1),
         dict(obj_exploration=0.05),
-        dict(obj_exploration=0.03),
-        dict(obj_exploration=0.02),
-        dict(obj_exploration=0.01),
-        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
-        dict(postprocessing="", preserve_env=False),
-    ],
-)
-
-yolo_rl_reset_config = yolo_rl_config.copy(
-    curriculum=[
-        dict(obj_exploration=0.5, load_path="/scratch/e2crawfo/dps_data/logs/yolo_rl_VERSUS_nips_2018_grid/exp_yolo_rl_VERSUS_nips_2018_grid_seed=347405995_2018_05_01_11_02_09/weights/best_of_stage_0", rl_weight=0.0),
-        dict(obj_exploration=0.2),
-        dict(obj_exploration=0.1),
-        dict(obj_exploration=0.05),
-        dict(obj_exploration=0.03),
-        dict(obj_exploration=0.02),
-        dict(obj_exploration=0.01),
         dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
         dict(postprocessing="", preserve_env=False),
     ],

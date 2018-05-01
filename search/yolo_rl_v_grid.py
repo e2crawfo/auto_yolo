@@ -12,7 +12,6 @@ from dps.train import PolynomialScheduleHook
 
 parser = argparse.ArgumentParser()
 parser.add_argument("kind", choices="long_cedar long_graham short_graham short_cedar".split())
-parser.add_argument("env", choices="white_14x14 colour_14x14 white_28x28 colour_28x28".split())
 args, _ = parser.parse_known_args()
 kind = args.kind
 
@@ -26,15 +25,24 @@ fragment = [
 
 
 distributions = dict(
-    area_weight=list(np.linspace(0.1, 1.0, 24))
+    area_vs_nonzero=list(np.linspace(0.01, 0.99, 24)),
 )
+
+
+def stage_prepare_func(stage_idx):
+    if cfg.fixed_values:  # First two stages.
+        return
+
+    from dps import cfg
+    cfg.area_weight = cfg.area_vs_nonzero * cfg.cost_weight
+    cfg.nonzero_weight = (1 - cfg.area_vs_nonzero) * cfg.cost_weight
+
 
 config = DEFAULT_CONFIG.copy()
 
 config.update(alg_config)
 
-env_config = getattr(envs, "scatter_{}_config".format(args.env))
-config.update(env_config)
+config.update(envs.grid_config)
 
 config.update(
     render_step=100000,
@@ -44,25 +52,30 @@ config.update(
     max_experiences=100000000,
     patience=2500,
     max_steps=100000000,
+    stopping_criteria="mAP,max",
 
     area_weight=None,
     nonzero_weight=None,
+    area_vs_nonzero=None,
+    cost_weight=1.0,
 
     curriculum=[
-        dict(do_train=False),
+        dict(max_steps=5000, rl_weight=None,
+             fixed_values=dict(h=8/14, w=8/14, cell_x=0.5, cell_y=0.5, obj=1.0)),
+        dict(max_steps=5000, rl_weight=None,
+             fixed_values=dict(obj=1.0)),
     ],
 
     hooks=[
         PolynomialScheduleHook(
-            attr_name="nonzero_weight",
+            attr_name="cost_weight",
             query_name="best_COST_reconstruction",
             base_configs=fragment, tolerance=10,
-            initial_value=50,
-            scale=10, power=1.0)
+            initial_value=10, scale=10, power=1.0)
     ]
 )
 
-config.log_name = "{}_VS_{}_env={}".format(alg_config.log_name, env_config.log_name, args.env)
+config.log_name = "{}_VS_{}_env={}".format(alg_config.log_name, envs.grid_config.log_name, args.env)
 
 print("Forcing creation of first dataset.")
 with config.copy():
@@ -84,20 +97,15 @@ if kind == "long_cedar":
         max_hosts=2, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="24hours", project="rrg-dprecup",
         cleanup_time="30mins", slack_time="30mins")
 
-elif kind == "long_graham":
+elif kind == "med_cedar":
     kind_args = dict(
-        max_hosts=2, ppn=8, cpp=1, gpu_set="0,1", wall_time="6hours", project="def-jpineau",
-        cleanup_time="30mins", slack_time="30mins", n_param_settings=16)
+        max_hosts=1, ppn=6, cpp=1, gpu_set="0,1", wall_time="1hour", project="rrg-dprecup",
+        cleanup_time="10mins", slack_time="10mins", n_param_settings=6)
 
 elif kind == "short_cedar":
     kind_args = dict(
         max_hosts=1, ppn=3, cpp=1, gpu_set="0", wall_time="20mins", project="rrg-dprecup",
         cleanup_time="2mins", slack_time="2mins", n_param_settings=3)
-
-elif kind == "short_graham":
-    kind_args = dict(
-        max_hosts=1, ppn=4, cpp=1, gpu_set="0", wall_time="20mins", project="def-jpineau",
-        cleanup_time="2mins", slack_time="2mins", n_param_settings=4)
 
 else:
     raise Exception("Unknown kind: {}".format(kind))
