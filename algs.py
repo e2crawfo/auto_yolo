@@ -28,13 +28,14 @@ yolo_rl_config = Config(
 
     # model params
 
-    build_backbone=yolo_rl.Backbone,
+    build_backbone=yolo_rl.NewBackbone,
     build_next_step=yolo_rl.NextStep,
     build_object_decoder=yolo_rl.ObjectDecoder,
 
     use_input_attention=False,
     decoder_logit_scale=10.0,
 
+    max_object_shape=(28, 28),
     pixels_per_cell=(8, 8),
 
     anchor_boxes=[[14, 14]],
