@@ -64,9 +64,9 @@ yolo_rl_config = Config(
     nonzero_weight=1.0,
     rl_weight=1.0,
 
-    local_reconstruction_cost=True,
-    area_neighbourhood_size=1,
-    nonzero_neighbourhood_size=1,
+    local_reconstruction_cost=False,
+    area_neighbourhood_size=None,
+    nonzero_neighbourhood_size=None,
     target_area=0.,
 
     fixed_values=dict(),
