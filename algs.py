@@ -42,13 +42,13 @@ yolo_rl_config = Config(
 
     kernel_size=(1, 1),
 
-    n_channels=128,
+    n_channels=64,
     n_decoder_channels=128,
     A=100,
     n_passthrough_features=0,
     n_backbone_features=100,
 
-    min_hw=0.3,
+    min_hw=0.0,
     max_hw=3.0,
 
     box_std=0.0,
@@ -58,16 +58,22 @@ yolo_rl_config = Config(
     obj_default=0.5,
     explore_during_val=False,
 
-    # Costs
     use_baseline=True,
-    area_weight=0.01,
+
+    # Costs
+    area_weight=1.0,
+    hw_weight=0.0,
     nonzero_weight=1.0,
     rl_weight=1.0,
 
     local_reconstruction_cost=False,
+
     area_neighbourhood_size=None,
+    hw_neighbourhood_size=None,
     nonzero_neighbourhood_size=None,
-    target_area=0.,
+
+    target_area=1.0,
+    target_hw=0.0,
 
     fixed_values=dict(),
     fixed_weights="",
@@ -80,6 +86,7 @@ yolo_rl_config = Config(
     ),
 
     curriculum=[
+        dict(obj_exploration=1.0, rl_weight=0.0),
         dict(obj_exploration=0.2),
         dict(obj_exploration=0.1),
         dict(obj_exploration=0.05),
@@ -90,6 +97,21 @@ yolo_rl_config = Config(
         dict(postprocessing="", preserve_env=False),
     ],
 )
+
+yolo_rl_reset_config = yolo_rl_config.copy(
+    curriculum=[
+        dict(obj_exploration=0.5, load_path="/scratch/e2crawfo/dps_data/logs/yolo_rl_VERSUS_nips_2018_grid/exp_yolo_rl_VERSUS_nips_2018_grid_seed=347405995_2018_05_01_11_02_09/weights/best_of_stage_0", rl_weight=0.0),
+        dict(obj_exploration=0.2),
+        dict(obj_exploration=0.1),
+        dict(obj_exploration=0.05),
+        dict(obj_exploration=0.03),
+        dict(obj_exploration=0.02),
+        dict(obj_exploration=0.01),
+        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
+        dict(postprocessing="", preserve_env=False),
+    ],
+)
+
 
 # Core air config, used as a base for all other air configs.
 
