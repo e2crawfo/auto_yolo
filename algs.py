@@ -61,7 +61,7 @@ yolo_rl_config = Config(
     use_baseline=True,
     area_weight=0.01,
     nonzero_weight=1.0,
-    use_rl=True,
+    rl_weight=1.0,
 
     local_reconstruction_cost=True,
     area_neighbourhood_size=1,
@@ -79,7 +79,6 @@ yolo_rl_config = Config(
     ),
 
     curriculum=[
-        dict(use_rl=False, fixed_values=dict(obj=1), max_steps=10000, patience=10000),
         dict(obj_exploration=0.2),
         dict(obj_exploration=0.1),
         dict(obj_exploration=0.05),
@@ -120,11 +119,11 @@ air_config = Config(
     # model params - based on the values in tf-attend-infer-repeat/training.py
     max_time_steps=3,
     rnn_units=256,
-    object_shape=(28, 28),
+    object_shape=(14, 14),
     vae_latent_dimensions=50,
     vae_recognition_units=(512, 256),
     vae_generative_units=(256, 512),
-    scale_prior_mean=-1.0,  # <- odd value
+    scale_prior_mean=-1.0,
     scale_prior_variance=0.05,
     shift_prior_mean=0.0,
     shift_prior_variance=1.0,
@@ -139,6 +138,6 @@ air_config = Config(
     z_pres_temperature=1.0,
     stopping_threshold=0.99,
     cnn=False,
-    cnn_filters=8,
+    cnn_filters=128,
     per_process_gpu_memory_fraction=0.3,
 )

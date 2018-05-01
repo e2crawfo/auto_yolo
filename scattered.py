@@ -1,12 +1,12 @@
 from dps import cfg
-from dps.datasets import EmnistObjectDetection
+from dps.datasets import EmnistObjectDetectionDataset
 from dps.utils import Config
 
 
 class Nips2018Scattered(object):
     def __init__(self):
-        train = EmnistObjectDetection(n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9))
-        val = EmnistObjectDetection(n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.))
+        train = EmnistObjectDetectionDataset(n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9))
+        val = EmnistObjectDetectionDataset(n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.))
 
         self.datasets = dict(train=train, val=val)
 
