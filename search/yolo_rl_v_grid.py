@@ -11,7 +11,7 @@ from dps.train import PolynomialScheduleHook
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("kind", choices="long_cedar long_graham short_graham short_cedar".split())
+parser.add_argument("kind", choices="long_cedar med_cedar short_cedar".split())
 args, _ = parser.parse_known_args()
 kind = args.kind
 
@@ -53,6 +53,7 @@ config.update(
     patience=2500,
     max_steps=100000000,
     stopping_criteria="mAP,max",
+    threshold=0.99,
 
     area_weight=None,
     nonzero_weight=None,
@@ -60,9 +61,9 @@ config.update(
     cost_weight=1.0,
 
     curriculum=[
-        dict(max_steps=5000, rl_weight=None,
+        dict(max_steps=5000, rl_weight=None, stopping_criteria="TOTAL_COST,min", threshold=-np.inf,
              fixed_values=dict(h=8/14, w=8/14, cell_x=0.5, cell_y=0.5, obj=1.0)),
-        dict(max_steps=5000, rl_weight=None,
+        dict(max_steps=5000, rl_weight=None, stopping_criteria="TOTAL_COST,min", threshold=-np.inf,
              fixed_values=dict(obj=1.0)),
     ],
 
@@ -75,16 +76,7 @@ config.update(
     ]
 )
 
-config.log_name = "{}_VS_{}_env={}".format(alg_config.log_name, envs.grid_config.log_name, args.env)
-
-print("Forcing creation of first dataset.")
-with config.copy():
-    cfg.build_env()
-
-print("Forcing creation of second dataset.")
-with config.copy(fragment[-1]):
-    cfg.build_env()
-
+config.log_name = "{}_VS_{}".format(alg_config.log_name, envs.grid_config.log_name)
 run_kwargs = dict(
     n_repeats=1,
     kind="slurm",
@@ -114,5 +106,5 @@ run_kwargs.update(kind_args)
 
 from dps.hyper import build_and_submit
 clify.wrap_function(build_and_submit)(
-    name="{}_param_search_{}".format(args.env, kind), config=config,
+    name="grid_param_search_{}".format(kind), config=config,
     distributions=distributions, **run_kwargs)

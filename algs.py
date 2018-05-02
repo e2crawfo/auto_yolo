@@ -97,6 +97,24 @@ yolo_rl_config = Config(
 )
 
 
+reset_config = yolo_rl_config.copy(
+    area_weight=1.0,
+    hw_weight=None,
+    nonzero_weight=1.0,
+    rl_weight=1.0,
+    z_weight=None,
+
+    curriculum=[
+        dict(obj_exploration=0.2,
+             load_path="/scratch/e2crawfo/dps_data/logs/yolo_rl_VERSUS_nips_2018_grid/reference_point/weights/best_of_stage_1",),
+        dict(obj_exploration=0.1),
+        dict(obj_exploration=0.05),
+        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
+        dict(postprocessing="", preserve_env=False),
+    ]
+)
+
+
 # Core air config, used as a base for all other air configs.
 
 air_config = Config(
