@@ -9,7 +9,7 @@ from dps.projects.nips_2018.algs import yolo_rl_config as alg_config
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("kind", choices="long med short".split())
+parser.add_argument("kind", choices="long_cedar long_graham med short".split())
 args, _ = parser.parse_known_args()
 kind = args.kind
 
@@ -46,7 +46,12 @@ run_kwargs = dict(
     ignore_gpu=False,
 )
 
-if kind == "long":
+if kind == "long_cedar":
+    kind_args = dict(
+        max_hosts=2, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="11hours", project="def-jpineau",
+        cleanup_time="30mins", slack_time="30mins", n_param_settings=24)
+
+if kind == "long_graham":
     kind_args = dict(
         max_hosts=3, ppn=8, cpp=2, gpu_set="0,1", wall_time="12hours", project="def-jpineau",
         cleanup_time="30mins", slack_time="30mins", n_param_settings=24)
@@ -58,8 +63,8 @@ elif kind == "med":
 
 elif kind == "short":
     kind_args = dict(
-        max_hosts=1, ppn=4, cpp=1, gpu_set="0", wall_time="20mins", project="def-jpineau",
-        cleanup_time="2mins", slack_time="2mins", n_param_settings=4)
+        max_hosts=1, ppn=4, cpp=1, gpu_set="0", wall_time="20mins", project="rpp-bengioy",
+        cleanup_time="5mins", slack_time="5mins", n_param_settings=4)
 
 else:
     raise Exception("Unknown kind: {}".format(kind))

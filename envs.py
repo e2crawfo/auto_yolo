@@ -136,6 +136,18 @@ scatter_colour_28x28_config = scatter_white_28x28_config.copy(
     build_object_decoder=yolo_rl.ObjectDecoder28x28,
 )
 
+
+single_digit_config = grid_config.copy(
+    log_name="nips_2018_single_digit",
+    build_env=Nips2018Scatter,
+    min_chars=1,
+    max_chars=1,
+    image_shape=(24, 24),
+
+    postprocessing="",
+)
+
+
 if __name__ == "__main__":
     with scatter_colour_14x14_config.copy(n_train=100, n_val=100):
         obj = Nips2018Scatter()
