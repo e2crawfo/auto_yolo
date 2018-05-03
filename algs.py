@@ -20,15 +20,15 @@ yolo_rl_config = Config(
 
     preserve_env=True,
     stopping_criteria="TOTAL_COST,min",
-    eval_mode="val",
     threshold=-np.inf,
+    eval_mode="val",
     max_experiments=None,
 
     render_hook=yolo_rl.YoloRL_RenderHook(),
 
     # model params
 
-    build_backbone=yolo_rl.NewBackbone,
+    build_backbone=yolo_rl.Backbone,
     build_next_step=yolo_rl.NextStep,
     build_object_decoder=yolo_rl.ObjectDecoder,
 
@@ -37,12 +37,11 @@ yolo_rl_config = Config(
 
     max_object_shape=(28, 28),
     pixels_per_cell=(8, 8),
-
     anchor_boxes=[[14, 14]],
 
-    kernel_size=(1, 1),
+    kernel_size=(3, 3),
 
-    n_channels=64,
+    n_channels=128,
     n_decoder_channels=128,
     A=100,
     n_passthrough_features=0,
@@ -61,18 +60,18 @@ yolo_rl_config = Config(
     use_baseline=True,
 
     # Costs
-    area_weight=1.0,
-    hw_weight=None,
-    nonzero_weight=1.0,
+    area_weight=5.0,
+    nonzero_weight=50.0,
     rl_weight=1.0,
+    hw_weight=None,
+    z_weight=None,
 
-    local_reconstruction_cost=False,
-
-    area_neighbourhood_size=None,
+    area_neighbourhood_size=2,
     hw_neighbourhood_size=None,
-    nonzero_neighbourhood_size=None,
+    nonzero_neighbourhood_size=2,
+    local_reconstruction_cost=True,
 
-    target_area=1.0,
+    target_area=0.0,
     target_hw=0.0,
 
     fixed_values=dict(),
@@ -86,32 +85,14 @@ yolo_rl_config = Config(
     ),
 
     curriculum=[
-        dict(max_steps=5000, rl_weight=None, area_weight=None, fixed_values=dict(h=8/14, w=8/14, cell_x=0.5, cell_y=0.5, obj=1.0)),
         dict(max_steps=5000, rl_weight=None, area_weight=None, fixed_values=dict(obj=1.0)),
+        dict(max_steps=5000, rl_weight=None, fixed_values=dict(obj=1.0)),
         dict(obj_exploration=0.2),
         dict(obj_exploration=0.1),
         dict(obj_exploration=0.05),
         dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
-        dict(postprocessing="", preserve_env=False),
+        dict(obj_exploration=0.05, preserve_env=False, patience=10000000),
     ],
-)
-
-
-reset_config = yolo_rl_config.copy(
-    area_weight=1.0,
-    hw_weight=None,
-    nonzero_weight=1.0,
-    rl_weight=1.0,
-    z_weight=None,
-
-    curriculum=[
-        dict(obj_exploration=0.2,
-             load_path="/scratch/e2crawfo/dps_data/logs/yolo_rl_VERSUS_nips_2018_grid/reference_point/weights/best_of_stage_1",),
-        dict(obj_exploration=0.1),
-        dict(obj_exploration=0.05),
-        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
-        dict(postprocessing="", preserve_env=False),
-    ]
 )
 
 
