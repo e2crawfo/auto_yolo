@@ -15,7 +15,7 @@ kind = args.kind
 
 
 distributions = dict(
-    area_weight=[1, 2, 3, 4, 5],
+    area_weight=[2, 4, 6, 8, 10],
     nonzero_weight=[10, 20, 30, 40, 50],
 )
 
@@ -24,7 +24,7 @@ config = DEFAULT_CONFIG.copy()
 
 config.update(alg_config)
 
-config.update(envs.grid_config)
+config.update(envs.single_digit_config)
 
 config.update(
     render_step=100000,
@@ -36,9 +36,22 @@ config.update(
     max_steps=100000000,
     stopping_criteria="TOTAL_COST,min",
     threshold=-np.inf,
+
+    min_yx=-1.0,
+    max_yx=2.0,
+
+    curriculum=[
+        dict(max_steps=5000, rl_weight=None, area_weight=None, fixed_values=dict(obj=1.0)),
+        dict(max_steps=5000, rl_weight=None, fixed_values=dict(obj=1.0)),
+        dict(obj_exploration=0.2),
+        dict(obj_exploration=0.1),
+        dict(obj_exploration=0.05),
+        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
+        dict(obj_exploration=0.05, preserve_env=False, patience=10000000),
+    ],
 )
 
-config.log_name = "{}_VS_{}".format(alg_config.log_name, envs.grid_config.log_name)
+config.log_name = "{}_VS_{}".format(alg_config.log_name, envs.single_digit_config.log_name)
 run_kwargs = dict(
     n_repeats=1,
     kind="slurm",
@@ -71,9 +84,12 @@ else:
 
 run_kwargs.update(kind_args)
 
-readme = "Testing new yolo_rl on grid task, trying to get centered again after making some changes that I probably shouldn't have done."
+readme = (
+    "Testing new yolo_rl on single digit task, trying to get things to work again. "
+    "Trying a variation where the predicted object centers are not restricted to the grid cell"
+)
 
 from dps.hyper import build_and_submit
 clify.wrap_function(build_and_submit)(
-    name="grid_param_search_{}".format(kind), config=config, readme=readme,
+    name="single_digit_param_search_{}".format(kind), config=config, readme=readme,
     distributions=distributions, **run_kwargs)

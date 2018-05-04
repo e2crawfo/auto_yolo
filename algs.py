@@ -60,8 +60,8 @@ yolo_rl_config = Config(
     use_baseline=True,
 
     # Costs
-    area_weight=5.0,
-    nonzero_weight=50.0,
+    area_weight=1.0,
+    nonzero_weight=25.0,
     rl_weight=1.0,
     hw_weight=None,
     z_weight=None,
@@ -84,17 +84,16 @@ yolo_rl_config = Config(
         build_next_step=lambda scope: MLP([100, 100], scope=scope),
     ),
 
-    curriculum=[
-        dict(max_steps=5000, rl_weight=None, area_weight=None, fixed_values=dict(obj=1.0)),
-        dict(max_steps=5000, rl_weight=None, fixed_values=dict(obj=1.0)),
-        dict(obj_exploration=0.2),
-        dict(obj_exploration=0.1),
-        dict(obj_exploration=0.05),
-        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
-        dict(obj_exploration=0.05, preserve_env=False, patience=10000000),
-    ],
+    # curriculum=[
+    #     dict(max_steps=5000, rl_weight=None, area_weight=None, fixed_values=dict(obj=1.0)),
+    #     dict(max_steps=5000, rl_weight=None, fixed_values=dict(obj=1.0)),
+    #     dict(obj_exploration=0.2),
+    #     dict(obj_exploration=0.1),
+    #     dict(obj_exploration=0.05),
+    #     dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
+    #     dict(obj_exploration=0.05, preserve_env=False, patience=10000000),
+    # ],
 )
-
 
 # Core air config, used as a base for all other air configs.
 

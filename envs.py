@@ -136,15 +136,41 @@ scatter_colour_28x28_config = scatter_white_28x28_config.copy(
     build_object_decoder=yolo_rl.ObjectDecoder28x28,
 )
 
-
 single_digit_config = grid_config.copy(
     log_name="nips_2018_single_digit",
     build_env=Nips2018Scatter,
     min_chars=1,
     max_chars=1,
-    image_shape=(24, 24),
+    image_shape=(32, 32),
+    fixed_values=dict(alpha=1.0),
 
     postprocessing="",
+)
+
+
+double_digit_config = grid_config.copy(
+    log_name="nips_2018_double_digit",
+    build_env=Nips2018Scatter,
+    min_chars=1,
+    max_chars=2,
+    image_shape=(32, 32),
+    min_yx=-1.0,
+    max_yx=2.0,
+    box_std=0.1,
+    max_overlap=196/2,
+
+    postprocessing="",
+
+    area_weight="Poly(0.01, 10.0, 100000)",
+    nonzero_weight=10.0,
+    max_steps=100000,
+    curriculum=[
+        dict(obj_exploration=0.2),
+        # dict(obj_exploration=0.1),
+        # dict(obj_exploration=0.05),
+        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
+        dict(obj_exploration=0.05, preserve_env=False, patience=10000000),
+    ],
 )
 
 
