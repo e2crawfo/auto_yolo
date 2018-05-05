@@ -1,5 +1,4 @@
 import argparse
-import pkgutil
 
 from dps import cfg
 from dps.config import DEFAULT_CONFIG

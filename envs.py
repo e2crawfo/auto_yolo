@@ -157,11 +157,13 @@ double_digit_config = grid_config.copy(
     min_yx=-1.0,
     max_yx=2.0,
     box_std=0.1,
-    max_overlap=196/2,
+    max_overlap=196/4,
+    overwrite_plots=False,
 
     postprocessing="",
 
-    area_weight="Poly(0.01, 10.0, 100000)",
+    area_weight=None,
+    hw_weight="Poly(0.5, 50.0, 100000)",
     nonzero_weight=10.0,
     max_steps=100000,
     curriculum=[
