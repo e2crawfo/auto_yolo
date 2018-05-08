@@ -30,7 +30,9 @@ yolo_rl_config = Config(
 
     build_backbone=yolo_rl.Backbone,
     build_next_step=yolo_rl.NextStep,
-    build_object_decoder=yolo_rl.ObjectDecoder,
+    build_object_encoder=lambda scope: MLP([100, 100], scope=scope),
+    build_object_decoder=lambda scope: MLP([100, 100], scope=scope),
+    # build_object_decoder=yolo_rl.ObjectDecoder,
 
     use_input_attention=False,
     decoder_logit_scale=10.0,

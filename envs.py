@@ -148,6 +148,12 @@ single_digit_config = grid_config.copy(
 )
 
 
+def prepare_func():
+    from dps import cfg
+    cfg.curriculum[1]['nonzero_weight'] = "Poly(0.0, {}, 100000)".format(cfg.nonzero_weight)
+
+
+# So this pretty much works!!
 double_digit_config = grid_config.copy(
     log_name="nips_2018_double_digit",
     build_env=Nips2018Scatter,
@@ -160,48 +166,75 @@ double_digit_config = grid_config.copy(
     min_hw=0.25,
     max_hw=3.,
     pixels_per_cell=(12, 12),
-    max_steps=10000,
-    # build_backbone=yolo_rl.NewBackbone,
-    # n_channels=64,
 
     postprocessing="",
     patience=1000000,
-    render_step=500,
+    render_step=5000,
 
-    patch_shape=(14, 14),
-    max_overlap=196/4,
-    # patch_shape=(28, 28),
+    # patch_shape=(21, 21),
     # max_overlap=196,
+    # patch_shape=(14, 14),
+    # max_overlap=196/4,
+    patch_shape=(28, 28),
+    max_overlap=196,
+
     min_yx=-0.5,
     max_yx=1.5,
 
-    order="obj z box attr",
+    use_input_attention=True,
+    order="obj z box",
 
-    # fixed_values=dict(alpha=1.0),
+    prepare_func=prepare_func,
+
+    area_neighbourhood_size=2,
+    hw_neighbourhood_size=None,  # This is what it was set to, but only by accident
+    nonzero_neighbourhood_size=2,
+    local_reconstruction_cost=True,
+
+    area_weight=1.0,
+    hw_weight=40.,
+    nonzero_weight=30.,
     reconstruction_weight=1.0,
-    nonzero_weight="Poly(0.0, 10, 100000)",
-    area_weight=3.92,
+    max_steps=100000,
+
     curriculum=[
-        dict(obj_exploration=1.0, obj_default=0.5, rl_weight=None, nonzero_weight=None, hw_weight=None),
-        dict(obj_exploration=0.2, max_steps=100000),
-        # dict(fixed_values=dict(alpha=1, obj=1), rl_weight=None, nonzero_weight=None, hw_weight=None),
-        # dict(obj_exploration=0.1),
-        # dict(obj_exploration=0.05),
-        # dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
-        # dict(obj_exploration=0.05, preserve_env=False, patience=10000000),
+        {'hw_weight': None,
+         'rl_weight': None,
+         'obj_default': 0.5,
+         'obj_exploration': 1.0},
+        {'obj_exploration': 0.2},
+        {'obj_exploration': 0.1},
+        {'obj_exploration': 0.05},
+        {'obj_exploration': 0.01}
     ],
     sequential_cfg=dict(on=True),
     n_passthrough_features=100,
-    # hw_weight=1.0,
-    # target_hw=1.0,
-    # target_hw="Poly(1.0, 0.0, 100000)",
-    # nonzero_weight=1.0,
-    # hw_weight=None,
-    # hw_weight="Poly(0.5, 50.0, 100000)",
-    # nonzero_weight="Poly(0.5, 10.0, 100000)",
-    # nonzero_weight=10.0,
+
+    readme="Testing the standard set up, which we've determined should work fairly well."
 )
 
+double_digit_colour_config = double_digit_config.copy(
+    colours="red green blue white",
+    image_shape=(48, 48),
+)
+
+dd_hw_20_config = double_digit_config.copy(
+    hw_weight=20.0,
+    readme="With hw_weight=20 instead of 40."
+)
+
+dd_hw_0_config = double_digit_config.copy(
+    hw_weight=None,
+    readme="With hw_weight=None instead of 40."
+)
+
+dd_nonlocal_config = double_digit_config.copy(
+    area_neighbourhood_size=None,
+    hw_neighbourhood_size=None,
+    nonzero_neighbourhood_size=None,
+    local_reconstruction_cost=False,
+    readme="With all neighbourhood sizes set to None, local_reconstruction_cost set to False."
+)
 
 if __name__ == "__main__":
     with scatter_colour_14x14_config.copy(n_train=100, n_val=100):
