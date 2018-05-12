@@ -2,7 +2,7 @@ import numpy as np
 
 from dps.utils import Config
 from dps.utils.tf import MLP
-from dps.env.advanced import yolo_rl, air
+from dps.env.advanced import yolo_rl, air, yolo_air
 
 # Core yolo_rl config, used as a base for all other yolo_rl configs.
 
@@ -147,4 +147,57 @@ air_config = Config(
     cnn=False,
     cnn_filters=128,
     per_process_gpu_memory_fraction=0.3,
+)
+
+
+def yolo_air_prepare_func():
+    from dps import cfg
+    if cfg.postprocessing is not None:
+        cfg.anchor_boxes = [cfg.tile_shape]
+    else:
+        cfg.anchor_boxes = [cfg.image_shape]
+
+
+yolo_air_config = Config(
+    log_name="yolo_air",
+    get_updater=yolo_air.get_updater,
+    prepare_func=yolo_air_prepare_func,
+
+    max_steps=50000,
+    patience=100000,
+
+    render_hook=yolo_air.YoloAir_RenderHook(),
+
+    build_backbone=yolo_rl.Backbone,
+    build_next_step=yolo_rl.NextStep,
+    build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
+    build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
+    # build_backbone=yolo_rl.NewBackbone,
+    # max_object_shape=(28, 28),
+    # build_object_decoder=ObjectDecoder,
+
+    pixels_per_cell=(12, 12),
+
+    kernel_size=(1, 1),
+
+    n_channels=128,
+    n_decoder_channels=128,
+    A=50,
+
+    sequential_cfg=dict(
+        on=True,
+        lookback_shape=(2, 2, 2),
+        build_next_step=lambda scope: MLP([100, 100], scope=scope),
+    ),
+
+    hw_prior_mean=np.log(0.1/0.9),
+    hw_prior_std=1.0,
+    count_prior_log_odds="Exp(start=10000.0, end=0.2, decay_rate=0.1, decay_steps=200, log=True)",
+    # count_prior_log_odds="Exp(start=10000.0, end=0.000000001, decay_rate=0.1, decay_steps=200, log=True)",
+    use_concrete_kl=False,
+
+    curriculum=[
+        dict(),
+        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
+    ],
 )
