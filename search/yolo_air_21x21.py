@@ -1,6 +1,5 @@
 import clify
 import argparse
-import numpy as np
 
 from dps.config import DEFAULT_CONFIG
 
@@ -10,6 +9,7 @@ from dps.projects.nips_2018.algs import yolo_air_config as alg_config
 
 parser = argparse.ArgumentParser()
 parser.add_argument("kind", choices="long_cedar long_graham med short".split())
+parser.add_argument("--c", action="store_true")
 args, _ = parser.parse_known_args()
 kind = args.kind
 
@@ -20,10 +20,15 @@ distributions = dict(
     hw_prior_std=[0.0625, 0.25, 1.0, 2.0, 4.0],
 )
 
+if args.c:
+    env_config = envs.scatter_colour_21x21_config
+else:
+    env_config = envs.scatter_white_21x21_config
+
 
 config = DEFAULT_CONFIG.copy()
 config.update(alg_config)
-config.update(envs.scatter_colour_14x14_config)
+config.update(env_config)
 config.update(
     render_step=1000,
     eval_step=1000,
@@ -34,7 +39,7 @@ config.update(
     max_steps=100000000,
 )
 
-config.log_name = "{}_VS_{}".format(alg_config.log_name, envs.scatter_colour_14x14_config.log_name)
+config.log_name = "{}_VS_{}".format(alg_config.log_name, env_config.log_name)
 run_kwargs = dict(
     n_repeats=1,
     kind="slurm",
@@ -67,9 +72,9 @@ else:
 
 run_kwargs.update(kind_args)
 
-readme = "First time testing yolo_air on scattered task."
+readme = "First time testing yolo_air on scattered task, 21x21."
 
 from dps.hyper import build_and_submit
 clify.wrap_function(build_and_submit)(
-    name="yolo_air_v_scatter_kind={}".format(kind), config=config, readme=readme,
+    name="yolo_air_v_scatter_21x21_kind={}".format(kind), config=config, readme=readme,
     distributions=distributions, **run_kwargs)

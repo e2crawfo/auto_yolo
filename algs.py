@@ -169,8 +169,19 @@ yolo_air_config = Config(
     get_updater=yolo_air.get_updater,
     prepare_func=yolo_air_prepare_func,
 
-    max_steps=50000,
-    patience=100000,
+    batch_size=32,
+    lr_schedule=1e-4,
+    optimizer_spec="adam",
+    max_grad_norm=1.0,
+    stopping_criteria="mAP,max",
+    threshold=1.0,
+
+    use_gpu=True,
+    gpu_allow_growth=True,
+
+    preserve_env=True,
+    eval_mode="val",
+    max_experiments=None,
 
     render_hook=yolo_air.YoloAir_RenderHook(),
 

@@ -72,6 +72,8 @@ grid_config = Config(
     render_step=5000,
     max_steps=1e7,
     patience=10000,
+
+    overwrite_plots=False,
 )
 
 grid_fullsize_config = grid_config.copy(
@@ -115,6 +117,24 @@ scatter_colour_14x14_config = scatter_white_14x14_config.copy(
     build_env=Nips2018Scatter,
     colours="red blue green cyan yellow magenta",
 )
+
+scatter_white_21x21_config = grid_config.copy(
+    log_name="nips_2018_scatter_white_21x21",
+    build_env=Nips2018Scatter,
+    max_overlap=21*21/2,
+    min_chars=12,
+    max_chars=12,
+    tile_shape=(40, 40),
+    patch_size_std=0.05,
+)
+
+scatter_colour_21x21_config = scatter_white_21x21_config.copy(
+    log_name="nips_2018_scatter_colour_21x21",
+    build_env=Nips2018Scatter,
+    colours="red blue green cyan yellow magenta",
+    patch_size_std=0.05,
+)
+
 
 scatter_white_28x28_config = grid_config.copy(
     log_name="nips_2018_scatter_white_28x28",
@@ -161,7 +181,6 @@ double_digit_config = grid_config.copy(
     max_chars=2,
     image_shape=(48, 48),
     box_std=0.1,
-    overwrite_plots=True,
 
     min_hw=0.25,
     max_hw=3.,
