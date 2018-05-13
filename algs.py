@@ -157,6 +157,12 @@ def yolo_air_prepare_func():
     else:
         cfg.anchor_boxes = [cfg.image_shape]
 
+    cfg.count_prior_log_odds = (
+        "Exp(start=10000.0, end={}, decay_rate=0.1, "
+        "decay_steps=1000, log=True)".format(cfg.final_count_prior_log_odds)
+    )
+    cfg.kernel_size = (cfg.kernel_size, cfg.kernel_size)
+
 
 yolo_air_config = Config(
     log_name="yolo_air",
@@ -178,7 +184,7 @@ yolo_air_config = Config(
 
     pixels_per_cell=(12, 12),
 
-    kernel_size=(1, 1),
+    kernel_size=1,
 
     n_channels=128,
     n_decoder_channels=128,
@@ -192,14 +198,13 @@ yolo_air_config = Config(
 
     hw_prior_mean=np.log(0.1/0.9),
     hw_prior_std=1.0,
-    count_prior_log_odds="Exp(start=10000.0, end=0.05, decay_rate=0.1, decay_steps=200, log=True)",
+    final_count_prior_log_odds=0.05,
+
     use_concrete_kl=False,
+    n_final_layers=3,
 
     curriculum=[
         dict(),
         dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
     ],
-
-    obj_logit_scale=2.0,
-    alpha_logit_scale=0.25,
 )
