@@ -15,10 +15,12 @@ kind = args.kind
 
 
 distributions = dict(
-    kernel_size=[1, 2, 3],
+    kernel_size=[1, 2],  # 3 doesn't work well
     final_count_prior_log_odds=[0.1, 0.05, 0.025, 0.0125],
-    hw_prior_std=[0.0625, 0.25, 1.0, 2.0, 4.0],
+    hw_prior_std=[0.5, 1.0, 2.0],  # Anything outside of these bounds doesn't work very well.
+    count_prior_decay_steps=[1000, 2000, 3000, 4000],
 )
+
 
 if args.c:
     env_config = envs.scatter_colour_21x21_config

@@ -159,7 +159,7 @@ def yolo_air_prepare_func():
 
     cfg.count_prior_log_odds = (
         "Exp(start=10000.0, end={}, decay_rate=0.1, "
-        "decay_steps=1000, log=True)".format(cfg.final_count_prior_log_odds)
+        "decay_steps={}, log=True)".format(cfg.final_count_prior_log_odds, cfg.count_prior_decay_steps)
     )
     cfg.kernel_size = (cfg.kernel_size, cfg.kernel_size)
 
@@ -210,6 +210,7 @@ yolo_air_config = Config(
     hw_prior_mean=np.log(0.1/0.9),
     hw_prior_std=1.0,
     final_count_prior_log_odds=0.05,
+    count_prior_decay_steps=1000,
 
     use_concrete_kl=False,
     n_final_layers=3,

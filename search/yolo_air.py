@@ -1,6 +1,5 @@
 import clify
 import argparse
-import numpy as np
 
 from dps.config import DEFAULT_CONFIG
 
@@ -10,31 +9,38 @@ from dps.projects.nips_2018.algs import yolo_air_config as alg_config
 
 parser = argparse.ArgumentParser()
 parser.add_argument("kind", choices="long_cedar long_graham med short".split())
+parser.add_argument("size", choices="14 21 28".split())
+parser.add_argument("--c", action="store_true")
 args, _ = parser.parse_known_args()
 kind = args.kind
 
 
 distributions = dict(
-    kernel_size=[1, 2, 3],
+    kernel_size=[1, 2],  # 3 doesn't work well
     final_count_prior_log_odds=[0.1, 0.05, 0.025, 0.0125],
-    hw_prior_std=[0.0625, 0.25, 1.0, 2.0, 4.0],
+    hw_prior_std=[0.5, 1.0, 2.0],  # Anything outside of these bounds doesn't work very well.
+    count_prior_decay_steps=[1000, 2000, 3000, 4000],
 )
+
+config_name = "scatter_{colour}_{size}x{size}_config".format(
+    colour="colour" if args.c else "white", size=args.size)
+env_config = getattr(envs, config_name)
 
 
 config = DEFAULT_CONFIG.copy()
 config.update(alg_config)
-config.update(envs.scatter_colour_14x14_config)
+config.update(env_config)
 config.update(
     render_step=1000,
     eval_step=1000,
-    per_process_gpu_memory_fraction=0.23,
+    per_process_gpu_memory_fraction=0.3,
 
     patience=1000000,
     max_experiences=100000000,
     max_steps=100000000,
 )
 
-config.log_name = "{}_VS_{}".format(alg_config.log_name, envs.scatter_colour_14x14_config.log_name)
+config.log_name = "{}_VS_{}".format(alg_config.log_name, env_config.log_name)
 run_kwargs = dict(
     n_repeats=1,
     kind="slurm",
@@ -67,9 +73,9 @@ else:
 
 run_kwargs.update(kind_args)
 
-readme = "First time testing yolo_air on scattered task."
+readme = "Testing yolo_air on scattered task, with new hyperparameter ranges."
 
 from dps.hyper import build_and_submit
 clify.wrap_function(build_and_submit)(
-    name="yolo_air_v_scatter_kind={}".format(kind), config=config, readme=readme,
+    name="yolo_air_v_scatter_{size}x{size}_kind={kind}".format(size=args.size, kind=kind), config=config, readme=readme,
     distributions=distributions, **run_kwargs)
