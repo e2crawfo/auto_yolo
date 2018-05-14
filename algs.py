@@ -220,3 +220,12 @@ yolo_air_config = Config(
         dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
     ],
 )
+
+load_config = yolo_air_config.copy(
+    load_path="/media/data/Dropbox/experiment_data/active/nips2018/run_search_yolo_air_v_scatter_14x14_kind=long_cedar_seed=0_2018_05_13_13_12_40/idx=16_weights/best_of_stage_0",
+    kernel_size=2,
+    curriculum=[
+        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
+    ],
+)
+
