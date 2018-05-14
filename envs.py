@@ -1,5 +1,5 @@
 from dps import cfg
-from dps.datasets import GridEmnistObjectDetectionDataset, EmnistObjectDetectionDataset
+from dps.datasets import GridEmnistObjectDetectionDataset, EmnistObjectDetectionDataset, VisualArithmeticDataset
 from dps.utils import Config, gen_seed
 from dps.env.advanced import yolo_rl
 
@@ -19,6 +19,19 @@ class Nips2018Scatter(object):
     def __init__(self):
         train = EmnistObjectDetectionDataset(n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9), seed=gen_seed())
         val = EmnistObjectDetectionDataset(n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.), seed=gen_seed())
+
+        self.datasets = dict(train=train, val=val)
+
+    def close(self):
+        pass
+
+
+class Nips2018Addition(object):
+    def __init__(self):
+        train = VisualArithmeticDataset(
+            n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9), seed=gen_seed())
+        val = VisualArithmeticDataset(
+            n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.), seed=gen_seed())
 
         self.datasets = dict(train=train, val=val)
 
@@ -109,7 +122,7 @@ scatter_white_14x14_config = grid_config.copy(
     max_overlap=196/2,
     min_chars=15,
     max_chars=15,
-    tile_shape=(40, 40),
+    tile_shape=(48, 48),
 )
 
 scatter_colour_14x14_config = scatter_white_14x14_config.copy(
@@ -124,7 +137,7 @@ scatter_white_21x21_config = grid_config.copy(
     max_overlap=21*21/2,
     min_chars=12,
     max_chars=12,
-    tile_shape=(40, 40),
+    tile_shape=(48, 48),
     patch_size_std=0.05,
 )
 
@@ -154,6 +167,28 @@ scatter_colour_28x28_config = scatter_white_28x28_config.copy(
     log_name="nips_2018_scatter_colour_28x28",
     colours="red blue green cyan yellow magenta",
     build_object_decoder=yolo_rl.ObjectDecoder28x28,
+)
+
+addition_config = grid_config.copy(
+    log_name="nips_2018_addition",
+    build_env=Nips2018Addition,
+    seed=91239139,
+
+    patch_shape=(14, 14),
+    image_shape=(84, 84),
+
+    min_digits=1,
+    max_digits=12,
+
+    min_chars=1,
+    max_chars=12,
+
+    largest_digit=99,
+    one_hot=True,
+    reductions="sum",
+    # reductions="A:sum,M:prod,N:min,X:max,C:len",
+
+    postprocessing="",
 )
 
 single_digit_config = grid_config.copy(

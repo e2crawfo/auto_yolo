@@ -4,7 +4,7 @@ import argparse
 from dps.config import DEFAULT_CONFIG
 
 from dps.projects.nips_2018 import envs
-from dps.projects.nips_2018.algs import yolo_air_config as alg_config
+from dps.projects.nips_2018.algs import yolo_air_config
 
 
 parser = argparse.ArgumentParser()
@@ -15,12 +15,11 @@ args, _ = parser.parse_known_args()
 kind = args.kind
 
 
-distributions = dict(
-    kernel_size=[1, 2],  # 3 doesn't work well
-    final_count_prior_log_odds=[0.1, 0.05, 0.025, 0.0125],
-    hw_prior_std=[0.5, 1.0, 2.0],  # Anything outside of these bounds doesn't work very well.
-    count_prior_decay_steps=[1000, 2000, 3000, 4000],
-)
+distributions = [
+    dict(min_chars=1, max_chars=5),
+    dict(min_chars=6, max_chars=10),
+    dict(min_chars=11, max_chars=15),
+]
 
 config_name = "scatter_{colour}_{size}x{size}_config".format(
     colour="colour" if args.c else "white", size=args.size)
@@ -28,7 +27,7 @@ env_config = getattr(envs, config_name)
 
 
 config = DEFAULT_CONFIG.copy()
-config.update(alg_config)
+config.update(yolo_air_config)
 config.update(env_config)
 config.update(
     render_step=1000,
@@ -37,12 +36,21 @@ config.update(
 
     patience=1000000,
     max_experiences=100000000,
-    max_steps=100000000,
+    max_steps=110000,
+
+    count_prior_decay_steps=1000,
+    final_count_prior_log_odds=0.0125,
+    hw_prior_std=0.5,
+    kernel_size=1,
+
+    curriculum=[
+        dict(),
+    ] + [dict(do_train=False, n_train=32, n_val=200, min_chars=i, max_chars=i) for i in range(1, 16)]
 )
 
-config.log_name = "{}_VS_{}".format(alg_config.log_name, env_config.log_name)
+config.log_name = "transfer_experiment_{}_VS_{}".format(yolo_air_config.log_name, env_config.log_name)
 run_kwargs = dict(
-    n_repeats=1,
+    n_repeats=8,
     kind="slurm",
     pmem=5000,
     ignore_gpu=False,
@@ -50,18 +58,19 @@ run_kwargs = dict(
 
 if kind == "long_cedar":
     kind_args = dict(
-        max_hosts=2, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="6hours", project="rpp-bengioy",
+        max_hosts=2, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="10hours", project="rpp-bengioy",
         cleanup_time="30mins", slack_time="30mins", n_param_settings=24)
 
 elif kind == "long_graham":
     kind_args = dict(
-        max_hosts=3, ppn=8, cpp=2, gpu_set="0,1", wall_time="6hours", project="def-jpineau",
+        max_hosts=3, ppn=8, cpp=2, gpu_set="0,1", wall_time="10hours", project="def-jpineau",
         cleanup_time="30mins", slack_time="30mins", n_param_settings=24)
 
 elif kind == "med":
+    config.max_steps=1000
     kind_args = dict(
-        max_hosts=1, ppn=8, cpp=2, gpu_set="0", wall_time="1hour", project="rpp-bengioy",
-        cleanup_time="10mins", slack_time="10mins", n_param_settings=8)
+        max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="1hour", project="rpp-bengioy",
+        cleanup_time="10mins", slack_time="10mins", n_param_settings=3, n_repeats=2)
 
 elif kind == "short":
     kind_args = dict(
@@ -73,9 +82,9 @@ else:
 
 run_kwargs.update(kind_args)
 
-readme = "Testing yolo_air on scattered task, with new hyperparameter ranges."
+readme = "Running the transfer learning experiment with yolo_air."
 
 from dps.hyper import build_and_submit
 clify.wrap_function(build_and_submit)(
-    name="yolo_air_v_scatter_{size}x{size}_kind={kind}".format(size=args.size, kind=kind), config=config, readme=readme,
-    distributions=distributions, **run_kwargs)
+    name=config.log_name + "_kind={}".format(kind),
+    config=config, readme=readme, distributions=distributions, **run_kwargs)

@@ -1,8 +1,9 @@
 import numpy as np
+import tensorflow as tf
 
 from dps.utils import Config
-from dps.utils.tf import MLP
-from dps.env.advanced import yolo_rl, air, yolo_air
+from dps.utils.tf import MLP, LeNet
+from dps.env.advanced import yolo_rl, air, yolo_air, yolo_math
 
 # Core yolo_rl config, used as a base for all other yolo_rl configs.
 
@@ -221,11 +222,18 @@ yolo_air_config = Config(
     ],
 )
 
-load_config = yolo_air_config.copy(
-    load_path="/media/data/Dropbox/experiment_data/active/nips2018/run_search_yolo_air_v_scatter_14x14_kind=long_cedar_seed=0_2018_05_13_13_12_40/idx=16_weights/best_of_stage_0",
-    kernel_size=2,
+yolo_math_config = yolo_air_config.copy(
     curriculum=[
-        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
+        dict(),
     ],
-)
 
+    math_weight=5.0,
+    train_kl=True,
+    train_reconstruction=True,
+
+    build_math_network=yolo_math.SequentialRegressionNetwork,
+
+    build_math_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(128),
+    build_math_output=lambda scope: MLP([100, 100], scope=scope),
+    build_math_input=lambda scope: MLP([100, 100], scope=scope),
+)
