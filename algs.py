@@ -223,11 +223,12 @@ yolo_air_config = Config(
 )
 
 yolo_math_config = yolo_air_config.copy(
+    get_updater=yolo_math.get_math_updater,
     curriculum=[
         dict(),
     ],
 
-    math_weight=5.0,
+    math_weight=1.0,
     train_kl=True,
     train_reconstruction=True,
 

@@ -17,7 +17,7 @@ kind = args.kind
 
 
 distributions = dict(
-    math_weight=list(np.linspace(-1, 4, 12)),
+    math_weight=list(np.linspace(-2, 2, 8)),
 )
 
 config_name = "addition_{colour}_{size}x{size}_config".format(
@@ -53,8 +53,8 @@ run_kwargs = dict(
 
 if kind == "long_cedar":
     kind_args = dict(
-        max_hosts=1, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="6hours", project="rpp-bengioy",
-        cleanup_time="30mins", slack_time="30mins", n_param_settings=12)
+        max_hosts=1, ppn=8, cpp=2, gpu_set="0,1", wall_time="6hours", project="rpp-bengioy",
+        cleanup_time="30mins", slack_time="30mins", n_param_settings=8)
 
 elif kind == "long_graham":
     kind_args = dict(

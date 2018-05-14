@@ -178,15 +178,15 @@ addition_config = grid_config.copy(
     image_shape=(84, 84),
 
     min_digits=1,
-    max_digits=12,
+    max_digits=11,
 
     min_chars=1,
-    max_chars=12,
+    max_chars=11,
 
     largest_digit=99,
     one_hot=True,
     reductions="sum",
-    # reductions="A:sum,M:prod,N:min,X:max,C:len",
+    # reductions="A:sum,N:min,X:max,C:len",
 
     postprocessing="",
 )
