@@ -6,9 +6,8 @@ from dps.config import DEFAULT_CONFIG
 from dps.projects.nips_2018 import envs
 from dps.projects.nips_2018.algs import yolo_math_config
 
-
 parser = argparse.ArgumentParser()
-parser.add_argument("duration", choices="long med supplement".split())
+parser.add_argument("duration", choices="long med".split())
 parser.add_argument("size", choices="14 21".split())
 parser.add_argument("task", choices="addition arithmetic".split())
 parser.add_argument("--c", action="store_true")
@@ -24,26 +23,29 @@ env_config = envs.get_mnist_config(size=args.size, colour=args.c, task=args.task
 
 
 config = DEFAULT_CONFIG.copy()
+
 config.update(yolo_math_config)
 config.update(env_config)
+
 config.update(
     render_step=5000,
     eval_step=1000,
     per_process_gpu_memory_fraction=0.3,
 
-    patience=1000000,
+    patience=5000,
     max_experiences=100000000,
     max_steps=110000,
+    robust=False,
 
-    count_prior_decay_steps=1000,
-    final_count_prior_log_odds=0.0125,
-    hw_prior_std=0.5,
-    kernel_size=1,
-    postprocessing="random",
-    tile_shape=(48, 48),
+    variational=False,
 
     curriculum=[
-        dict(math_weight=0.0, fixed_weights="math"),
+        dict(
+            math_weight=0.0,
+            fixed_weights="math",
+            stopping_criteria="loss_reconstruction,min",
+            threshold=0.0,
+        ),
         dict(
             max_steps=100000000,
             postprocessing="",
@@ -51,15 +53,14 @@ config.update(
             math_weight=1.0,
             train_kl=False,
             train_reconstruction=False,
-            fixed_weights="object_encoder object_decoder box obj backbone edge",
+            fixed_weights="decoder encoder",
             stopping_criteria="math_accuracy,max",
             threshold=1.0,
         )
     ],
-    robust=False,
 )
 
-config.log_name = "sample_complexity_experiment_{}_alg={}_2stage".format(env_config.log_name, yolo_math_config.log_name)
+config.log_name = "sample_complexity-{}_alg={}_2stage".format(env_config.log_name, yolo_math_config.log_name)
 
 run_kwargs = dict(
     n_repeats=6,
@@ -68,34 +69,23 @@ run_kwargs = dict(
     ignore_gpu=False,
 )
 
-readme = "Running a sample complexity experiment with yolo_air on the {} task.".format(args.task)
-
-
 if duration == "long":
     duration_args = dict(
-        max_hosts=3, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="10hours", project="rpp-bengioy",
-        cleanup_time="30mins", slack_time="30mins")
+        max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="6hours", project="rpp-bengioy",
+        step_time_limit="2hours", cleanup_time="10mins", slack_time="5mins")
 
 elif duration == "med":
     config.max_steps=1000
     duration_args = dict(
-        max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="1hour", project="rpp-bengioy",
-        cleanup_time="10mins", slack_time="10mins", n_repeats=1)
-
-elif duration == "supplement":
-    distributions = dict(
-        n_train=[2000],
-    )
-    config.log_name = "supplement_" + config.log_name
-    duration_args = dict(
-        max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="10hours", project="rpp-bengioy",
-        cleanup_time="30mins", slack_time="30mins")
-    readme = "Supplemental learning experiment with yolo_air, gathering a data point that we missed previously."
+        max_hosts=1, ppn=3, cpp=2, gpu_set="0", wall_time="1hour", project="rpp-bengioy",
+        cleanup_time="10mins", slack_time="3mins", n_param_settings=6, n_repeats=1, step_time_limit="25mins")
 
 else:
     raise Exception("Unknown duration: {}".format(duration))
 
 run_kwargs.update(duration_args)
+
+readme = "Running sample complexity experiment on {} task with simple_math network, single stage.".format(args.task)
 
 from dps.hyper import build_and_submit
 clify.wrap_function(build_and_submit)(
