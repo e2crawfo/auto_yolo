@@ -239,3 +239,23 @@ yolo_math_config = yolo_air_config.copy(
     build_math_output=lambda scope: MLP([100, 100], scope=scope),
     build_math_input=lambda scope: MLP([100, 100], scope=scope),
 )
+
+yolo_math_simple_config = yolo_math_config.copy(
+    log_name="yolo_math_simple",
+    get_updater=yolo_math.get_simple_math_updater,
+    curriculum=[
+        dict(),
+    ],
+
+    math_weight=1.0,
+    train_kl=True,
+    train_reconstruction=True,
+
+    build_math_network=yolo_math.SequentialRegressionNetwork,
+
+    build_math_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(128),
+    build_math_output=lambda scope: MLP([100, 100], scope=scope),
+    build_math_input=lambda scope: MLP([100, 100], scope=scope),
+    build_math_encoder=yolo_rl.Backbone,
+    build_math_decoder=yolo_rl.InverseBackbone,
+)
