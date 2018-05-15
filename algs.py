@@ -190,9 +190,6 @@ yolo_air_config = Config(
     build_next_step=yolo_rl.NextStep,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
-    # build_backbone=yolo_rl.NewBackbone,
-    # max_object_shape=(28, 28),
-    # build_object_decoder=ObjectDecoder,
 
     pixels_per_cell=(12, 12),
 
@@ -233,6 +230,9 @@ yolo_math_config = yolo_air_config.copy(
     train_kl=True,
     train_reconstruction=True,
 
+    stopping_criteria="math_accuracy,max",
+    threshold=1.0,
+
     build_math_network=yolo_math.SequentialRegressionNetwork,
 
     build_math_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(128),
@@ -246,4 +246,5 @@ yolo_math_simple_config = yolo_math_config.copy(
     build_math_encoder=yolo_rl.Backbone,
     build_math_decoder=yolo_rl.InverseBackbone,
     variational=False,
+    render_hook=None,
 )

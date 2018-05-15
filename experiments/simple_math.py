@@ -4,7 +4,7 @@ import argparse
 from dps.config import DEFAULT_CONFIG
 
 from dps.projects.nips_2018 import envs
-from dps.projects.nips_2018.algs import yolo_math_config
+from dps.projects.nips_2018.algs import yolo_math_simple_config as alg_config
 
 parser = argparse.ArgumentParser()
 parser.add_argument("duration", choices="long med".split())
@@ -24,7 +24,7 @@ env_config = envs.get_mnist_config(size=args.size, colour=args.c, task=args.task
 
 config = DEFAULT_CONFIG.copy()
 
-config.update(yolo_math_config)
+config.update(alg_config)
 config.update(env_config)
 
 config.update(
@@ -35,6 +35,7 @@ config.update(
     patience=5000,
     max_experiences=100000000,
     max_steps=110000,
+    robust=False,
 
     train_reconstruction=False,
     train_kl=False,
@@ -42,10 +43,10 @@ config.update(
 
     curriculum=[
         dict()
-    ]
+    ],
 )
 
-config.log_name = "simple_math-sample_complexity-{}_alg={}".format(env_config.log_name, yolo_math_config.log_name)
+config.log_name = "sample_complexity-{}_alg={}".format(env_config.log_name, alg_config.log_name)
 
 run_kwargs = dict(
     n_repeats=6,

@@ -10,7 +10,8 @@ from dps.projects.nips_2018.algs import yolo_math_config as alg_config
 
 parser = argparse.ArgumentParser()
 parser.add_argument("kind", choices="long med".split())
-parser.add_argument("size", choices="14 21 28".split())
+parser.add_argument("size", choices="14 21".split())
+parser.add_argument("task", choices="addition arithmetic".split())
 parser.add_argument("--c", action="store_true")
 args, _ = parser.parse_known_args()
 kind = args.kind
@@ -20,10 +21,7 @@ distributions = dict(
     math_weight=list(2**np.linspace(-2, 2, 8)),
 )
 
-config_name = "addition_{colour}_{size}x{size}_config".format(
-    colour="colour" if args.c else "white", size=args.size)
-env_config = getattr(envs, config_name)
-
+env_config = envs.get_mnist_config(size=args.size, colour=args.c, task=args.task)
 
 config = DEFAULT_CONFIG.copy()
 config.update(alg_config)
@@ -43,7 +41,7 @@ config.update(
     kernel_size=1,
 )
 
-config.log_name = "{}_VS_{}".format(alg_config.log_name, env_config.log_name)
+config.log_name = "parameter_search-{}_alg={}".format(env_config.log_name, alg_config.log_name)
 run_kwargs = dict(
     n_repeats=1,
     kind="slurm",
@@ -66,9 +64,9 @@ else:
 
 run_kwargs.update(kind_args)
 
-readme = "Testing yolo_air on math scattered task"
+readme = "Parameter search on arithmetic task"
 
 from dps.hyper import build_and_submit
 clify.wrap_function(build_and_submit)(
-    name=config.log_name + "_search_kind={}".format(kind),
+    name=config.log_name + "_kind={}".format(kind),
     config=config, readme=readme, distributions=distributions, **run_kwargs)

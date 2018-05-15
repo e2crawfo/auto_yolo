@@ -4,7 +4,7 @@ import argparse
 from dps.config import DEFAULT_CONFIG
 
 from dps.projects.nips_2018 import envs
-from dps.projects.nips_2018.algs import yolo_math_config
+from dps.projects.nips_2018.algs import yolo_math_simple_config as alg_config
 
 parser = argparse.ArgumentParser()
 parser.add_argument("duration", choices="long med".split())
@@ -24,7 +24,7 @@ env_config = envs.get_mnist_config(size=args.size, colour=args.c, task=args.task
 
 config = DEFAULT_CONFIG.copy()
 
-config.update(yolo_math_config)
+config.update(alg_config)
 config.update(env_config)
 
 config.update(
@@ -54,13 +54,11 @@ config.update(
             train_kl=False,
             train_reconstruction=False,
             fixed_weights="decoder encoder",
-            stopping_criteria="math_accuracy,max",
-            threshold=1.0,
         )
     ],
 )
 
-config.log_name = "sample_complexity-{}_alg={}_2stage".format(env_config.log_name, yolo_math_config.log_name)
+config.log_name = "sample_complexity-{}_alg={}_2stage".format(env_config.log_name, alg_config.log_name)
 
 run_kwargs = dict(
     n_repeats=6,
@@ -85,7 +83,7 @@ else:
 
 run_kwargs.update(duration_args)
 
-readme = "Running sample complexity experiment on {} task with simple_math network, single stage.".format(args.task)
+readme = "Running sample complexity experiment on {} task with simple_math network, double stage.".format(args.task)
 
 from dps.hyper import build_and_submit
 clify.wrap_function(build_and_submit)(

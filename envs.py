@@ -200,6 +200,7 @@ def get_mnist_config(size, colour, task):
 
     elif task == "addition" or task == "arithmetic":
         config.update(
+            build_env=Nips2018Arithmetic,
             min_digits=1,
             max_digits=11,
 
@@ -208,7 +209,7 @@ def get_mnist_config(size, colour, task):
 
             largest_digit=99,
             one_hot=True,
-            reductions="sum" if task == "addition" else "arithmetic",
+            reductions="sum" if task == "addition" else "A:sum,N:min,X:max,C:len",
 
             postprocessing="",
         )
