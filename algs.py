@@ -246,5 +246,5 @@ yolo_math_simple_config = yolo_math_config.copy(
     build_math_encoder=yolo_rl.Backbone,
     build_math_decoder=yolo_rl.InverseBackbone,
     variational=False,
-    render_hook=None,
+    render_hook=yolo_math.SimpleMath_RenderHook(),
 )
