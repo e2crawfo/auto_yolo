@@ -1,7 +1,6 @@
 from dps import cfg
 from dps.datasets import GridEmnistObjectDetectionDataset, EmnistObjectDetectionDataset, VisualArithmeticDataset
 from dps.utils import Config, gen_seed
-from dps.env.advanced import yolo_rl
 
 
 class Nips2018Grid(object):
@@ -26,7 +25,7 @@ class Nips2018Scatter(object):
         pass
 
 
-class Nips2018Addition(object):
+class Nips2018Arithmetic(object):
     def __init__(self):
         train = VisualArithmeticDataset(
             n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9), seed=gen_seed())
@@ -89,19 +88,6 @@ grid_config = Config(
     overwrite_plots=False,
 )
 
-grid_fullsize_config = grid_config.copy(
-    log_name="nips_2018_gridfullsize",
-    postprocessing="",
-    max_time_steps=16,
-    max_chars=16,
-    min_chars=16,
-    grid_shape=(4, 4),
-    spacing=(0, 0),
-    random_offset_range=None,
-    image_shape=(56, 56),
-
-)
-
 air_testing_config = grid_config.copy(
     log_name="nips_2018_air_testing",
     postprocessing="",
@@ -113,93 +99,6 @@ air_testing_config = grid_config.copy(
     random_offset_range=None,
     image_shape=(28, 28),
 
-)
-
-
-scatter_white_14x14_config = grid_config.copy(
-    log_name="nips_2018_scatter_white",
-    build_env=Nips2018Scatter,
-    max_overlap=196/2,
-    min_chars=15,
-    max_chars=15,
-    tile_shape=(48, 48),
-)
-
-scatter_colour_14x14_config = scatter_white_14x14_config.copy(
-    log_name="nips_2018_scatter_colour",
-    build_env=Nips2018Scatter,
-    colours="red blue green cyan yellow magenta",
-)
-
-scatter_white_21x21_config = grid_config.copy(
-    log_name="nips_2018_scatter_white_21x21",
-    build_env=Nips2018Scatter,
-    max_overlap=21*21/2,
-    min_chars=12,
-    max_chars=12,
-    tile_shape=(48, 48),
-    patch_size_std=0.05,
-)
-
-scatter_colour_21x21_config = scatter_white_21x21_config.copy(
-    log_name="nips_2018_scatter_colour_21x21",
-    build_env=Nips2018Scatter,
-    colours="red blue green cyan yellow magenta",
-    patch_size_std=0.05,
-)
-
-
-scatter_white_28x28_config = grid_config.copy(
-    log_name="nips_2018_scatter_white_28x28",
-    build_env=Nips2018Scatter,
-    object_shape=(28, 28),
-    colours="white",
-    min_chars=1,
-    max_chars=15,
-    max_overlap=2*196,
-    patch_shape=(28, 28),
-    tile_shape=(48, 48),
-    image_shape=(100, 100),
-    build_object_decoder=yolo_rl.ObjectDecoder28x28,
-)
-
-scatter_colour_28x28_config = scatter_white_28x28_config.copy(
-    log_name="nips_2018_scatter_colour_28x28",
-    colours="red blue green cyan yellow magenta",
-    build_object_decoder=yolo_rl.ObjectDecoder28x28,
-)
-
-addition_config = grid_config.copy(
-    log_name="nips_2018_addition",
-    build_env=Nips2018Addition,
-    seed=91239139,
-
-    patch_shape=(14, 14),
-    image_shape=(84, 84),
-
-    min_digits=1,
-    max_digits=11,
-
-    min_chars=1,
-    max_chars=11,
-
-    largest_digit=99,
-    one_hot=True,
-    reductions="sum",
-    # reductions="A:sum,N:min,X:max,C:len",
-
-    postprocessing="",
-)
-
-single_digit_config = grid_config.copy(
-    log_name="nips_2018_single_digit",
-    build_env=Nips2018Scatter,
-    min_chars=1,
-    max_chars=1,
-    image_shape=(32, 32),
-    fixed_values=dict(alpha=1.0),
-
-    postprocessing="",
 )
 
 
@@ -267,29 +166,52 @@ double_digit_config = grid_config.copy(
     readme="Testing the standard set up, which we've determined should work fairly well."
 )
 
-double_digit_colour_config = double_digit_config.copy(
-    colours="red green blue white",
-    image_shape=(48, 48),
-)
 
-dd_hw_20_config = double_digit_config.copy(
-    hw_weight=20.0,
-    readme="With hw_weight=20 instead of 40."
-)
+def get_mnist_config(size, colour, task):
+    config = grid_config.copy()
+    config.log_name = "size={}_colour={}_task={}".format(size, colour, task)
 
-dd_hw_0_config = double_digit_config.copy(
-    hw_weight=None,
-    readme="With hw_weight=None instead of 40."
-)
+    if colour:
+        config.colours = "red blue green cyan yellow magenta"
 
-dd_nonlocal_config = double_digit_config.copy(
-    area_neighbourhood_size=None,
-    hw_neighbourhood_size=None,
-    nonzero_neighbourhood_size=None,
-    local_reconstruction_cost=False,
-    readme="With all neighbourhood sizes set to None, local_reconstruction_cost set to False."
-)
+    if task == "grid":
+        return config
 
-if __name__ == "__main__":
-    with scatter_colour_14x14_config.copy(n_train=100, n_val=100):
-        obj = Nips2018Scatter()
+    if size == "14":
+        config.update(
+            max_overlap=14*14/2,
+            min_chars=15,
+            max_chars=15,
+            tile_shape=(48, 48),
+        )
+    elif size == "21":
+        config.update(
+            max_overlap=21*21/2,
+            min_chars=12,
+            max_chars=12,
+            tile_shape=(48, 48),
+            patch_size_std=0.05,
+        )
+    else:
+        raise Exception("Unknown size {}".format(size))
+
+    if task == "scatter":
+        config.build_env = Nips2018Scatter
+
+    elif task == "addition" or task == "arithmetic":
+        config.update(
+            min_digits=1,
+            max_digits=11,
+
+            min_chars=1,
+            max_chars=11,
+
+            largest_digit=99,
+            one_hot=True,
+            reductions="sum" if task == "addition" else "arithmetic",
+
+            postprocessing="",
+        )
+    else:
+        raise Exception("Unknown task `{}`".format(task))
+    return config

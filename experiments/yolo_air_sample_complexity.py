@@ -15,11 +15,9 @@ args, _ = parser.parse_known_args()
 duration = args.duration
 
 
-distributions = [
-    dict(min_chars=1, max_chars=5),
-    dict(min_chars=6, max_chars=10),
-    dict(min_chars=11, max_chars=15),
-]
+distributions = dict(
+    n_train=[1000, 2000, 4000, 8000, 16000, 32000],
+)
 
 
 env_config = envs.get_mnist_config(size=args.size, colour=args.c, task="scatter")
@@ -44,13 +42,12 @@ config.update(
 
     curriculum=[
         dict(),
-    ] + [dict(preserve_env=False, do_train=False, n_train=32, n_val=200, min_chars=i, max_chars=i) for i in range(1, 16)]
+    ]
 )
 
-config.log_name = "transfer_experiment_{}_alg={}".format(env_config.log_name, yolo_air_config.log_name)
+config.log_name = "sample_complexity_experiment_{}_alg={}".format(env_config.log_name, yolo_air_config.log_name)
 
 run_kwargs = dict(
-    n_repeats=8,
     kind="slurm",
     pmem=5000,
     ignore_gpu=False,
@@ -58,20 +55,21 @@ run_kwargs = dict(
 
 if duration == "long":
     duration_args = dict(
-        max_hosts=2, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="7hours", project="rpp-bengioy",
-        cleanup_time="15mins", slack_time="15mins")
+        max_hosts=3, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="6hours", project="rpp-bengioy",
+        cleanup_time="15mins", slack_time="15mins", n_repeats=6)
 
 elif duration == "med":
     config.max_steps=1000
     duration_args = dict(
         max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="1hour", project="rpp-bengioy",
         cleanup_time="10mins", slack_time="10mins", n_param_settings=3, n_repeats=2)
+
 else:
     raise Exception("Unknown duration: {}".format(duration))
 
 run_kwargs.update(duration_args)
 
-readme = "Running the scatter transfer learning experiment with yolo_air."
+readme = "Testing sample complexity of yolo_air."
 
 from dps.hyper import build_and_submit
 clify.wrap_function(build_and_submit)(

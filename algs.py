@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 
 from dps.utils import Config
-from dps.utils.tf import MLP, LeNet
+from dps.utils.tf import MLP
 from dps.env.advanced import yolo_rl, air, yolo_air, yolo_math
 
 # Core yolo_rl config, used as a base for all other yolo_rl configs.
@@ -223,6 +223,7 @@ yolo_air_config = Config(
 )
 
 yolo_math_config = yolo_air_config.copy(
+    log_name="yolo_math",
     get_updater=yolo_math.get_math_updater,
     curriculum=[
         dict(),
@@ -238,5 +239,3 @@ yolo_math_config = yolo_air_config.copy(
     build_math_output=lambda scope: MLP([100, 100], scope=scope),
     build_math_input=lambda scope: MLP([100, 100], scope=scope),
 )
-
-convolution_config = yolo_math.convolutional_config
