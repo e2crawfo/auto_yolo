@@ -22,7 +22,6 @@ config = Config(
     build_env=Nips2018Scattered,
 
     # dataset params
-    use_dataset_cache=True,
     min_chars=10,
     max_chars=10,
     n_patch_examples=0,
