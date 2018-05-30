@@ -14,8 +14,9 @@ from dps.utils.tf import (
     FullyConvolutional, build_gradient_train_op, trainable_variables,
     tf_mean_sum, build_scheduled_value, MLP, masked_mean)
 from dps.env.advanced.yolo import mAP
-from dps.tf_ops import render_sprites
 from dps.updater import DataManager
+
+from auto_yolo.tf_ops import render_sprites
 
 
 class Env(object):

@@ -23,8 +23,9 @@ import matplotlib.colors as colors
 from dps import cfg
 from dps.utils import Param, Parameterized, Config
 from dps.utils.tf import trainable_variables, build_scheduled_value
-from dps.env.advanced import yolo_rl
 from dps.env.advanced.yolo import mAP
+
+from auto_yolo import yolo_rl
 
 
 # ------ transformer.py -------

@@ -4,8 +4,9 @@ from dps import cfg
 from dps.config import DEFAULT_CONFIG
 from dps.train import training_loop
 from dps.utils import pdb_postmortem
-import dps.projects.nips_2018.envs as env_module
-import dps.projects.nips_2018.algs as alg_module
+
+import auto_yolo.envs as env_module
+import auto_yolo.algs as alg_module
 
 
 def run():

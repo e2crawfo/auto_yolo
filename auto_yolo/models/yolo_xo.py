@@ -2,8 +2,9 @@ import tensorflow as tf
 
 from dps import cfg
 from dps.utils import Param, Config
-from dps.env.advanced import yolo_math, yolo_rl
 from dps.datasets.atari import RewardClassificationDataset
+
+from auto_yolo.models import yolo_math, yolo_rl
 
 
 class Env(object):

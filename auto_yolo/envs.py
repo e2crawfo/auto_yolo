@@ -1,7 +1,8 @@
 from dps import cfg
 from dps.datasets import GridEmnistObjectDetectionDataset, EmnistObjectDetectionDataset, VisualArithmeticDataset
 from dps.utils import Config, gen_seed
-from dps.envs.advanced import yolo_xo
+
+from auto_yolo.models import yolo_xo
 
 
 class Nips2018Grid(object):

@@ -3,7 +3,8 @@ import tensorflow as tf
 
 from dps.utils import Config
 from dps.utils.tf import MLP
-from dps.env.advanced import yolo_rl, air, yolo_air, yolo_math, yolo_xo
+
+from auto_yolo.models import yolo_rl, air, yolo_air, yolo_math, yolo_xo
 
 # Core yolo_rl config, used as a base for all other yolo_rl configs.
 

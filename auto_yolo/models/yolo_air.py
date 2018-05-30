@@ -11,8 +11,9 @@ import shutil
 from dps import cfg
 from dps.utils import Config, Param
 from dps.utils.tf import ScopedFunction, trainable_variables, tf_mean_sum, build_scheduled_value, MLP
-from dps.tf_ops import render_sprites
-from dps.env.advanced import yolo_rl
+
+from auto_yolo.tf_ops import render_sprites
+from auto_yolo.models import yolo_rl
 
 
 def normal_kl(mean, std, prior_mean, prior_std):

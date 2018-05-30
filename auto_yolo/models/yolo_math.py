@@ -9,8 +9,9 @@ from dps import cfg
 from dps.utils import Param, Parameterized, Config
 from dps.utils.tf import (
     trainable_variables, ScopedFunction, MLP, FullyConvolutional, tf_mean_sum)
-from dps.env.advanced import yolo_rl, yolo_air
 from dps.datasets import VisualArithmeticDataset
+
+from auto_yolo.models import yolo_rl, yolo_air
 
 
 class Env(object):
