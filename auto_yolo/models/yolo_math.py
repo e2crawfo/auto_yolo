@@ -11,7 +11,7 @@ from dps.utils.tf import (
     trainable_variables, ScopedFunction, MLP, FullyConvolutional, tf_mean_sum)
 from dps.datasets import VisualArithmeticDataset
 
-from auto_yolo.models import yolo_rl, yolo_air
+from auto_yolo.models import core, yolo_air
 
 
 class Env(object):
@@ -361,7 +361,7 @@ class SimpleMathNetwork(Parameterized):
 
         if self.train_reconstruction:
             loss_key = 'xent' if self.xent_loss else 'squared'
-            self._tensors['per_pixel_reconstruction_loss'] = yolo_rl.loss_builders[loss_key](reconstruction, inp)
+            self._tensors['per_pixel_reconstruction_loss'] = core.loss_builders[loss_key](reconstruction, inp)
             losses['reconstruction'] = tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
 
         # --- predict ---
@@ -499,7 +499,7 @@ env_config = Config(
 )
 
 alg_config = Config(
-    get_updater=yolo_rl.YoloRL_Updater,
+    get_updater=core.Updater,
     build_network=YoloAir_MathNetwork,
     stopping_criteria="math_accuracy,max",
     threshold=1.0,
@@ -527,7 +527,7 @@ simple_config = config.copy(
     render_hook=SimpleMath_RenderHook(),
     stopping_criteria="math_accuracy,max",
     threshold=1.0,
-    build_math_encoder=yolo_rl.Backbone,
-    build_math_decoder=yolo_rl.InverseBackbone,
+    build_math_encoder=core.Backbone,
+    build_math_decoder=core.InverseBackbone,
     variational=False,
 )

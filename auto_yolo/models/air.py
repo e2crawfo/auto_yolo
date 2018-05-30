@@ -25,7 +25,7 @@ from dps.utils import Param, Parameterized, Config
 from dps.utils.tf import trainable_variables, build_scheduled_value
 from dps.env.advanced.yolo import mAP
 
-from auto_yolo import yolo_rl
+from auto_yolo.models import core
 
 
 # ------ transformer.py -------
@@ -1024,9 +1024,9 @@ class AIR_RenderHook(object):
 
 config = Config(
     log_name="attend_infer_repeat",
-    get_updater=yolo_rl.YoloRL_Updater,
+    get_updater=core.YoloRL_Updater,
     build_network=AIR_Network,
-    build_env=yolo_rl.Env,
+    build_env=core.Env,
 
     curriculum=[dict()] * 12,
 

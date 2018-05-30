@@ -4,7 +4,7 @@ from dps import cfg
 from dps.utils import Param, Config
 from dps.datasets.atari import RewardClassificationDataset
 
-from auto_yolo.models import yolo_math, yolo_rl
+from auto_yolo.models import core, yolo_math
 
 
 class Env(object):
@@ -101,7 +101,7 @@ env_config = Config(
 )
 
 alg_config = Config(
-    get_updater=yolo_rl.YoloRL_Updater,
+    get_updater=core.Updater,
     build_network=YoloAIR_XONetwork,
 
     math_weight=1.0,

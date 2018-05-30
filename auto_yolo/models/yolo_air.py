@@ -13,7 +13,7 @@ from dps.utils import Config, Param
 from dps.utils.tf import ScopedFunction, trainable_variables, tf_mean_sum, build_scheduled_value, MLP
 
 from auto_yolo.tf_ops import render_sprites
-from auto_yolo.models import yolo_rl
+from auto_yolo.models import core
 
 
 def normal_kl(mean, std, prior_mean, prior_std):
@@ -158,7 +158,7 @@ class YoloAir_Network(ScopedFunction):
 
         self.anchor_boxes = np.array(self.anchor_boxes)
 
-        self.eval_funcs = dict(mAP=yolo_rl.yolo_rl_mAP)
+        self.eval_funcs = dict(mAP=core.mAP)
 
         self.object_encoder = None
         self.object_decoder = None
@@ -1026,7 +1026,7 @@ xkcd_colors = 'viridian,cerulean,vermillion,lavender,celadon,fuchsia,saffron,cin
 env_config = Config(
     log_name="yolo_air",
 
-    build_env=yolo_rl.Env,
+    build_env=core.Env,
     seed=347405995,
 
     min_chars=12,
@@ -1071,7 +1071,7 @@ env_config = Config(
 
 # This works quite well if it is trained for long enough.
 alg_config = Config(
-    get_updater=yolo_rl.YoloRL_Updater,
+    get_updater=core.Updater,
     build_network=YoloAir_Network,
 
     lr_schedule=1e-4,
@@ -1100,11 +1100,11 @@ alg_config = Config(
 
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
-    build_next_step=yolo_rl.NextStep,
-    # build_backbone=yolo_rl.NewBackbone,
+    build_next_step=core.NextStep,
+    # build_backbone=core.NewBackbone,
     # max_object_shape=(28, 28),
     # build_object_decoder=ObjectDecoder,
-    build_backbone=yolo_rl.Backbone,
+    build_backbone=core.Backbone,
 
     pixels_per_cell=(12, 12),
 
@@ -1154,7 +1154,7 @@ big_single_config = config.copy(
     kernel_size=(3, 3),
     # hw_prior_mean=10.0,
 
-    # build_backbone=yolo_rl.NewBackbone,
+    # build_backbone=core.NewBackbone,
     # max_object_shape=(28, 28),
 )
 
@@ -1177,7 +1177,7 @@ big_double_config = config.copy(
     hw_prior_std=2.0,
     # hw_prior_mean=10.0,
 
-    build_backbone=yolo_rl.NewBackbone,
+    build_backbone=core.NewBackbone,
     max_object_shape=(28, 28),
 )
 
@@ -1196,7 +1196,7 @@ big_config = config.copy(
     # fixed_values=dict(alpha=1),
     hw_prior_std=10.0,
 
-    build_backbone=yolo_rl.NewBackbone,
+    build_backbone=core.NewBackbone,
     max_object_shape=(28, 28),
 )
 
@@ -1209,7 +1209,7 @@ colour_config = config.copy(
 )
 
 single_digit_config = config.copy(
-    log_name="yolo_rl_single_digit",
+    log_name="yolo_air_single_digit",
 
     min_chars=1,
     max_chars=1,

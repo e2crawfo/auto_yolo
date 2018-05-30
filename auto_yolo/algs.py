@@ -4,13 +4,13 @@ import tensorflow as tf
 from dps.utils import Config
 from dps.utils.tf import MLP
 
-from auto_yolo.models import yolo_rl, air, yolo_air, yolo_math, yolo_xo
+from auto_yolo.models import core, yolo_rl, air, yolo_air, yolo_math, yolo_xo
 
 # Core yolo_rl config, used as a base for all other yolo_rl configs.
 
 yolo_rl_config = Config(
     log_name="yolo_rl",
-    get_updater=yolo_rl.get_updater,
+    get_updater=core.Updater,
 
     batch_size=32,
     lr_schedule=1e-4,
@@ -26,15 +26,15 @@ yolo_rl_config = Config(
     eval_mode="val",
     max_experiments=None,
 
-    render_hook=yolo_rl.YoloRL_RenderHook(),
+    render_hook=core.RenderHook(),
 
     # model params
 
-    build_backbone=yolo_rl.Backbone,
-    build_next_step=yolo_rl.NextStep,
+    build_backbone=core.Backbone,
+    build_next_step=core.NextStep,
     build_object_encoder=lambda scope: MLP([100, 100], scope=scope),
     build_object_decoder=lambda scope: MLP([100, 100], scope=scope),
-    # build_object_decoder=yolo_rl.ObjectDecoder,
+    # build_object_decoder=core.ObjectDecoder,
 
     use_input_attention=False,
     decoder_logit_scale=10.0,
@@ -103,7 +103,7 @@ yolo_rl_config = Config(
 
 air_config = Config(
     log_name="attend_infer_repeat",
-    get_updater=air.get_updater,
+    get_updater=core.Updater,
 
     # training loop params
 
@@ -168,7 +168,7 @@ def yolo_air_prepare_func():
 
 yolo_air_config = Config(
     log_name="yolo_air",
-    get_updater=yolo_air.get_updater,
+    get_updater=core.Updater,
     prepare_func=yolo_air_prepare_func,
 
     batch_size=32,
@@ -187,8 +187,8 @@ yolo_air_config = Config(
 
     render_hook=yolo_air.YoloAir_RenderHook(),
 
-    build_backbone=yolo_rl.Backbone,
-    build_next_step=yolo_rl.NextStep,
+    build_backbone=core.Backbone,
+    build_next_step=core.NextStep,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
 
@@ -222,7 +222,6 @@ yolo_air_config = Config(
 
 yolo_math_config = yolo_air_config.copy(
     log_name="yolo_math",
-    get_updater=yolo_math.get_math_updater,
     curriculum=[
         dict(),
     ],
@@ -242,20 +241,16 @@ yolo_math_config = yolo_air_config.copy(
 
 yolo_math_simple_config = yolo_math_config.copy(
     log_name="yolo_math_simple",
-    get_updater=yolo_math.get_simple_math_updater,
-    build_math_encoder=yolo_rl.Backbone,
-    build_math_decoder=yolo_rl.InverseBackbone,
+    build_math_encoder=core.Backbone,
+    build_math_decoder=core.InverseBackbone,
     variational=False,
     render_hook=yolo_math.SimpleMath_RenderHook(),
 )
 
 yolo_xo_config = yolo_math_config.copy(
     log_name="yolo_xo",
-    get_updater=yolo_xo.get_xo_updater,
 )
 
 yolo_xo_simple_config = yolo_math_simple_config.copy(
     log_name="yolo_xo_simple",
-    get_updater=yolo_xo.get_simple_xo_updater,
-    render_hook=yolo_xo.SimpleXO_RenderHook(),
 )
