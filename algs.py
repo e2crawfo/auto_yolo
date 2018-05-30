@@ -3,7 +3,7 @@ import tensorflow as tf
 
 from dps.utils import Config
 from dps.utils.tf import MLP
-from dps.env.advanced import yolo_rl, air, yolo_air, yolo_math
+from dps.env.advanced import yolo_rl, air, yolo_air, yolo_math, yolo_xo
 
 # Core yolo_rl config, used as a base for all other yolo_rl configs.
 
@@ -234,7 +234,6 @@ yolo_math_config = yolo_air_config.copy(
     threshold=1.0,
 
     build_math_network=yolo_math.SequentialRegressionNetwork,
-
     build_math_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(128),
     build_math_output=lambda scope: MLP([100, 100], scope=scope),
     build_math_input=lambda scope: MLP([100, 100], scope=scope),
@@ -247,4 +246,15 @@ yolo_math_simple_config = yolo_math_config.copy(
     build_math_decoder=yolo_rl.InverseBackbone,
     variational=False,
     render_hook=yolo_math.SimpleMath_RenderHook(),
+)
+
+yolo_xo_config = yolo_math_config.copy(
+    log_name="yolo_xo",
+    get_updater=yolo_xo.get_xo_updater,
+)
+
+yolo_xo_simple_config = yolo_math_simple_config.copy(
+    log_name="yolo_xo_simple",
+    get_updater=yolo_xo.get_simple_xo_updater,
+    render_hook=yolo_xo.SimpleXO_RenderHook(),
 )

@@ -1,6 +1,7 @@
 from dps import cfg
 from dps.datasets import GridEmnistObjectDetectionDataset, EmnistObjectDetectionDataset, VisualArithmeticDataset
 from dps.utils import Config, gen_seed
+from dps.envs.advanced import yolo_xo
 
 
 class Nips2018Grid(object):
@@ -215,4 +216,31 @@ def get_mnist_config(size, colour, task):
         )
     else:
         raise Exception("Unknown task `{}`".format(task))
+    return config
+
+
+def get_xo_config():
+    config = Config(
+        log_name="nips_xo",
+        build_env=yolo_xo.XO_Env,
+        one_hot=True,
+
+        min_yx=-0.5,
+        max_yx=1.5,
+
+        image_shape=(72, 72),
+        n_samples_per_image=4,
+        tile_shape=(48, 48),
+        postprocessing="",
+
+        classes=[-1, 0, 1],
+        n_actions=4,
+
+        n_train_per_class=10000,
+        n_val_per_class=100,
+
+        train_rl_data_location="/media/data/Dropbox/projects/PyDSRL/train",
+        val_rl_data_location="/media/data/Dropbox/projects/PyDSRL/val",
+    )
+
     return config

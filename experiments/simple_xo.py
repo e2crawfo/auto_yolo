@@ -1,14 +1,13 @@
 import clify
 import argparse
 
-from dps import cfg
 from dps.config import DEFAULT_CONFIG
-from dps.train import training_loop
+
 from dps.projects.nips_2018 import envs
 from dps.projects.nips_2018.algs import yolo_math_simple_config as alg_config
 
 parser = argparse.ArgumentParser()
-parser.add_argument("duration", choices="long med test".split())
+parser.add_argument("duration", choices="long med".split())
 parser.add_argument("size", choices="14 21".split())
 parser.add_argument("task", choices="addition arithmetic".split())
 parser.add_argument("--c", action="store_true")
@@ -38,29 +37,16 @@ config.update(
     max_steps=110000,
     robust=False,
 
+    train_reconstruction=False,
+    train_kl=False,
     variational=False,
 
     curriculum=[
-        dict(
-            math_weight=None,
-            fixed_weights="math",
-            stopping_criteria="loss_reconstruction,min",
-            threshold=0.0,
-            noise_schedule=0.001,  # Helps avoid collapse
-        ),
-        dict(
-            max_steps=100000000,
-            postprocessing="",
-            preserve_env=False,
-            math_weight=1.0,
-            train_kl=False,
-            train_reconstruction=False,
-            fixed_weights="decoder encoder",
-        )
+        dict()
     ],
 )
 
-config.log_name = "sample_complexity-{}_alg={}_2stage".format(env_config.log_name, alg_config.log_name)
+config.log_name = "sample_complexity-{}_alg={}".format(env_config.log_name, alg_config.log_name)
 
 run_kwargs = dict(
     n_repeats=6,
@@ -80,17 +66,12 @@ elif duration == "med":
         max_hosts=1, ppn=3, cpp=2, gpu_set="0", wall_time="1hour", project="rpp-bengioy",
         cleanup_time="10mins", slack_time="3mins", n_param_settings=6, n_repeats=1, step_time_limit="25mins")
 
-elif duration == "test":
-    with config:
-        cfg.update_from_command_line()
-        training_loop()
-    exit()
 else:
     raise Exception("Unknown duration: {}".format(duration))
 
 run_kwargs.update(duration_args)
 
-readme = "Running sample complexity experiment on {} task with simple_math network, double stage.".format(args.task)
+readme = "Running sample complexity experiment on {} task with simple_math network, single stage.".format(args.task)
 
 from dps.hyper import build_and_submit
 clify.wrap_function(build_and_submit)(
