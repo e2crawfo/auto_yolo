@@ -2,11 +2,14 @@ import tensorflow as tf
 import numpy as np
 import collections
 import sonnet as snt
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 from dps import cfg
-from dps.utils import Config, Param, Parameterized
+from dps.utils import Config, Param
 from dps.utils.tf import (
-    trainable_variables, tf_mean_sum, build_scheduled_value, MLP, masked_mean)
+    ScopedFunction, trainable_variables, tf_mean_sum,
+    build_scheduled_value, MLP, masked_mean)
 
 from auto_yolo.models import core
 from auto_yolo.tf_ops import render_sprites
@@ -111,7 +114,7 @@ class HeightWidthCost(object):
         return tf_local_filter(selected_hw_cost, self.neighbourhood_size)
 
 
-class YoloRL_Network(Parameterized):
+class YoloRL_Network(ScopedFunction):
     pixels_per_cell = Param()
     A = Param(help="Dimension of attribute vector.")
     anchor_boxes = Param(help="List of (h, w) pairs.")
@@ -262,6 +265,8 @@ class YoloRL_Network(Parameterized):
                 sigmoid=False,
             ),
         )
+
+        super(YoloRL_Network, self).__init__()
 
     @property
     def inp(self):
@@ -976,13 +981,201 @@ class YoloRL_Network(Parameterized):
         }
 
 
+class YoloRL_RenderHook(object):
+    def __init__(self, N=16):
+        self.N = N
+
+    def __call__(self, updater):
+        fetched = self._fetch(updater)
+
+        self._plot_reconstruction(updater, fetched)
+        self._plot_patches(updater, fetched, 4)
+
+    def _fetch(self, updater):
+        feed_dict = updater.data_manager.do_val()
+
+        network = updater.network
+
+        to_fetch = network.program.copy()
+
+        to_fetch["images"] = network._tensors["inp"]
+        to_fetch["annotations"] = network._tensors["annotations"]
+        to_fetch["n_annotations"] = network._tensors["n_annotations"]
+        to_fetch["output"] = network._tensors["output"]
+        to_fetch["objects"] = network._tensors["objects"]
+        to_fetch["routing"] = network._tensors["routing"]
+        to_fetch["n_objects"] = network._tensors["n_objects"]
+        to_fetch["normalized_box"] = network._tensors["normalized_box"]
+
+        if network.use_input_attention:
+            to_fetch["input_glimpses"] = network._tensors["input_glimpses"]
+
+        to_fetch = {k: v[:self.N] for k, v in to_fetch.items()}
+
+        sess = tf.get_default_session()
+        fetched = sess.run(to_fetch, feed_dict=feed_dict)
+
+        return fetched
+
+    def _plot_reconstruction(self, updater, fetched):
+        images = fetched['images']
+        output = fetched['output']
+
+        _, image_height, image_width, _ = images.shape
+        H, W, B = updater.network.H, updater.network.W, updater.network.B
+
+        obj = fetched['obj'].reshape(self.N, H*W*B)
+
+        box = (
+            fetched['normalized_box'] *
+            [image_height, image_width, image_height, image_width]
+        )
+        box = box.reshape(self.N, H*W*B, 4)
+
+        annotations = fetched["annotations"]
+        n_annotations = fetched["n_annotations"]
+
+        sqrt_N = int(np.ceil(np.sqrt(self.N)))
+
+        fig, axes = plt.subplots(2*sqrt_N, 2*sqrt_N, figsize=(20, 20))
+        axes = np.array(axes).reshape(2*sqrt_N, 2*sqrt_N)
+        for n, (pred, gt) in enumerate(zip(output, images)):
+            i = int(n / sqrt_N)
+            j = int(n % sqrt_N)
+
+            ax1 = axes[2*i, 2*j]
+            ax1.imshow(gt, vmin=0.0, vmax=1.0)
+
+            ax2 = axes[2*i, 2*j+1]
+            ax2.imshow(pred, vmin=0.0, vmax=1.0)
+
+            ax3 = axes[2*i+1, 2*j]
+            ax3.imshow(pred, vmin=0.0, vmax=1.0)
+
+            ax4 = axes[2*i+1, 2*j+1]
+            ax4.imshow(pred, vmin=0.0, vmax=1.0)
+
+            # Plot proposed bounding boxes
+            for o, (top, left, height, width) in zip(obj[n], box[n]):
+                color = "xkcd:azure" if o > 1e-6 else "xkcd:red"
+
+                rect = patches.Rectangle(
+                    (left, top), width, height, linewidth=1,
+                    edgecolor=color, facecolor='none')
+                ax4.add_patch(rect)
+
+                if o > 1e-6:
+                    rect = patches.Rectangle(
+                        (left, top), width, height, linewidth=1,
+                        edgecolor=color, facecolor='none')
+                    ax3.add_patch(rect)
+
+            # Plot true bounding boxes
+            for k in range(n_annotations[n]):
+                _, top, bottom, left, right = annotations[n][k]
+
+                height = bottom - top
+                width = right - left
+
+                rect = patches.Rectangle(
+                    (left, top), width, height, linewidth=1,
+                    edgecolor="xkcd:yellow", facecolor='none')
+                ax1.add_patch(rect)
+
+                rect = patches.Rectangle(
+                    (left, top), width, height, linewidth=1,
+                    edgecolor="xkcd:yellow", facecolor='none')
+                ax3.add_patch(rect)
+
+                rect = patches.Rectangle(
+                    (left, top), width, height, linewidth=1,
+                    edgecolor="xkcd:yellow", facecolor='none')
+                ax4.add_patch(rect)
+
+        plt.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0.1, hspace=0.1)
+
+        local_step = np.inf if cfg.overwrite_plots else "{:0>10}".format(updater.n_updates)
+        path = updater.exp_dir.path_for(
+            'plots',
+            'sampled_reconstruction',
+            'stage={:0>4}_local_step={}.pdf'.format(updater.stage_idx, local_step))
+        fig.savefig(path)
+
+        plt.close(fig)
+
+    def _plot_patches(self, updater, fetched, N):
+        # Create a plot showing what each object is generating
+        import matplotlib.pyplot as plt
+
+        H, W, B = updater.network.H, updater.network.W, updater.network.B
+
+        input_glimpses = fetched.get('input_glimpses', None)
+        objects = fetched['objects']
+        obj = fetched['obj']
+        n_objects = fetched['n_objects']
+        routing = fetched['routing']
+        z = fetched['z']
+
+        for idx in range(N):
+            fig, axes = plt.subplots(3*H, W*B, figsize=(20, 20))
+            axes = np.array(axes).reshape(3*H, W*B)
+
+            for h in range(H):
+                for w in range(W):
+                    for b in range(B):
+                        _obj = obj[idx, h, w, b, 0]
+                        _z = z[idx, h, w, b, 0]
+
+                        ax = axes[3*h, w * B + b]
+                        ax.set_aspect('equal')
+
+                        if h == 0 and b == 0:
+                            ax.set_title("w={}".format(w))
+                        if w == 0 and b == 0:
+                            ax.set_ylabel("h={}".format(h))
+
+                        ax = axes[3*h+1, w * B + b]
+                        ax.set_aspect('equal')
+
+                        ax.set_title("obj={}, z={}, b={}".format(_obj, _z, b))
+
+                        ax = axes[3*h+2, w * B + b]
+                        ax.set_aspect('equal')
+                        ax.set_title("input glimpse")
+
+            for i in range(n_objects[idx]):
+                _, h, w, b = routing[idx, i]
+
+                ax = axes[3*h, w * B + b]
+
+                ax.imshow(objects[idx, i, :, :, :3], vmin=0.0, vmax=1.0)
+
+                ax = axes[3*h+1, w * B + b]
+                ax.imshow(objects[idx, i, :, :, 3], cmap="gray", vmin=0.0, vmax=1.0)
+
+                if input_glimpses is not None:
+                    ax = axes[3*h+2, w * B + b]
+                    ax.imshow(input_glimpses[idx, i, :, :, :], vmin=0.0, vmax=1.0)
+
+            plt.subplots_adjust(left=0.02, right=.98, top=.98, bottom=0.02, wspace=0.1, hspace=0.1)
+
+            local_step = np.inf if cfg.overwrite_plots else "{:0>10}".format(updater.n_updates)
+            path = updater.exp_dir.path_for(
+                'plots',
+                'sampled_patches', str(idx),
+                'stage={:0>4}_local_step={}.pdf'.format(updater.stage_idx, local_step))
+
+            fig.savefig(path)
+            plt.close(fig)
+
+
 xkcd_colors = 'viridian,cerulean,vermillion,lavender,celadon,fuchsia,saffron,cinnamon,greyish,vivid blue'.split(',')
 
 
 # env config
 
 config = Config(
-    log_name="yolo_rl",
+    alg_name="yolo_rl",
     build_env=core.Env,
     seed=347405995,
 
@@ -1123,7 +1316,7 @@ config.update(
 )
 
 single_digit_config = config.copy(
-    log_name="yolo_rl_single_digit",
+    alg_name="yolo_rl_single_digit",
 
     min_chars=1,
     max_chars=1,

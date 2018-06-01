@@ -6,9 +6,9 @@ import shutil
 import os
 
 from dps import cfg
-from dps.utils import Param, Parameterized, Config
+from dps.utils import Param, Parameterized
 from dps.utils.tf import (
-    trainable_variables, ScopedFunction, MLP, FullyConvolutional, tf_mean_sum)
+    trainable_variables, ScopedFunction, FullyConvolutional, tf_mean_sum)
 from dps.datasets import VisualArithmeticDataset
 
 from auto_yolo.models import core, yolo_air
@@ -16,8 +16,10 @@ from auto_yolo.models import core, yolo_air
 
 class Env(object):
     def __init__(self):
-        train = VisualArithmeticDataset(n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9))
-        val = VisualArithmeticDataset(n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.))
+        train = VisualArithmeticDataset(
+            n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9))
+        val = VisualArithmeticDataset(
+            n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.))
 
         self.datasets = dict(train=train, val=val)
 
@@ -121,6 +123,27 @@ class ConvolutionalRegressionNetwork(ScopedFunction):
         return self.network(inp['attr'], output_size, is_training)
 
 
+class AttentionRegressionNetwork(FullyConvolutional):
+    def __init__(self, **kwargs):
+        layout = [
+            dict(filters=64, kernel_size=3, padding="SAME", strides=1),
+            dict(filters=64, kernel_size=3, padding="SAME", strides=1),
+            dict(filters=4, kernel_size=1, padding="SAME", strides=1),
+        ]
+        super(AttentionRegressionNetwork, self).__init__(layout, check_output_shape=False, **kwargs)
+
+    def _call(self, inp, output_size, is_training):
+        batch_size = tf.shape(inp)[0]
+        inp = tf.reshape(inp, (batch_size, *inp.shape[1:3], inp.shape[3] * inp.shape[4]))
+        output = super(AttentionRegressionNetwork, self)._call(inp, output_size, is_training)
+        output = tf.reshape(output, (batch_size, output.shape[1] * output.shape[2], output.shape[3]))
+
+        attention = tf.nn.softmax(output[:, :, 3:], axis=1)
+        weighted_output = output[:, :, :3] * attention
+
+        return tf.reduce_sum(weighted_output, axis=1)
+
+
 class YoloAir_MathNetwork(yolo_air.YoloAir_Network):
     math_weight = Param()
     largest_digit = Param()
@@ -131,14 +154,6 @@ class YoloAir_MathNetwork(yolo_air.YoloAir_Network):
     @property
     def n_classes(self):
         return self.largest_digit + 1
-
-    def trainable_variables(self, for_opt):
-        tvars = super(YoloAir_MathNetwork, self).trainable_variables(for_opt)
-        math_network_tvars = trainable_variables(self.math_network.scope, for_opt=for_opt)
-        tvars.extend(math_network_tvars)
-        math_input_network_tvars = trainable_variables(self.math_input_network.scope, for_opt=for_opt)
-        tvars.extend(math_input_network_tvars)
-        return tvars
 
     def build_math_representation(self, math_attr):
         # Use raw_obj so that there is no discrepancy between validation and train
@@ -480,54 +495,3 @@ class SimpleMath_RenderHook(object):
         shutil.copyfile(
             path,
             os.path.join(os.path.dirname(path), 'latest_stage{:0>4}.pdf'.format(updater.stage_idx)))
-
-
-env_config = Config(
-    log_name="yolo_math",
-    build_env=Env,
-
-    image_shape=(48, 48),
-    patch_shape=(14, 14),
-
-    min_digits=1,
-    max_digits=11,
-
-    largest_digit=99,
-    one_hot=True,
-    reductions="sum",
-    # reductions="A:sum,M:prod,N:min,X:max,C:len",
-)
-
-alg_config = Config(
-    get_updater=core.Updater,
-    build_network=YoloAir_MathNetwork,
-    stopping_criteria="math_accuracy,max",
-    threshold=1.0,
-
-    build_math_network=SequentialRegressionNetwork,
-    build_math_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(128),
-    build_math_output=lambda scope: MLP([100, 100], scope=scope),
-    build_math_input=lambda scope: MLP([100, 100], scope=scope),
-
-    math_weight=5.0,
-    train_kl=True,
-    train_reconstruction=True,
-    postprocessing="",
-
-    curriculum=[
-        dict(),
-    ],
-)
-
-config = alg_config.copy()
-config.update(env_config)
-
-simple_config = config.copy(
-    build_network=SimpleMathNetwork,
-    render_hook=SimpleMath_RenderHook(),
-    stopping_criteria="math_accuracy,max",
-    threshold=1.0,
-    build_math_encoder=core.Backbone,
-    build_math_decoder=core.InverseBackbone,
-    variational=False,
-)

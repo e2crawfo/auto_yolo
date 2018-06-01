@@ -1012,7 +1012,7 @@ class NeuralEM_RenderHook(object):
 
 
 config = Config(
-    log_name="nem",
+    alg_name="nem",
     get_updater=NeuralEM_Updater,
     build_env=Env,
 

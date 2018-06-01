@@ -10,27 +10,13 @@ import shutil
 
 from dps import cfg
 from dps.utils import Config, Param
-from dps.utils.tf import ScopedFunction, trainable_variables, tf_mean_sum, build_scheduled_value, MLP
+from dps.utils.tf import (
+    ScopedFunction, tf_mean_sum,
+    build_scheduled_value, MLP, FIXED_COLLECTION,
+)
 
 from auto_yolo.tf_ops import render_sprites
 from auto_yolo.models import core
-
-
-def normal_kl(mean, std, prior_mean, prior_std):
-    var = std**2
-    prior_var = prior_std**2
-
-    return 0.5 * (
-        tf.log(prior_var) - tf.log(var) -
-        1.0 + var / prior_var +
-        tf.square(mean - prior_mean) / prior_var
-    )
-
-
-def normal_vae(mean, std, prior_mean, prior_std):
-    sample = mean + tf.random_normal(tf.shape(mean)) * std
-    kl = normal_kl(mean, std, prior_mean, prior_std)
-    return sample, kl
 
 
 def concrete_binary_pre_sigmoid_sample(log_odds, temperature, eps=10e-10):
@@ -54,31 +40,6 @@ def concrete_binary_sample_kl(pre_sigmoid_sample,
         2.0 * tf.log(1.0 + tf.exp(-y_times_posterior_temp + posterior_log_odds) + eps)
 
     return log_posterior - log_prior
-
-
-def build_xent_loss(predictions, targets):
-    return -(
-        targets * tf.log(predictions) +
-        (1. - targets) * tf.log(1. - predictions))
-
-
-def build_squared_loss(predictions, targets):
-    return (predictions - targets)**2
-
-
-def build_normal_ll_loss(predictions, targets):
-    return ((predictions - targets)**2) / (0.3**2)
-
-
-def build_1norm_loss(predictions, targets):
-    return tf.abs(predictions - targets)
-
-
-loss_builders = {
-    'xent': build_xent_loss,
-    'squared': build_squared_loss,
-    '1norm': build_1norm_loss,
-}
 
 
 def tf_safe_log(value, nan_value=100.0):
@@ -194,6 +155,8 @@ class YoloAir_Network(ScopedFunction):
             ),
         )
 
+        super(YoloAir_Network, self).__init__()
+
     @property
     def inp(self):
         return self._tensors["inp"]
@@ -209,21 +172,6 @@ class YoloAir_Network(ScopedFunction):
     @property
     def float_is_training(self):
         return self._tensors["float_is_training"]
-
-    def trainable_variables(self, for_opt):
-        scoped_functions = (
-            [self.object_encoder, self.object_decoder, self.backbone] +
-            [self.layer_params[kind]["network"] for kind in self.order]
-        )
-
-        tvars = []
-        for sf in scoped_functions:
-            tvars.extend(trainable_variables(sf.scope, for_opt=for_opt))
-
-        if self.sequential_cfg['on'] and "edge" not in self.fixed_weights:
-            tvars.append(self.edge_weights)
-
-        return tvars
 
     def _get_scheduled_value(self, name):
         scalar = self._tensors.get(name, None)
@@ -420,6 +368,10 @@ class YoloAir_Network(ScopedFunction):
         total_sample_size = sum(self.layer_params[kind]["sample_size"] for kind in self.order)
 
         self.edge_weights = tf.get_variable("edge_weights", shape=(1, total_sample_size), dtype=tf.float32)
+
+        if "backbone" in self.fixed_weights:
+            tf.add_to_collection(FIXED_COLLECTION, self.edge_weights)
+
         sizes = [self.layer_params[kind]['sample_size'] for kind in self.order]
         edge_weights = tf.split(self.edge_weights, sizes, axis=1)
         _edge_weights = []
@@ -785,7 +737,7 @@ class YoloAir_Network(ScopedFunction):
 
             output = self._tensors['output']
             inp = self._tensors['inp']
-            self._tensors['per_pixel_reconstruction_loss'] = loss_builders[loss_key](output, inp)
+            self._tensors['per_pixel_reconstruction_loss'] = core.loss_builders[loss_key](output, inp)
             losses['reconstruction'] = tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
 
         if self.train_kl:
@@ -1024,7 +976,7 @@ xkcd_colors = 'viridian,cerulean,vermillion,lavender,celadon,fuchsia,saffron,cin
 # env config
 
 env_config = Config(
-    log_name="yolo_air",
+    alg_name="yolo_air",
 
     build_env=core.Env,
     seed=347405995,
@@ -1046,7 +998,6 @@ env_config = Config(
     backgrounds="",
     backgrounds_sample_every=False,
     background_colours="",
-
     background_cfg=dict(mode="none"),
 
     object_shape=(14, 14),
@@ -1209,7 +1160,7 @@ colour_config = config.copy(
 )
 
 single_digit_config = config.copy(
-    log_name="yolo_air_single_digit",
+    alg_name="yolo_air_single_digit",
 
     min_chars=1,
     max_chars=1,

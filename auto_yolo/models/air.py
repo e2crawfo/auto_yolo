@@ -21,8 +21,8 @@ import matplotlib.patches as patches
 import matplotlib.colors as colors
 
 from dps import cfg
-from dps.utils import Param, Parameterized, Config
-from dps.utils.tf import trainable_variables, build_scheduled_value
+from dps.utils import Param, Config
+from dps.utils.tf import trainable_variables, build_scheduled_value, ScopedFunction
 from dps.env.advanced.yolo import mAP
 
 from auto_yolo.models import core
@@ -328,7 +328,7 @@ def air_mAP(_tensors, updater):
 air_mAP.keys_accessed = "scales shifts predicted_n_digits annotations n_annotations"
 
 
-class AIR_Network(Parameterized):
+class AIR_Network(ScopedFunction):
     max_time_steps = Param()
     max_chars = Param()
     rnn_units = Param()
@@ -368,6 +368,8 @@ class AIR_Network(Parameterized):
         self.obs_shape = env.datasets['train'].obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
         self.eval_funcs = dict(mAP=air_mAP)
+
+        super(AIR_Network, self).__init__(scope=scope)
 
     @property
     def inp(self):
@@ -1023,8 +1025,8 @@ class AIR_RenderHook(object):
 
 
 config = Config(
-    log_name="attend_infer_repeat",
-    get_updater=core.YoloRL_Updater,
+    alg_name="attend_infer_repeat",
+    get_updater=core.Updater,
     build_network=AIR_Network,
     build_env=core.Env,
 
