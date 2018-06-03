@@ -1,32 +1,41 @@
 import numpy as np
 import tensorflow as tf
+import copy
 
 from dps.utils import Config
 from dps.utils.tf import MLP
 
-from auto_yolo.models import core, yolo_rl, air, yolo_air, yolo_math, yolo_xo
+from auto_yolo.models import core, air, yolo_rl, yolo_air, yolo_math, yolo_xo
 
-# Core yolo_rl config, used as a base for all other yolo_rl configs.
 
-yolo_rl_config = Config(
-    log_name="yolo_rl",
+alg_config = Config(
     get_updater=core.Updater,
 
     batch_size=32,
     lr_schedule=1e-4,
     optimizer_spec="adam",
     max_grad_norm=1.0,
-
     use_gpu=True,
     gpu_allow_growth=True,
-
-    preserve_env=True,
-    stopping_criteria="TOTAL_COST,min",
-    threshold=-np.inf,
     eval_mode="val",
     max_experiments=None,
+    preserve_env=True,
+    stopping_criteria="loss,min",
+    threshold=-np.inf,
 
-    render_hook=core.RenderHook(),
+    curriculum=[
+        dict(),
+    ],
+)
+
+
+yolo_rl_config = alg_config.copy(
+    alg_name="yolo_rl",
+    build_network=yolo_rl.YoloRL_Network,
+
+    stopping_criteria="TOTAL_COST,min",
+
+    render_hook=yolo_rl.YoloRL_RenderHook(),
 
     # model params
 
@@ -34,6 +43,7 @@ yolo_rl_config = Config(
     build_next_step=core.NextStep,
     build_object_encoder=lambda scope: MLP([100, 100], scope=scope),
     build_object_decoder=lambda scope: MLP([100, 100], scope=scope),
+
     # build_object_decoder=core.ObjectDecoder,
 
     use_input_attention=False,
@@ -87,39 +97,13 @@ yolo_rl_config = Config(
         lookback_shape=(2, 2, 2),
         build_next_step=lambda scope: MLP([100, 100], scope=scope),
     ),
-
-    # curriculum=[
-    #     dict(max_steps=5000, rl_weight=None, area_weight=None, fixed_values=dict(obj=1.0)),
-    #     dict(max_steps=5000, rl_weight=None, fixed_values=dict(obj=1.0)),
-    #     dict(obj_exploration=0.2),
-    #     dict(obj_exploration=0.1),
-    #     dict(obj_exploration=0.05),
-    #     dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
-    #     dict(obj_exploration=0.05, preserve_env=False, patience=10000000),
-    # ],
 )
 
-# Core air config, used as a base for all other air configs.
-
 air_config = Config(
-    log_name="attend_infer_repeat",
-    get_updater=core.Updater,
-
-    # training loop params
+    alg_name="attend_infer_repeat",
+    build_network=air.AIR_Network,
 
     batch_size=64,
-    lr_schedule=1e-4,
-    optimizer_spec="adam",
-    max_grad_norm=1.0,
-
-    use_gpu=True,
-    gpu_allow_growth=True,
-
-    preserve_env=True,
-    stopping_criteria="loss,min",
-    eval_mode="val",
-    threshold=-np.inf,
-    max_experiments=None,
 
     verbose_summaries=False,
 
@@ -138,8 +122,7 @@ air_config = Config(
     shift_prior_variance=1.0,
     vae_prior_mean=0.0,
     vae_prior_variance=1.0,
-    # vae_likelihood_std=0.0,
-    vae_likelihood_std=0.3,  # <- an odd value...maybe comes from the output gaussian with std 0.3 used in original paper?
+    vae_likelihood_std=0.3,
     scale_hidden_units=64,
     shift_hidden_units=64,
     z_pres_hidden_units=64,
@@ -154,36 +137,26 @@ air_config = Config(
 
 def yolo_air_prepare_func():
     from dps import cfg
-    if cfg.postprocessing is not None:
+    if cfg.postprocessing:
         cfg.anchor_boxes = [cfg.tile_shape]
     else:
         cfg.anchor_boxes = [cfg.image_shape]
 
     cfg.count_prior_log_odds = (
         "Exp(start=10000.0, end={}, decay_rate=0.1, "
-        "decay_steps={}, log=True)".format(cfg.final_count_prior_log_odds, cfg.count_prior_decay_steps)
+        "decay_steps={}, log=True)".format(
+            cfg.final_count_prior_log_odds, cfg.count_prior_decay_steps)
     )
     cfg.kernel_size = (cfg.kernel_size, cfg.kernel_size)
 
 
-yolo_air_config = Config(
-    log_name="yolo_air",
-    get_updater=core.Updater,
+yolo_air_config = alg_config.copy(
+    alg_name="yolo_air",
+    build_network=yolo_air.YoloAir_Network,
     prepare_func=yolo_air_prepare_func,
 
-    batch_size=32,
-    lr_schedule=1e-4,
-    optimizer_spec="adam",
-    max_grad_norm=1.0,
     stopping_criteria="mAP,max",
     threshold=1.0,
-
-    use_gpu=True,
-    gpu_allow_growth=True,
-
-    preserve_env=True,
-    eval_mode="val",
-    max_experiments=None,
 
     render_hook=yolo_air.YoloAir_RenderHook(),
 
@@ -193,8 +166,6 @@ yolo_air_config = Config(
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
 
     pixels_per_cell=(12, 12),
-
-    kernel_size=1,
 
     n_channels=128,
     n_decoder_channels=128,
@@ -206,30 +177,32 @@ yolo_air_config = Config(
         build_next_step=lambda scope: MLP([100, 100], scope=scope),
     ),
 
-    hw_prior_mean=np.log(0.1/0.9),
-    hw_prior_std=1.0,
-    final_count_prior_log_odds=0.05,
-    count_prior_decay_steps=1000,
-
     use_concrete_kl=False,
     n_final_layers=3,
+    object_shape=(14, 14),
+
+    min_yx=-0.5,
+    max_yx=1.5,
+
+    hw_prior_mean=np.log(0.1/0.9),
+
+    # Found through hyper parameter search
+    hw_prior_std=0.5,
+    count_prior_decay_steps=1000,
+    final_count_prior_log_odds=0.0125,
+    kernel_size=1,
 
     curriculum=[
-        dict(),
-        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
+        dict(postprocessing="random", tile_shape=(40, 40), n_samples_per_image=4),
+        dict(do_train=False, n_train=16, min_chars=1, preserve_env=False),
     ],
 )
 
+# --- MATH ---
+
 yolo_math_config = yolo_air_config.copy(
-    log_name="yolo_math",
-    curriculum=[
-        dict(),
-    ],
-
-    math_weight=1.0,
-    train_kl=True,
-    train_reconstruction=True,
-
+    alg_name="yolo_math",
+    build_network=yolo_math.YoloAir_MathNetwork,
     stopping_criteria="math_accuracy,max",
     threshold=1.0,
 
@@ -237,20 +210,140 @@ yolo_math_config = yolo_air_config.copy(
     build_math_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(128),
     build_math_output=lambda scope: MLP([100, 100], scope=scope),
     build_math_input=lambda scope: MLP([100, 100], scope=scope),
+
+    math_weight=5.0,
+    train_kl=True,
+    train_reconstruction=True,
+    noise_schedule=0.001,
+
+    curriculum=[dict()],
 )
+
+curriculum_2stage = [
+    dict(
+        max_steps=30000,
+        stopping_criteria="loss_reconstruction,min",
+        threshold=0.0,
+        math_weight=0.0,
+        train_reconstruction=True,
+        fixed_weights="math",
+
+        postprocessing="random",
+        tile_shape=(48, 48),
+        n_samples_per_image=4,
+    ),
+    dict(
+        render_step=10000,
+        max_steps=100000000,
+        preserve_env=False,
+        math_weight=1.0,
+        train_reconstruction=False,
+        train_kl=False,
+        fixed_weights="object_encoder object_decoder box obj backbone edge",
+    )
+]
+
+yolo_math_2stage_config = yolo_math_config.copy(
+    alg_name="yolo_math_2stage",
+    curriculum=curriculum_2stage,
+)
+
+# --- SIMPLE_MATH ---
 
 yolo_math_simple_config = yolo_math_config.copy(
-    log_name="yolo_math_simple",
+    alg_name="simple_math",
+    build_network=yolo_math.SimpleMathNetwork,
+    render_hook=yolo_math.SimpleMath_RenderHook(),
     build_math_encoder=core.Backbone,
     build_math_decoder=core.InverseBackbone,
+    train_reconstruction=False,
+    train_kl=False,
     variational=False,
-    render_hook=yolo_math.SimpleMath_RenderHook(),
 )
+
+curriculum_simple_2stage = copy.deepcopy(curriculum_2stage)
+curriculum_simple_2stage[0]['postprocessing'] = ""
+
+yolo_math_simple_2stage_config = yolo_math_simple_config.copy(
+    alg_name="simple_math_2stage",
+    curriculum=curriculum_simple_2stage,
+)
+
+# --- XO ---
 
 yolo_xo_config = yolo_math_config.copy(
-    log_name="yolo_xo",
+    alg_name="yolo_xo",
+    build_network=yolo_xo.YoloAIR_XONetwork,
+    build_math_network=yolo_math.AttentionRegressionNetwork,
 )
 
-yolo_xo_simple_config = yolo_math_simple_config.copy(
-    log_name="yolo_xo_simple",
+yolo_xo_2stage_config = yolo_xo_config.copy(
+    alg_name="yolo_xo_2stage",
+    curriculum=curriculum_2stage,
 )
+
+yolo_xo_init_config = yolo_xo_config.copy(
+    alg_name="yolo_xo_init",
+    keep_prob=0.25,
+    balanced=False,
+    n_train=60000,
+    n_samples_per_image=1,
+    curriculum=[dict()],
+)
+
+yolo_xo_init_config.update(curriculum_2stage[0])
+yolo_xo_init_config.max_steps = 100000
+yolo_xo_init_config.patience = 5000
+
+yolo_xo_continue_config = yolo_xo_config.copy(
+    alg_name="yolo_xo_continue",
+    balanced=True,
+    n_train=1000,
+    n_samples_per_image=1,
+    curriculum=[dict()],
+    load_path="/media/data/dps_data/logs/local_run_env=xo/exp_alg=yolo_xo_init_seed=525580444_2018_06_03_07_49_07/weights/best_of_stage_0",
+)
+
+yolo_xo_continue_config.update(curriculum_2stage[1])
+yolo_xo_continue_config.max_steps = 100000
+yolo_xo_continue_config.patience = 5000
+
+
+# --- SIMPLE_XO ---
+
+yolo_xo_simple_config = yolo_math_simple_config.copy(
+    alg_name="simple_xo",
+    build_network=yolo_xo.SimpleXONetwork,
+    build_math_network=yolo_math.AttentionRegressionNetwork,
+)
+
+yolo_xo_simple_2stage_config = yolo_xo_simple_config.copy(
+    alg_name="simple_xo_2stage",
+    curriculum=curriculum_simple_2stage
+)
+
+yolo_xo_simple_init_config = yolo_xo_simple_config.copy(
+    alg_name="yolo_xo_simple_init",
+    keep_prob=0.25,
+    balanced=False,
+    n_train=60000,
+    n_samples_per_image=1,
+    curriculum=[dict()],
+)
+
+yolo_xo_simple_init_config.update(curriculum_simple_2stage[0])
+yolo_xo_simple_init_config.max_steps = 100000
+yolo_xo_simple_init_config.patience = 5000
+
+yolo_xo_simple_continue_config = yolo_xo_simple_config.copy(
+    alg_name="yolo_xo_simple_continue",
+    balanced=True,
+    n_train=1000,
+    n_samples_per_image=1,
+    curriculum=[dict()],
+    load_path="/media/data/dps_data/logs/local_run_env=xo/exp_alg=yolo_xo_init_seed=525580444_2018_06_03_07_49_07/weights/best_of_stage_0",
+)
+
+yolo_xo_simple_continue_config.update(curriculum_2stage[1])
+yolo_xo_simple_continue_config.max_steps = 100000
+yolo_xo_simple_continue_config.patience = 5000

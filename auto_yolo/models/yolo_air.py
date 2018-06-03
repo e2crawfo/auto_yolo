@@ -19,6 +19,23 @@ from auto_yolo.tf_ops import render_sprites
 from auto_yolo.models import core
 
 
+def normal_kl(mean, std, prior_mean, prior_std):
+    var = std**2
+    prior_var = prior_std**2
+
+    return 0.5 * (
+        tf.log(prior_var) - tf.log(var) -
+        1.0 + var / prior_var +
+        tf.square(mean - prior_mean) / prior_var
+    )
+
+
+def normal_vae(mean, std, prior_mean, prior_std):
+    sample = mean + tf.random_normal(tf.shape(mean)) * std
+    kl = normal_kl(mean, std, prior_mean, prior_std)
+    return sample, kl
+
+
 def concrete_binary_pre_sigmoid_sample(log_odds, temperature, eps=10e-10):
     u = tf.random_uniform(tf.shape(log_odds), minval=0, maxval=1)
     noise = tf.log(u + eps) - tf.log(1.0 - u + eps)
@@ -592,7 +609,9 @@ class YoloAir_Network(ScopedFunction):
 
     def _call(self, inp, _, is_training):
         inp, labels, background = inp
+        return self.build_graph(inp, labels, background, is_training)
 
+    def build_graph(self, inp, labels, background, is_training):
         # --- initialize containers for storing outputs ---
 
         self._tensors = dict(

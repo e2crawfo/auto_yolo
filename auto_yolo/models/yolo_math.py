@@ -6,9 +6,8 @@ import shutil
 import os
 
 from dps import cfg
-from dps.utils import Param, Parameterized
-from dps.utils.tf import (
-    trainable_variables, ScopedFunction, FullyConvolutional, tf_mean_sum)
+from dps.utils import Param
+from dps.utils.tf import ScopedFunction, FullyConvolutional, tf_mean_sum
 from dps.datasets import VisualArithmeticDataset
 
 from auto_yolo.models import core, yolo_air
@@ -238,7 +237,7 @@ class ConvNet(FullyConvolutional):
         return output
 
 
-class SimpleMathNetwork(Parameterized):
+class SimpleMathNetwork(ScopedFunction):
     largest_digit = Param()
     A = Param()
     pixels_per_cell = Param()
@@ -267,6 +266,8 @@ class SimpleMathNetwork(Parameterized):
         if isinstance(self.fixed_weights, str):
             self.fixed_weights = self.fixed_weights.split()
 
+        super(SimpleMathNetwork, self).__init__()
+
     @property
     def inp(self):
         return self._tensors["inp"]
@@ -283,14 +284,6 @@ class SimpleMathNetwork(Parameterized):
     def float_is_training(self):
         return self._tensors["float_is_training"]
 
-    def trainable_variables(self, for_opt):
-
-        tvars = []
-        for sf in [self.encoder, self.decoder, self.math_input_network, self.math_network]:
-            tvars.extend(trainable_variables(sf.scope, for_opt=for_opt))
-
-        return tvars
-
     def _process_labels(self, labels):
         self._tensors.update(
             annotations=labels[0],
@@ -305,7 +298,11 @@ class SimpleMathNetwork(Parameterized):
     def n_classes(self):
         return self.largest_digit + 1
 
-    def build_graph(self, inp, labels, is_training, background):
+    def _call(self, inp, _, is_training):
+        inp, labels, background = inp
+        return self.build_graph(inp, labels, background, is_training)
+
+    def build_graph(self, inp, labels, background, is_training):
         attr_dim = 2 * self.A if self.variational else self.A
 
         # --- init modules ---

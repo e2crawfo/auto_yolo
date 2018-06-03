@@ -1243,7 +1243,7 @@ config.update(
     max_steps=1e7,
     patience=10000,
 
-    render_hook=core.RenderHook(),
+    render_hook=YoloRL_RenderHook(),
 
     # network params
 

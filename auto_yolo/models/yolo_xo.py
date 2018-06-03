@@ -2,27 +2,9 @@ import tensorflow as tf
 
 from dps import cfg
 from dps.utils import Param
-from dps.datasets.atari import RewardClassificationDataset
+from dps.datasets.xo import XO_RewardClassificationDataset
 
 from auto_yolo.models import yolo_math
-
-
-class Env(object):
-    def __init__(self):
-        train = RewardClassificationDataset(
-            rl_data_location=cfg.train_rl_data_location,
-            max_examples_per_class=cfg.n_train_per_class,
-            balanced=cfg.train_balanced)
-
-        val = RewardClassificationDataset(
-            rl_data_location=cfg.val_rl_data_location,
-            max_examples_per_class=cfg.n_val_per_class,
-            balanced=True)
-
-        self.datasets = dict(train=train, val=val)
-
-    def close(self):
-        pass
 
 
 class YoloAIR_XONetwork(yolo_math.YoloAir_MathNetwork):
