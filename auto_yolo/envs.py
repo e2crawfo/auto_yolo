@@ -11,21 +11,20 @@ from dps.hyper import build_and_submit
 from dps.config import DEFAULT_CONFIG
 
 import auto_yolo.algs as alg_module
-from auto_yolo.models import yolo_xo
 
 
 def run_experiment(
-        name, config, readme, distributions=None, durations=None, task="grid"):
+        name, config, readme, distributions=None, durations=None, alg=None, task="grid"):
 
     durations = durations or {}
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('alg', nargs='?', default=None,
+    parser.add_argument("duration", choices=list(durations.keys()) + ["local"])
+
+    parser.add_argument('--alg', default=alg,
                         help="Name (or unique name-prefix) of algorithm to run. Optional. "
                              "If not provided, algorithm spec is assumed to be included "
                              "in the environment spec.")
-    parser.add_argument("duration", choices=list(durations.keys()) + ["local"])
-
     parser.add_argument("--size", choices="14 21".split(), default=14)
     parser.add_argument("--in-colour", action="store_true")
     parser.add_argument("--task", choices="grid scatter arithmetic xo".split(), default=task)
@@ -45,6 +44,7 @@ def run_experiment(
     _config.update(alg_config)
 
     _config.update(config)
+    _config.update_from_command_line()
 
     _config.env_name = "{}_env={}".format(name, env_config.env_name)
 
@@ -65,7 +65,7 @@ def run_experiment(
         run_kwargs.update(durations[args.duration])
 
     exp_name = "{}_alg={}_duration={}".format(
-        _config.env_name, alg_config.alg_name, args.duration),
+        _config.env_name, alg_config.alg_name, args.duration)
 
     build_and_submit(
         name=exp_name, config=_config, distributions=distributions, **run_kwargs)

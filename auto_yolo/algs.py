@@ -214,7 +214,7 @@ yolo_math_config = yolo_air_config.copy(
     math_weight=5.0,
     train_kl=True,
     train_reconstruction=True,
-    noise_schedule=0.001,
+    noise_schedule="Exp(0.001, 0.0, 1000, 0.1)",
 
     curriculum=[dict()],
 )
@@ -239,7 +239,7 @@ curriculum_2stage = [
         math_weight=1.0,
         train_reconstruction=False,
         train_kl=False,
-        fixed_weights="object_encoder object_decoder box obj backbone edge",
+        fixed_weights="encoder decoder object_encoder object_decoder box obj backbone edge",
     )
 ]
 
