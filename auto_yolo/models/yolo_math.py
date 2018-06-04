@@ -159,7 +159,8 @@ class YoloAir_MathNetwork(yolo_air.YoloAir_Network):
         return self._tensors["raw_obj"] * math_attr
 
     def build_graph(self, *args, **kwargs):
-        result = super(YoloAir_MathNetwork, self).build_graph(*args, **kwargs)
+        with tf.variable_scope("reconstruction", reuse=self.initialized):
+            result = super(YoloAir_MathNetwork, self).build_graph(*args, **kwargs)
 
         if self.math_input_network is None:
             self.math_input_network = cfg.build_math_input(scope="math_input_network")

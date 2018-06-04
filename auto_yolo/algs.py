@@ -295,13 +295,18 @@ yolo_xo_init_config.update(curriculum_2stage[0])
 yolo_xo_init_config.max_steps = 100000
 yolo_xo_init_config.patience = 5000
 
+
 yolo_xo_continue_config = yolo_xo_config.copy(
     alg_name="yolo_xo_continue",
     balanced=True,
     n_train=1000,
     n_samples_per_image=1,
     curriculum=[dict()],
-    load_path="/media/data/dps_data/logs/local_run_env=xo/exp_alg=yolo_xo_init_seed=525580444_2018_06_03_07_49_07/weights/best_of_stage_0",
+    load_path={
+        "YoloAIR_XONetwork/reconstruction":
+            "/media/data/dps_data/logs/local_run_env=xo/exp_alg=yolo_xo_init_seed=525580444_2018_06_04_05_28_03/weights/best_of_stage_0"
+    },
+    build_math_network=lambda scope: MLP([100, 100, 100], scope=scope),
 )
 
 yolo_xo_continue_config.update(curriculum_2stage[1])
@@ -341,7 +346,7 @@ yolo_xo_simple_continue_config = yolo_xo_simple_config.copy(
     n_train=1000,
     n_samples_per_image=1,
     curriculum=[dict()],
-    load_path="/media/data/dps_data/logs/local_run_env=xo/exp_alg=yolo_xo_init_seed=525580444_2018_06_03_07_49_07/weights/best_of_stage_0",
+    load_path="/media/data/dps_data/logs/local_run_env=xo/exp_alg=yolo_xo_simple_init_seed=525580444_2018_06_03_11_03_59/weights/best_of_stage_0",
 )
 
 yolo_xo_simple_continue_config.update(curriculum_2stage[1])
