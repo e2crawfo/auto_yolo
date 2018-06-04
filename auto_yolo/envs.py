@@ -57,12 +57,13 @@ def run_experiment(
             else:
                 return training_loop()
     else:
-        run_kwargs = dict(
+        run_kwargs = Config(
             kind="slurm",
             pmem=5000,
             ignore_gpu=False,
         )
         run_kwargs.update(durations[args.duration])
+        run_kwargs.update_from_command_line()
 
     exp_name = "{}_alg={}_duration={}".format(
         _config.env_name, alg_config.alg_name, args.duration)
@@ -221,6 +222,10 @@ def get_env_config(task, size, in_colour, ops, **_):
             backgrounds_sample_every=False,
             background_colours="",
             background_cfg=dict(mode="none"),
+
+            eval_step=1000,
+            display_step=1000,
+            render_step=5000,
         )
 
     config = grid_config.copy()
