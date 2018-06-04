@@ -26,20 +26,26 @@ import traceback
 import tensorflow as tf
 from tensorflow.python.framework import ops
 
-load_successful = False
-try:
-    loc = os.path.join(os.path.split(__file__)[0], "_render_sprites.so")
-    print("Loading render_sprites library at {}.".format(loc))
-    _render_sprites_so = tf.load_op_library(loc)
-except Exception as e:
-    print("Failed. Reason:\n{}".format(traceback.format_exc()))
-else:
-    print("Success.")
-    load_successful = True
+_render_sprites_so = None
+
+
+def render_sprites_so():
+    global _render_sprites_so
+    if _render_sprites_so is None:
+        try:
+            loc = os.path.join(os.path.split(__file__)[0], "_render_sprites.so")
+            print("Loading render_sprites library at {}.".format(loc))
+            _render_sprites_so = tf.load_op_library(loc)
+        except Exception as e:
+            print("Failed. Reason:\n{}".format(traceback.format_exc()))
+        else:
+            print("Success.")
+    return _render_sprites_so
 
 
 def lib_avail():
-    return load_successful
+    so = render_sprites_so()
+    return so is not None
 
 
 def render_sprites(sprites, n_sprites, scales, offsets, backgrounds, name="render_sprites"):
@@ -77,7 +83,7 @@ def render_sprites(sprites, n_sprites, scales, offsets, backgrounds, name="rende
     scales_tensor = ops.convert_to_tensor(scales, name="scales")
     offsets_tensor = ops.convert_to_tensor(offsets, name="offsets")
     backgrounds_tensor = ops.convert_to_tensor(backgrounds, name="backgrounds")
-    return _render_sprites_so.render_sprites(
+    return render_sprites_so().render_sprites(
       sprites_tensor, n_sprites_tensor, scales_tensor, offsets_tensor, backgrounds_tensor)
 
 
@@ -85,7 +91,7 @@ def render_sprites(sprites, n_sprites, scales, offsets, backgrounds, name="rende
 def _render_sprites_grad(op, grad_output):
   sprites, n_sprites, scales, offsets, backgrounds = op.inputs
   grad_output_tensor = ops.convert_to_tensor(grad_output, name="grad_output")
-  return _render_sprites_so.render_sprites_grad(
+  return render_sprites_so().render_sprites_grad(
     sprites, n_sprites, scales, offsets, backgrounds, grad_output_tensor)
 
 
