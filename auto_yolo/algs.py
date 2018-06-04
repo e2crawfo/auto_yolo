@@ -292,7 +292,7 @@ yolo_xo_init_config = yolo_xo_config.copy(
 )
 
 yolo_xo_init_config.update(curriculum_2stage[0])
-yolo_xo_init_config.max_steps = 100000
+yolo_xo_init_config.max_steps = 1000000
 yolo_xo_init_config.patience = 5000
 
 

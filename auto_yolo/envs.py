@@ -13,9 +13,14 @@ from dps.config import DEFAULT_CONFIG
 import auto_yolo.algs as alg_module
 
 
+def sanitize(s):
+    return s.replace('_', '-')
+
+
 def run_experiment(
         name, config, readme, distributions=None, durations=None, alg=None, task="grid"):
 
+    name = sanitize(name)
     durations = durations or {}
 
     parser = argparse.ArgumentParser()
@@ -42,14 +47,15 @@ def run_experiment(
 
     alg_config = getattr(alg_module, "{}_config".format(args.alg))
     _config.update(alg_config)
+    alg_name = sanitize(alg_config.alg_name)
 
     _config.update(config)
     _config.update_from_command_line()
 
-    _config.env_name = "{}_env={}".format(name, env_config.env_name)
+    _config.env_name = "{}_env={}".format(name, sanitize(env_config.env_name))
 
     if args.duration == "local":
-        _config.exp_name = "alg={}".format(alg_config.alg_name)
+        _config.exp_name = "alg={}".format(alg_name)
         with _config:
             if args.pdb:
                 with pdb_postmortem():
@@ -65,8 +71,7 @@ def run_experiment(
         run_kwargs.update(durations[args.duration])
         run_kwargs.update_from_command_line()
 
-    exp_name = "{}_alg={}_duration={}".format(
-        _config.env_name, alg_config.alg_name, args.duration)
+    exp_name = "{}_alg={}_duration={}".format(_config.env_name, alg_name, args.duration)
 
     build_and_submit(
         name=exp_name, config=_config, distributions=distributions, **run_kwargs)

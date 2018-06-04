@@ -1,11 +1,11 @@
 from auto_yolo import envs
 
-readme = "xo pretrained representation experiment: pretraining the representation"
+readme = "xo pretrained representation experiment: pretraining the representation. using simple, rather than yolo, encoder/decoder."
 
 config = dict()
 
 envs.run_experiment(
-    "yolo_xo_init", config, readme, alg="yolo_xo_init", task="xo",
+    "yolo_xo_simple_init", config, readme, alg="yolo_xo_simple_init", task="xo",
     durations=dict(
         long=dict(
             max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="4hours",
