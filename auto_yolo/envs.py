@@ -146,7 +146,6 @@ class Nips2018XO(object):
 grid_config = Config(
     env_name="nips_2018_grid",
     build_env=Nips2018Grid,
-    seed=347405995,
 
     # dataset params
     min_chars=16,

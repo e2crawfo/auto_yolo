@@ -8,7 +8,7 @@ envs.run_experiment(
     "yolo_xo_init", config, readme, alg="yolo_xo_init", task="xo",
     durations=dict(
         long=dict(
-            max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="4hours",
+            max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="8hours",
             project="rpp-bengioy", cleanup_time="10mins",
             slack_time="10mins", n_repeats=6),
         med=dict(

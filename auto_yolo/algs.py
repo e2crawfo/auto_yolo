@@ -287,13 +287,13 @@ yolo_xo_init_config = yolo_xo_config.copy(
     keep_prob=0.25,
     balanced=False,
     n_train=60000,
-    n_samples_per_image=1,
     curriculum=[dict()],
 )
 
 yolo_xo_init_config.update(curriculum_2stage[0])
-yolo_xo_init_config.max_steps = 1000000
-yolo_xo_init_config.patience = 5000
+yolo_xo_init_config.n_samples_per_image = 1
+yolo_xo_init_config.max_steps = 10000000
+yolo_xo_init_config.patience = 10000
 
 
 yolo_xo_continue_config = yolo_xo_config.copy(
@@ -337,8 +337,8 @@ yolo_xo_simple_init_config = yolo_xo_simple_config.copy(
 )
 
 yolo_xo_simple_init_config.update(curriculum_simple_2stage[0])
-yolo_xo_simple_init_config.max_steps = 100000
-yolo_xo_simple_init_config.patience = 5000
+yolo_xo_simple_init_config.max_steps = 10000000
+yolo_xo_simple_init_config.patience = 10000
 
 yolo_xo_simple_continue_config = yolo_xo_simple_config.copy(
     alg_name="yolo_xo_simple_continue",
