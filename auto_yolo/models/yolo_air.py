@@ -113,7 +113,7 @@ class YoloAir_Network(ScopedFunction):
         lookback_shape=(2, 2, 2),
     ))
 
-    def __init__(self, env, **kwargs):
+    def __init__(self, env, scope=None, **kwargs):
         self.obs_shape = env.datasets['train'].obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
 
@@ -172,7 +172,7 @@ class YoloAir_Network(ScopedFunction):
             ),
         )
 
-        super(YoloAir_Network, self).__init__()
+        super(YoloAir_Network, self).__init__(scope=scope)
 
     @property
     def inp(self):

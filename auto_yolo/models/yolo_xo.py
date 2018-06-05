@@ -1,8 +1,6 @@
 import tensorflow as tf
 
-from dps import cfg
 from dps.utils import Param
-from dps.datasets.xo import XO_RewardClassificationDataset
 
 from auto_yolo.models import yolo_math
 
@@ -12,8 +10,8 @@ class YoloAIR_XONetwork(yolo_math.YoloAir_MathNetwork):
     n_actions = Param()
     classes = Param()
 
-    def __init__(self, env, **kwargs):
-        super(YoloAIR_XONetwork, self).__init__(env, **kwargs)
+    def __init__(self, env, scope=None, **kwargs):
+        super(YoloAIR_XONetwork, self).__init__(env, scope=scope, **kwargs)
         self.eval_funcs = dict()
 
     @property

@@ -18,7 +18,8 @@ def sanitize(s):
 
 
 def run_experiment(
-        name, config, readme, distributions=None, durations=None, alg=None, task="grid"):
+        name, config, readme, distributions=None, durations=None,
+        alg=None, task="grid", name_variables=None):
 
     name = sanitize(name)
     durations = durations or {}
@@ -54,6 +55,12 @@ def run_experiment(
 
     _config.env_name = "{}_env={}".format(name, sanitize(env_config.env_name))
 
+    if name_variables is not None:
+        name_variables_str = "_".join(
+            "{}={}".format(sanitize(str(k)), sanitize(str(getattr(_config, k))))
+            for k in name_variables.split(","))
+        _config.env_name = "{}_{}".format(_config.env_name, name_variables_str)
+
     if args.duration == "local":
         _config.exp_name = "alg={}".format(alg_name)
         with _config:
@@ -79,7 +86,7 @@ def run_experiment(
 
 class Nips2018Grid(object):
     def __init__(self):
-        train_seed, val_seed = gen_seed(), gen_seed()
+        train_seed, val_seed = 0, 1
         train = GridEmnistObjectDetectionDataset(
             n_examples=int(cfg.n_train), shuffle=True,
             example_range=(0.0, 0.9), seed=train_seed)
@@ -96,7 +103,7 @@ class Nips2018Grid(object):
 
 class Nips2018Scatter(object):
     def __init__(self):
-        train_seed, val_seed = gen_seed(), gen_seed()
+        train_seed, val_seed = 0, 1
         train = EmnistObjectDetectionDataset(
             n_examples=int(cfg.n_train), shuffle=True,
             example_range=(0.0, 0.9), seed=train_seed)
@@ -113,7 +120,7 @@ class Nips2018Scatter(object):
 
 class Nips2018Arithmetic(object):
     def __init__(self):
-        train_seed, val_seed = gen_seed(), gen_seed()
+        train_seed, val_seed = 0, 1
 
         train = VisualArithmeticDataset(
             n_examples=int(cfg.n_train), shuffle=True,
@@ -131,7 +138,7 @@ class Nips2018Arithmetic(object):
 
 class Nips2018XO(object):
     def __init__(self):
-        train_seed, val_seed = gen_seed(), gen_seed()
+        train_seed, val_seed = 0, 1
 
         train = XO_RewardClassificationDataset(n_examples=cfg.n_train, seed=train_seed)
 

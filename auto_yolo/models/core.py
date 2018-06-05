@@ -310,7 +310,7 @@ class Updater(_Updater):
         self.obs_shape = env.datasets['train'].obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
 
-        self.network = cfg.build_network(env)
+        self.network = cfg.build_network(env, scope="network")
         self.datasets = env.datasets
 
         self.scope = scope

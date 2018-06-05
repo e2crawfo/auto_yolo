@@ -2,7 +2,7 @@ from dps.utils import Config
 
 from auto_yolo import envs
 
-readme = "xo 2stage experiment"
+readme = "xo simple 2stage experiment"
 
 config = Config()
 
@@ -22,6 +22,6 @@ durations = dict(
 )
 
 envs.run_experiment(
-    "yolo_xo_2stage", config, readme, alg="yolo_xo_2stage", task="xo",
+    "yolo_xo_simple_2stage", config, readme, alg="yolo_xo_simple_2stage", task="xo",
     name_variables="decoder_kind", durations=durations,
 )

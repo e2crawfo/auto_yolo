@@ -35,7 +35,6 @@ class SequentialRegressionNetwork(ScopedFunction):
 
     def _call(self, _inp, output_size, is_training):
         """ program is the program dictionary from YoloAir_Network """
-
         if self.h_cell is None:
             self.h_cell = cfg.build_math_cell(scope="regression_h_cell")
             self.w_cell = cfg.build_math_cell(scope="regression_w_cell")
@@ -123,10 +122,12 @@ class ConvolutionalRegressionNetwork(ScopedFunction):
 
 
 class AttentionRegressionNetwork(FullyConvolutional):
+    ar_n_filters = Param(128)
+
     def __init__(self, **kwargs):
         layout = [
-            dict(filters=64, kernel_size=3, padding="SAME", strides=1),
-            dict(filters=64, kernel_size=3, padding="SAME", strides=1),
+            dict(filters=self.ar_n_filters, kernel_size=3, padding="SAME", strides=1),
+            dict(filters=self.ar_n_filters, kernel_size=3, padding="SAME", strides=1),
             dict(filters=4, kernel_size=1, padding="SAME", strides=1),
         ]
         super(AttentionRegressionNetwork, self).__init__(layout, check_output_shape=False, **kwargs)
@@ -256,7 +257,7 @@ class SimpleMathNetwork(ScopedFunction):
     math_input_network = None
     math_network = None
 
-    def __init__(self, env, **kwargs):
+    def __init__(self, env, scope=None, **kwargs):
         self.obs_shape = env.datasets['train'].obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
 
@@ -267,7 +268,7 @@ class SimpleMathNetwork(ScopedFunction):
         if isinstance(self.fixed_weights, str):
             self.fixed_weights = self.fixed_weights.split()
 
-        super(SimpleMathNetwork, self).__init__()
+        super(SimpleMathNetwork, self).__init__(scope=scope)
 
     @property
     def inp(self):
@@ -350,32 +351,33 @@ class SimpleMathNetwork(ScopedFunction):
 
         # --- encode ---
 
-        code = self.encoder(inp, (self.H, self.W, attr_dim), is_training)
+        with tf.variable_scope("reconstruction", reuse=self.initialized):
+            code = self.encoder(inp, (self.H, self.W, attr_dim), is_training)
 
-        if self.variational:
-            code_mean, code_log_std = tf.split(code, 2, axis=-1)
-            code_std = tf.exp(code_log_std)
-            code, code_kl = yolo_air.normal_vae(code_mean, code_std, self.code_prior_mean, self.code_prior_std)
+            if self.variational:
+                code_mean, code_log_std = tf.split(code, 2, axis=-1)
+                code_std = tf.exp(code_log_std)
+                code, code_kl = yolo_air.normal_vae(code_mean, code_std, self.code_prior_mean, self.code_prior_std)
 
-            self._tensors["code_mean"] = code_mean
-            self._tensors["code_std"] = code_std
-            self._tensors["code_kl"] = code_kl
+                self._tensors["code_mean"] = code_mean
+                self._tensors["code_std"] = code_std
+                self._tensors["code_kl"] = code_kl
 
-            if self.train_kl:
-                losses['code_kl'] = tf_mean_sum(self._tensors["code_kl"])
+                if self.train_kl:
+                    losses['code_kl'] = tf_mean_sum(self._tensors["code_kl"])
 
-        self._tensors["code"] = code
+            self._tensors["code"] = code
 
-        # --- decode ---
+            # --- decode ---
 
-        reconstruction = self.decoder(code, inp.shape[1:], is_training)
-        reconstruction = tf.nn.sigmoid(tf.clip_by_value(reconstruction, -10, 10))
-        self._tensors["output"] = reconstruction
+            reconstruction = self.decoder(code, inp.shape[1:], is_training)
+            reconstruction = tf.nn.sigmoid(tf.clip_by_value(reconstruction, -10, 10))
+            self._tensors["output"] = reconstruction
 
-        if self.train_reconstruction:
-            loss_key = 'xent' if self.xent_loss else 'squared'
-            self._tensors['per_pixel_reconstruction_loss'] = core.loss_builders[loss_key](reconstruction, inp)
-            losses['reconstruction'] = tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
+            if self.train_reconstruction:
+                loss_key = 'xent' if self.xent_loss else 'squared'
+                self._tensors['per_pixel_reconstruction_loss'] = core.loss_builders[loss_key](reconstruction, inp)
+                losses['reconstruction'] = tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
 
         # --- predict ---
 

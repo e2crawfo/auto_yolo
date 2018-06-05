@@ -23,9 +23,13 @@ alg_config = Config(
     stopping_criteria="loss,min",
     threshold=-np.inf,
 
-    curriculum=[
-        dict(),
-    ],
+    max_steps=10000000,
+    patience=10000,
+    render_step=10000,
+    eval_step=1000,
+    display_step=1000,
+
+    curriculum=[dict()],
 )
 
 
@@ -198,13 +202,47 @@ yolo_air_config = alg_config.copy(
     ],
 )
 
+
 # --- MATH ---
+
+
+def math_prepare_func():
+    from dps import cfg
+
+    yolo_air_prepare_func()
+
+    decoder_kind = cfg.decoder_kind
+    if decoder_kind == "mlp":
+        cfg.build_math_network = lambda scope: MLP([256, 256, 256, 128], scope=scope)
+    elif decoder_kind == "seq":
+        cfg.build_math_network = yolo_math.SequentialRegressionNetwork
+        cfg.build_math_cell = lambda scope: tf.contrib.rnn.LSTMBlockCell(128)
+    elif decoder_kind == "attn":
+        cfg.build_math_network = yolo_math.AttentionRegressionNetwork
+        cfg.ar_n_filters = 256
+    else:
+        raise Exception("Unknown value for decoder_kind: '{}'".format(decoder_kind))
+
+
+def continue_prepare_func():
+    from dps import cfg
+
+    math_prepare_func()
+
+    repeat = int(cfg.get('repeat', 0))
+    cfg.load_path = {
+        "network/reconstruction": cfg.candidate_load_paths[repeat]
+    }
+
 
 yolo_math_config = yolo_air_config.copy(
     alg_name="yolo_math",
     build_network=yolo_math.YoloAir_MathNetwork,
     stopping_criteria="math_accuracy,max",
     threshold=1.0,
+
+    prepare_func=math_prepare_func,
+    decoder_kind="attn",
 
     build_math_network=yolo_math.SequentialRegressionNetwork,
     build_math_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(128),
@@ -221,25 +259,22 @@ yolo_math_config = yolo_air_config.copy(
 
 curriculum_2stage = [
     dict(
-        max_steps=30000,
         stopping_criteria="loss_reconstruction,min",
         threshold=0.0,
         math_weight=0.0,
         train_reconstruction=True,
         fixed_weights="math",
-
         postprocessing="random",
         tile_shape=(48, 48),
         n_samples_per_image=4,
     ),
     dict(
-        render_step=10000,
-        max_steps=100000000,
         preserve_env=False,
         math_weight=1.0,
         train_reconstruction=False,
         train_kl=False,
         fixed_weights="encoder decoder object_encoder object_decoder box obj backbone edge",
+        load_path={"network/reconstruction": -1},
     )
 ]
 
@@ -275,6 +310,7 @@ yolo_xo_config = yolo_math_config.copy(
     alg_name="yolo_xo",
     build_network=yolo_xo.YoloAIR_XONetwork,
     build_math_network=yolo_math.AttentionRegressionNetwork,
+    balanced=True,
 )
 
 yolo_xo_2stage_config = yolo_xo_config.copy(
@@ -282,7 +318,9 @@ yolo_xo_2stage_config = yolo_xo_config.copy(
     curriculum=curriculum_2stage,
 )
 
-yolo_xo_init_config = yolo_xo_config.copy(
+yolo_xo_init_config = yolo_xo_config.copy()
+yolo_xo_init_config.update(curriculum_2stage[0])
+yolo_xo_init_config.update(
     alg_name="yolo_xo_init",
     keep_prob=0.25,
     balanced=False,
@@ -290,29 +328,15 @@ yolo_xo_init_config = yolo_xo_config.copy(
     curriculum=[dict()],
 )
 
-yolo_xo_init_config.update(curriculum_2stage[0])
-yolo_xo_init_config.n_samples_per_image = 1
-yolo_xo_init_config.max_steps = 10000000
-yolo_xo_init_config.patience = 10000
-
-
-yolo_xo_continue_config = yolo_xo_config.copy(
-    alg_name="yolo_xo_continue",
-    balanced=True,
-    n_train=1000,
-    n_samples_per_image=1,
-    curriculum=[dict()],
-    load_path={
-        "YoloAIR_XONetwork/reconstruction":
-            "/media/data/dps_data/logs/local_run_env=xo/exp_alg=yolo_xo_init_seed=525580444_2018_06_04_05_28_03/weights/best_of_stage_0"
-    },
-    build_math_network=lambda scope: MLP([100, 100, 100], scope=scope),
-)
-
+yolo_xo_continue_config = yolo_xo_config.copy()
 yolo_xo_continue_config.update(curriculum_2stage[1])
-yolo_xo_continue_config.max_steps = 100000
-yolo_xo_continue_config.patience = 5000
-
+yolo_xo_continue_config.update(
+    alg_name="yolo_xo_continue",
+    prepare_func=continue_prepare_func,
+    n_train=1000,
+    curriculum=[dict()],
+    candidate_load_paths=["/media/data/dps_data/logs/yolo-xo-init_env=xo/exp_alg=yolo-xo-init_seed=0_2018_06_05_09_37_35/weights/best_of_stage_0"],
+)
 
 # --- SIMPLE_XO ---
 
@@ -327,28 +351,24 @@ yolo_xo_simple_2stage_config = yolo_xo_simple_config.copy(
     curriculum=curriculum_simple_2stage
 )
 
-yolo_xo_simple_init_config = yolo_xo_simple_config.copy(
+yolo_xo_simple_init_config = yolo_xo_simple_config.copy()
+yolo_xo_simple_init_config.update(curriculum_simple_2stage[0])
+yolo_xo_simple_init_config.update(
     alg_name="yolo_xo_simple_init",
     keep_prob=0.25,
     balanced=False,
     n_train=60000,
-    n_samples_per_image=1,
     curriculum=[dict()],
 )
 
-yolo_xo_simple_init_config.update(curriculum_simple_2stage[0])
-yolo_xo_simple_init_config.max_steps = 10000000
-yolo_xo_simple_init_config.patience = 10000
-
-yolo_xo_simple_continue_config = yolo_xo_simple_config.copy(
+yolo_xo_simple_continue_config = yolo_xo_simple_config.copy()
+yolo_xo_simple_continue_config.update(curriculum_simple_2stage[1])
+yolo_xo_simple_continue_config.update(
     alg_name="yolo_xo_simple_continue",
-    balanced=True,
+    prepare_func=continue_prepare_func,
     n_train=1000,
-    n_samples_per_image=1,
     curriculum=[dict()],
-    load_path="/media/data/dps_data/logs/local_run_env=xo/exp_alg=yolo_xo_simple_init_seed=525580444_2018_06_03_11_03_59/weights/best_of_stage_0",
+    candidate_load_paths=[
+        "/media/data/dps_data/logs/yolo-xo-simple-init_env=xo/exp_alg=yolo-xo-simple-init_seed=0_2018_06_05_09_54_38/weights/best_of_stage_0"
+    ],
 )
-
-yolo_xo_simple_continue_config.update(curriculum_2stage[1])
-yolo_xo_simple_continue_config.max_steps = 100000
-yolo_xo_simple_continue_config.patience = 5000
