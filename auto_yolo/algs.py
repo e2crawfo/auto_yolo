@@ -24,7 +24,7 @@ alg_config = Config(
     threshold=-np.inf,
 
     max_steps=10000000,
-    patience=10000,
+    patience=5000,
     render_step=10000,
     eval_step=1000,
     display_step=1000,
@@ -226,12 +226,17 @@ def math_prepare_func():
 
 def continue_prepare_func():
     from dps import cfg
+    import os
 
     math_prepare_func()
 
     repeat = int(cfg.get('repeat', 0))
+
+    candidates = sorted(os.listdir(cfg.init_path))
+    load_path = os.path.join(cfg.init_path, candidates[repeat], "weights/best_of_stage_0")
+
     cfg.load_path = {
-        "network/reconstruction": cfg.candidate_load_paths[repeat]
+        "network/reconstruction": load_path
     }
 
 
@@ -335,7 +340,8 @@ yolo_xo_continue_config.update(
     prepare_func=continue_prepare_func,
     n_train=1000,
     curriculum=[dict()],
-    candidate_load_paths=["/media/data/dps_data/logs/yolo-xo-init_env=xo/exp_alg=yolo-xo-init_seed=0_2018_06_05_09_37_35/weights/best_of_stage_0"],
+    init_path="/scratch/e2crawfo/dps_data/run_experiments/GOOD_NIPS_2018/"
+              "run_search_yolo-xo-init_env=xo_alg=yolo-xo-init_duration=long_seed=0_2018_06_05_09_23_55/experiments"
 )
 
 # --- SIMPLE_XO ---
@@ -368,7 +374,6 @@ yolo_xo_simple_continue_config.update(
     prepare_func=continue_prepare_func,
     n_train=1000,
     curriculum=[dict()],
-    candidate_load_paths=[
-        "/media/data/dps_data/logs/yolo-xo-simple-init_env=xo/exp_alg=yolo-xo-simple-init_seed=0_2018_06_05_09_54_38/weights/best_of_stage_0"
-    ],
+    init_path="/scratch/e2crawfo/dps_data/run_experiments/GOOD_NIPS_2018/"
+              "run_search_yolo-xo-simple-init_env=xo_alg=yolo-xo-simple-init_duration=long_seed=0_2018_06_05_09_25_02/experiments"
 )

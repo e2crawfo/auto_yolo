@@ -5,7 +5,7 @@ from dps.datasets import (
     GridEmnistObjectDetectionDataset, EmnistObjectDetectionDataset,
     VisualArithmeticDataset)
 from dps.datasets.xo import XO_RewardClassificationDataset
-from dps.utils import Config, gen_seed, pdb_postmortem
+from dps.utils import Config, pdb_postmortem
 from dps.train import training_loop
 from dps.hyper import build_and_submit
 from dps.config import DEFAULT_CONFIG
