@@ -6,7 +6,7 @@ readme = "Testing sample complexity of yolo_air."
 
 envs.run_experiments(
     "sample_complexity_experiment", "arithmetic",
-    yolo_air_config, config, readme, distributions,
+    yolo_air_config, dict(), readme, distributions,
     dict(
         long=dict(
             max_hosts=3, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="6hours",

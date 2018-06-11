@@ -50,17 +50,6 @@ def run_experiment(
     _config.update(alg_config)
     alg_name = sanitize(alg_config.alg_name)
 
-    _config.update(config)
-    _config.update_from_command_line()
-
-    _config.env_name = "{}_env={}".format(name, sanitize(env_config.env_name))
-
-    if name_variables is not None:
-        name_variables_str = "_".join(
-            "{}={}".format(sanitize(str(k)), sanitize(str(getattr(_config, k))))
-            for k in name_variables.split(","))
-        _config.env_name = "{}_{}".format(_config.env_name, name_variables_str)
-
     if args.duration == "local":
         _config.exp_name = "alg={}".format(alg_name)
         with _config:
@@ -75,8 +64,26 @@ def run_experiment(
             pmem=5000,
             ignore_gpu=False,
         )
+
+        duration_args = durations[args.duration]
+
+        if 'config' in duration_args:
+            _config.update(duration_args['config'])
+            del duration_args['config']
+
         run_kwargs.update(durations[args.duration])
         run_kwargs.update_from_command_line()
+
+    _config.update(config)
+    _config.update_from_command_line()
+
+    _config.env_name = "{}_env={}".format(name, sanitize(env_config.env_name))
+
+    if name_variables is not None:
+        name_variables_str = "_".join(
+            "{}={}".format(sanitize(str(k)), sanitize(str(getattr(_config, k))))
+            for k in name_variables.split(","))
+        _config.env_name = "{}_{}".format(_config.env_name, name_variables_str)
 
     exp_name = "{}_alg={}_duration={}".format(_config.env_name, alg_name, args.duration)
 
@@ -184,7 +191,6 @@ grid_config = Config(
 
     n_train=25000,
     n_val=1e2,
-    n_test=1e2,
 
     eval_step=1000,
     display_step=1000,

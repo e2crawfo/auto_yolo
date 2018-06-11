@@ -9,11 +9,8 @@ import os
 import shutil
 
 from dps import cfg
-from dps.utils import Config, Param
-from dps.utils.tf import (
-    ScopedFunction, tf_mean_sum,
-    build_scheduled_value, MLP, FIXED_COLLECTION,
-)
+from dps.utils import Param
+from dps.utils.tf import ScopedFunction, tf_mean_sum, build_scheduled_value, FIXED_COLLECTION
 
 from auto_yolo.tf_ops import render_sprites
 from auto_yolo.models import core
@@ -95,6 +92,9 @@ class YoloAir_Network(ScopedFunction):
     train_reconstruction = Param(True)
     train_kl = Param(True)
 
+    reconstruction_weight = Param(1.0)
+    kl_weight = Param(1.0)
+
     yx_prior_mean = Param(0.0)
     yx_prior_std = Param(1.0)
 
@@ -107,6 +107,8 @@ class YoloAir_Network(ScopedFunction):
     obj_logit_scale = Param(2.0)
     alpha_logit_scale = Param(0.1)
     alpha_logit_bias = Param(5.0)
+
+    training_wheels = Param(0.0)
 
     sequential_cfg = Param(dict(
         on=False,
@@ -133,6 +135,11 @@ class YoloAir_Network(ScopedFunction):
 
         self.attr_prior_mean = build_scheduled_value(self.attr_prior_mean, "attr_prior_mean")
         self.attr_prior_std = build_scheduled_value(self.attr_prior_std, "attr_prior_std")
+
+        self.training_wheels = build_scheduled_value(self.training_wheels, "training_wheels")
+
+        self.reconstruction_weight = build_scheduled_value(self.reconstruction_weight, "reconstruction_weight")
+        self.kl_weight = build_scheduled_value(self.kl_weight, "kl_weight")
 
         self.anchor_boxes = np.array(self.anchor_boxes)
 
@@ -260,6 +267,8 @@ class YoloAir_Network(ScopedFunction):
         )
 
     def _build_obj(self, obj_logits, is_training, **kwargs):
+        obj_logits = self.training_wheels * tf.stop_gradient(obj_logits) + (1-self.training_wheels) * obj_logits
+
         obj_log_odds = tf.clip_by_value(obj_logits, -10., 10.)
 
         obj_pre_sigmoid = concrete_binary_pre_sigmoid_sample(
@@ -646,6 +655,8 @@ class YoloAir_Network(ScopedFunction):
         count_support = tf.range(self.HWB+1, dtype=tf.float32)
         count_prior_prob = tf.nn.sigmoid(self.count_prior_log_odds)
         count_distribution = (1 - count_prior_prob) * (count_prior_prob ** count_support)
+        normalizer = tf.reduce_sum(count_distribution)
+        count_distribution = count_distribution / normalizer
         count_distribution = tf.tile(count_distribution[None, :], (self.batch_size, 1))
         count_so_far = tf.zeros((self.batch_size, 1), dtype=tf.float32)
 
@@ -757,18 +768,18 @@ class YoloAir_Network(ScopedFunction):
             output = self._tensors['output']
             inp = self._tensors['inp']
             self._tensors['per_pixel_reconstruction_loss'] = core.loss_builders[loss_key](output, inp)
-            losses['reconstruction'] = tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
+            losses['reconstruction'] = self.reconstruction_weight * tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
 
         if self.train_kl:
-            losses['obj_kl'] = tf_mean_sum(self._tensors["obj_kl"])
+            losses['obj_kl'] = self.kl_weight * tf_mean_sum(self._tensors["obj_kl"])
 
             obj = self.program["obj"]
 
-            losses['cell_y_kl'] = tf_mean_sum(obj * self._tensors["cell_y_kl"])
-            losses['cell_x_kl'] = tf_mean_sum(obj * self._tensors["cell_x_kl"])
-            losses['h_kl'] = tf_mean_sum(obj * self._tensors["h_kl"])
-            losses['w_kl'] = tf_mean_sum(obj * self._tensors["w_kl"])
-            losses['attr_kl'] = tf_mean_sum(obj * self._tensors["attr_kl"])
+            losses['cell_y_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["cell_y_kl"])
+            losses['cell_x_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["cell_x_kl"])
+            losses['h_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["h_kl"])
+            losses['w_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["w_kl"])
+            losses['attr_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["attr_kl"])
 
         # --- other evaluation metrics
 
@@ -987,208 +998,3 @@ class YoloAir_RenderHook(object):
             shutil.copyfile(
                 path,
                 os.path.join(os.path.dirname(path), 'latest_stage{:0>4}.pdf'.format(updater.stage_idx)))
-
-
-xkcd_colors = 'viridian,cerulean,vermillion,lavender,celadon,fuchsia,saffron,cinnamon,greyish,vivid blue'.split(',')
-
-
-# env config
-
-env_config = Config(
-    alg_name="yolo_air",
-
-    build_env=core.Env,
-    seed=347405995,
-
-    min_chars=12,
-    max_chars=12,
-    n_patch_examples=0,
-
-    image_shape=(84, 84),
-    max_overlap=49,
-    patch_shape=(14, 14),
-
-    characters=list(range(10)),
-    patch_size_std=0.0,
-    colours="white",
-
-    n_distractors_per_image=0,
-
-    backgrounds="",
-    backgrounds_sample_every=False,
-    background_colours="",
-    background_cfg=dict(mode="none"),
-
-    object_shape=(14, 14),
-
-    xent_loss=True,
-
-    postprocessing="random",
-    n_samples_per_image=4,
-    tile_shape=(42, 42),
-    max_attempts=1000000,
-
-    preserve_env=True,
-
-    n_train=25000,
-    n_val=1e2,
-    n_test=1e2,
-)
-
-
-# model config
-
-
-# This works quite well if it is trained for long enough.
-alg_config = Config(
-    get_updater=core.Updater,
-    build_network=YoloAir_Network,
-
-    lr_schedule=1e-4,
-    batch_size=32,
-
-    optimizer_spec="adam",
-    use_gpu=True,
-    gpu_allow_growth=True,
-    preserve_env=True,
-    stopping_criteria="loss,min",
-    eval_mode="val",
-    threshold=-np.inf,
-    max_grad_norm=1.0,
-    max_experiments=None,
-
-    eval_step=100,
-    display_step=1000,
-    render_step=500,
-
-    max_steps=50000,
-    patience=100000,
-
-    render_hook=YoloAir_RenderHook(),
-
-    # network params
-
-    build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
-    build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
-    build_next_step=core.NextStep,
-    # build_backbone=core.NewBackbone,
-    # max_object_shape=(28, 28),
-    # build_object_decoder=ObjectDecoder,
-    build_backbone=core.Backbone,
-
-    pixels_per_cell=(12, 12),
-
-    kernel_size=(1, 1),
-
-    n_channels=128,
-    n_decoder_channels=128,
-    A=50,
-
-    sequential_cfg=dict(
-        on=True,
-        lookback_shape=(2, 2, 2),
-        build_next_step=lambda scope: MLP([100, 100], scope=scope),
-    ),
-
-    hw_prior_mean=np.log(0.1/0.9),
-    hw_prior_std=1.0,
-    anchor_boxes=[[48, 48]],
-    count_prior_log_odds="Exp(start=10000.0, end=0.2, decay_rate=0.1, decay_steps=200, log=True)",
-    # count_prior_log_odds="Exp(start=10000.0, end=0.000000001, decay_rate=0.1, decay_steps=200, log=True)",
-    use_concrete_kl=False,
-
-    overwrite_plots=False,
-
-    curriculum=[
-        dict(),
-        dict(do_train=False, n_train=16, min_chars=1, postprocessing="", preserve_env=False),
-    ],
-)
-
-config = env_config.copy()
-config.update(alg_config)
-
-big_single_config = config.copy(
-    image_shape=(40, 40),
-    postprocessing="",
-    curriculum=[
-        dict(),
-    ],
-    object_shape=(28, 28),
-    patch_shape=(28, 28),
-    max_overlap=2*196,
-    min_chars=1,
-    max_chars=1,
-    anchor_boxes=[[40, 40]],
-    hw_prior_std=1.0,
-    kernel_size=(3, 3),
-    # hw_prior_mean=10.0,
-
-    # build_backbone=core.NewBackbone,
-    # max_object_shape=(28, 28),
-)
-
-big_double_config = config.copy(
-    image_shape=(48, 48),
-    postprocessing="",
-    curriculum=[
-        dict(),
-    ],
-    object_shape=(28, 28),
-    patch_shape=(28, 28),
-    max_overlap=2*196,
-    min_chars=1,
-    max_chars=2,
-    anchor_boxes=[[40, 40]],
-    kernel_size=(3, 3),
-    alpha_logit_scale=0.25,
-    obj_logit_scale=2.0,
-    count_prior_log_odds="Exp(start=10000.0, end=0.2, decay_rate=0.1, decay_steps=200, log=True)",
-    hw_prior_std=2.0,
-    # hw_prior_mean=10.0,
-
-    build_backbone=core.NewBackbone,
-    max_object_shape=(28, 28),
-)
-
-big_config = config.copy(
-    image_shape=(48, 48),
-    postprocessing="",
-    curriculum=[
-        dict(),
-    ],
-    object_shape=(28, 28),
-    patch_shape=(28, 28),
-    max_overlap=2*196,
-    min_chars=1,
-    max_chars=2,
-    anchor_boxes=[[48, 48]],
-    # fixed_values=dict(alpha=1),
-    hw_prior_std=10.0,
-
-    build_backbone=core.NewBackbone,
-    max_object_shape=(28, 28),
-)
-
-big_colour_config = big_config.copy(
-    colours="red green blue",
-)
-
-colour_config = config.copy(
-    colours="red green blue",
-)
-
-single_digit_config = config.copy(
-    alg_name="yolo_air_single_digit",
-
-    min_chars=1,
-    max_chars=1,
-    image_shape=(24, 24),
-    pixels_per_cell=(12, 12),
-
-    postprocessing="",
-
-    curriculum=[
-        dict()
-    ]
-)

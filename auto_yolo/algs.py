@@ -66,7 +66,7 @@ yolo_rl_config = alg_config.copy(
     n_backbone_features=100,
 
     min_hw=0.0,
-    max_hw=3.0,
+    max_hw=1.0,
 
     box_std=0.0,
     attr_std=0.0,
@@ -141,13 +141,9 @@ air_config = Config(
 
 def yolo_air_prepare_func():
     from dps import cfg
-    if cfg.postprocessing:
-        cfg.anchor_boxes = [cfg.tile_shape]
-    else:
-        cfg.anchor_boxes = [cfg.image_shape]
-
+    cfg.anchor_boxes = [cfg.tile_shape]
     cfg.count_prior_log_odds = (
-        "Exp(start=10000.0, end={}, decay_rate=0.1, "
+        "Exp(start=1000000.0, end={}, decay_rate=0.1, "
         "decay_steps={}, log=True)".format(
             cfg.final_count_prior_log_odds, cfg.count_prior_decay_steps)
     )
@@ -157,7 +153,7 @@ def yolo_air_prepare_func():
 yolo_air_config = alg_config.copy(
     alg_name="yolo_air",
     build_network=yolo_air.YoloAir_Network,
-    prepare_func=yolo_air_prepare_func,
+    stage_prepare_func=yolo_air_prepare_func,
 
     stopping_criteria="mAP,max",
     threshold=1.0,
@@ -168,6 +164,8 @@ yolo_air_config = alg_config.copy(
     build_next_step=core.NextStep,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
+    # build_object_encoder=lambda scope: MLP([100, 100], scope=scope),
+    # build_object_decoder=lambda scope: MLP([100, 100], scope=scope),
 
     pixels_per_cell=(12, 12),
 
@@ -188,18 +186,31 @@ yolo_air_config = alg_config.copy(
     min_yx=-0.5,
     max_yx=1.5,
 
-    hw_prior_mean=np.log(0.1/0.9),
-
     # Found through hyper parameter search
+    hw_prior_mean=np.log(0.1/0.9),
     hw_prior_std=0.5,
     count_prior_decay_steps=1000,
     final_count_prior_log_odds=0.0125,
     kernel_size=1,
 
-    curriculum=[
-        dict(postprocessing="random", tile_shape=(40, 40), n_samples_per_image=4),
-        dict(do_train=False, n_train=16, min_chars=1, preserve_env=False),
-    ],
+    training_wheels="Exp(1.0, 0.0, decay_rate=0.0, decay_steps=200, staircase=True)",
+
+    tile_shape=(48, 48),
+    n_samples_per_image=4,
+    postprocessing="",
+
+    train_kl=True,
+    train_reconstruction=True,
+    noise_schedule="Exp(0.001, 0.0, 1000, 0.1)",
+)
+
+yolo_air_transfer_config = yolo_air_config.copy(
+    min_chars=6, max_chars=10,
+    preserve_env=False,
+    load_path=0,
+    curriculum=(
+        [dict(postprocessing="random")] +
+        [dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False) for n in range(20, 21)]),
 )
 
 
@@ -246,7 +257,7 @@ yolo_math_config = yolo_air_config.copy(
     stopping_criteria="math_accuracy,max",
     threshold=1.0,
 
-    prepare_func=math_prepare_func,
+    stage_prepare_func=math_prepare_func,
     decoder_kind="attn",
 
     build_math_network=yolo_math.SequentialRegressionNetwork,
@@ -254,12 +265,7 @@ yolo_math_config = yolo_air_config.copy(
     build_math_output=lambda scope: MLP([100, 100], scope=scope),
     build_math_input=lambda scope: MLP([100, 100], scope=scope),
 
-    math_weight=5.0,
-    train_kl=True,
-    train_reconstruction=True,
-    noise_schedule="Exp(0.001, 0.0, 1000, 0.1)",
-
-    curriculum=[dict()],
+    math_weight=1.0,
 )
 
 curriculum_2stage = [
@@ -267,11 +273,8 @@ curriculum_2stage = [
         stopping_criteria="loss_reconstruction,min",
         threshold=0.0,
         math_weight=0.0,
-        train_reconstruction=True,
         fixed_weights="math",
         postprocessing="random",
-        tile_shape=(48, 48),
-        n_samples_per_image=4,
     ),
     dict(
         preserve_env=False,
@@ -337,8 +340,7 @@ yolo_xo_continue_config = yolo_xo_config.copy()
 yolo_xo_continue_config.update(curriculum_2stage[1])
 yolo_xo_continue_config.update(
     alg_name="yolo_xo_continue",
-    prepare_func=continue_prepare_func,
-    n_train=1000,
+    stage_prepare_func=continue_prepare_func,
     curriculum=[dict()],
     init_path="/scratch/e2crawfo/dps_data/run_experiments/GOOD_NIPS_2018/"
               "run_search_yolo-xo-init_env=xo_alg=yolo-xo-init_duration=long_seed=0_2018_06_05_09_23_55/experiments"
@@ -371,8 +373,7 @@ yolo_xo_simple_continue_config = yolo_xo_simple_config.copy()
 yolo_xo_simple_continue_config.update(curriculum_simple_2stage[1])
 yolo_xo_simple_continue_config.update(
     alg_name="yolo_xo_simple_continue",
-    prepare_func=continue_prepare_func,
-    n_train=1000,
+    stage_prepare_func=continue_prepare_func,
     curriculum=[dict()],
     init_path="/scratch/e2crawfo/dps_data/run_experiments/GOOD_NIPS_2018/"
               "run_search_yolo-xo-simple-init_env=xo_alg=yolo-xo-simple-init_duration=long_seed=0_2018_06_05_09_25_02/experiments"

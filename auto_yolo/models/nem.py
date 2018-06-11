@@ -1031,7 +1031,6 @@ config = Config(
 
     n_train=1e5,
     n_val=1e2,
-    n_test=1e2,
 
     preserve_env=True,
 

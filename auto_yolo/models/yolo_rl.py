@@ -1212,7 +1212,6 @@ config = Config(
 
     n_train=25000,
     n_val=1e2,
-    n_test=1e2,
 )
 
 
