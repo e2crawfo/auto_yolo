@@ -7,9 +7,7 @@ from auto_yolo import envs
 readme = "xo 2stage experiment"
 
 config = Config()
-# config = Config()
 
-# distributions = dict(n_train=100 * 2 ** np.arange(2))
 distributions = dict(n_train=100 * 2 ** np.arange(8))
 
 durations = dict(

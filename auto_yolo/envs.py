@@ -187,7 +187,7 @@ grid_config = Config(
     xent_loss=True,
 
     postprocessing="",
-    preserve_env=True,
+    preserve_env=False,
 
     n_train=25000,
     n_val=1e2,
