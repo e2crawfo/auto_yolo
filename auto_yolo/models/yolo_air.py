@@ -112,7 +112,7 @@ class YoloAir_Network(ScopedFunction):
 
     sequential_cfg = Param(dict(
         on=False,
-        lookback_shape=(2, 2, 2),
+        n_lookback=1,
     ))
 
     def __init__(self, env, scope=None, **kwargs):
@@ -354,21 +354,26 @@ class YoloAir_Network(ScopedFunction):
 
     def _get_sequential_input(self, program, h, w, b, edge_element):
         inp = []
-        for i in range(self.sequential_cfg.lookback_shape[0]):
-            for j in range(self.sequential_cfg.lookback_shape[1]):
-                for k in range(self.sequential_cfg.lookback_shape[2]):
+        grid_size = 2 * self.sequential_cfg.n_lookback + 1
+        n_grid_locs = int((grid_size**2) / 2)
 
-                    if i == j == k == 0:
-                        continue
+        for idx in range(n_grid_locs):
+            _i = int(idx / grid_size) + h - self.sequential_cfg.n_lookback
+            _j = int(idx % grid_size) + w - self.sequential_cfg.n_lookback
 
-                    _i = h - i
-                    _j = w - j
-                    _k = b - k
+            for k in range(self.B):
+                if _i < 0 or _j < 0 or _i >= program.shape[0] or _j >= program.shape[1]:
+                    inp.append(edge_element)
+                else:
+                    inp.append(program[_i, _j, k])
 
-                    if _i < 0 or _j < 0 or _k < 0:
-                        inp.append(edge_element)
-                    else:
-                        inp.append(program[_i, _j, _k])
+        offset = -(self.B - 1) + b
+        for k in range(self.B-1):
+            _k = k + offset
+            if _k < 0:
+                inp.append(edge_element)
+            else:
+                inp.append(program[h, w, _k])
 
         return tf.concat(inp, axis=1)
 

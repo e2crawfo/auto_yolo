@@ -164,8 +164,6 @@ yolo_air_config = alg_config.copy(
     build_next_step=core.NextStep,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
-    # build_object_encoder=lambda scope: MLP([100, 100], scope=scope),
-    # build_object_decoder=lambda scope: MLP([100, 100], scope=scope),
 
     pixels_per_cell=(12, 12),
 
@@ -175,7 +173,7 @@ yolo_air_config = alg_config.copy(
 
     sequential_cfg=dict(
         on=True,
-        lookback_shape=(2, 2, 2),
+        n_lookback=1,
         build_next_step=lambda scope: MLP([100, 100], scope=scope),
     ),
 
@@ -205,12 +203,13 @@ yolo_air_config = alg_config.copy(
 )
 
 yolo_air_transfer_config = yolo_air_config.copy(
+    alg_name="yolo_air_transfer",
     min_chars=6, max_chars=10,
     preserve_env=False,
     load_path=0,
     curriculum=(
         [dict(postprocessing="random")] +
-        [dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False) for n in range(20, 21)]),
+        [dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False) for n in range(1, 21)]),
 )
 
 

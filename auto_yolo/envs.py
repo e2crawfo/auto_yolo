@@ -50,6 +50,11 @@ def run_experiment(
     _config.update(alg_config)
     alg_name = sanitize(alg_config.alg_name)
 
+    _config.update(config)
+    _config.update_from_command_line()
+
+    _config.env_name = "{}_env={}".format(name, sanitize(env_config.env_name))
+
     if args.duration == "local":
         _config.exp_name = "alg={}".format(alg_name)
         with _config:
@@ -73,11 +78,6 @@ def run_experiment(
 
         run_kwargs.update(durations[args.duration])
         run_kwargs.update_from_command_line()
-
-    _config.update(config)
-    _config.update_from_command_line()
-
-    _config.env_name = "{}_env={}".format(name, sanitize(env_config.env_name))
 
     if name_variables is not None:
         name_variables_str = "_".join(
