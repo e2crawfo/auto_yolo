@@ -200,6 +200,11 @@ yolo_air_config = alg_config.copy(
     train_kl=True,
     train_reconstruction=True,
     noise_schedule="Exp(0.001, 0.0, 1000, 0.1)",
+
+    curriculum=[
+        dict(postprocessing="random"),
+        dict(n_train=32, n_val=200, do_train=False),
+    ]
 )
 
 yolo_air_transfer_config = yolo_air_config.copy(

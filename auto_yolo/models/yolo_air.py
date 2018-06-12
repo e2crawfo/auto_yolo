@@ -849,15 +849,14 @@ class YoloAir_RenderHook(object):
         targets = fetched.get("targets", None)
 
         _, image_height, image_width, _ = images.shape
-        H, W, B = updater.network.H, updater.network.W, updater.network.B
 
-        obj = fetched['obj'].reshape(self.N, H*W*B)
+        obj = fetched['obj'].reshape(self.N, -1)
 
         box = (
             fetched['normalized_box'] *
             [image_height, image_width, image_height, image_width]
         )
-        box = box.reshape(self.N, H*W*B, 4)
+        box = box.reshape(self.N, -1, 4)
 
         n_annotations = fetched.get("n_annotations", [0] * self.N)
         annotations = fetched.get("annotations", None)
