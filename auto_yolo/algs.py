@@ -5,7 +5,9 @@ import copy
 from dps.utils import Config
 from dps.utils.tf import MLP
 
-from auto_yolo.models import core, air, yolo_rl, yolo_air, yolo_math, yolo_xo
+from auto_yolo.models import (
+    core, air, yolo_rl, yolo_air, yolo_math, yolo_xo, baseline
+)
 
 
 alg_config = Config(
@@ -136,6 +138,23 @@ air_config = Config(
     cnn=False,
     cnn_filters=128,
     per_process_gpu_memory_fraction=0.3,
+)
+
+
+yolo_baseline_transfer_config = alg_config.copy(
+    alg_name="yolo_transfer_baseline",
+    build_network=baseline.YoloBaseline_Network,
+    render_hook=baseline.YoloBaseline_RenderHook(),
+    A=50,
+    do_train=False,
+    render_step=1,
+    curriculum=[
+        dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False)
+        for n in range(20, 21)],
+    stopping_criteria="mAP,max",
+    threshold=1.0,
+    build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
+    build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
 )
 
 

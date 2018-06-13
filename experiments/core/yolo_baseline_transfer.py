@@ -2,12 +2,6 @@ from auto_yolo import envs
 
 readme = "redoing yolo_air transfer experiment"
 
-distributions = [
-    dict(min_chars=1, max_chars=5),
-    dict(min_chars=6, max_chars=10),
-    dict(min_chars=11, max_chars=15),
-]
-
 durations = dict(
     long=dict(
         max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="24hours",
@@ -44,7 +38,6 @@ durations = dict(
 )
 
 envs.run_experiment(
-    "yolo_air_transfer", dict(), readme,
-    alg="yolo_air_transfer", task="scatter", durations=durations,
-    distributions=distributions
+    "yolo_baseline_transfer", dict(), readme,
+    alg="yolo_baseline_transfer", task="scatter", durations=durations,
 )
