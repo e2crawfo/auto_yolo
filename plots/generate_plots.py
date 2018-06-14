@@ -25,15 +25,15 @@ def std_dev(ys):
 
 
 def ci95(ys):
-    conf_int = [confidence_interval(_y.values, 0.95) for _y in ys]
-    y = [_y.mean() for _y in ys]
+    conf_int = [confidence_interval(_y, 0.95) for _y in ys]
+    y = ys.mean(axis=1)
     y_lower = y - np.array([ci[0] for ci in conf_int])
     y_upper = np.array([ci[1] for ci in conf_int]) - y
     return y_upper, y_lower
 
 
 def std_err(ys):
-    y_upper = y_lower = [standard_error(_y.values) for _y in ys]
+    y_upper = y_lower = [standard_error(_y) for _y in ys]
     return y_upper, y_lower
 
 
@@ -773,87 +773,226 @@ def plot_core_sample_complexity():
     plt.show()
 
 
-def get_transfer_data(path, x_key, y_key, spread_measure, y_func=None):
+def get_transfer_data(path, x_key, y_key, spread_measure, is_baseline, y_func=None):
     job = HyperSearch(path)
     stage_data = job.extract_stage_data()
 
-    data = []
+    all_data = []
 
     for i, (key, value) in enumerate(sorted(stage_data.items())):
-        _data = {}
+        data = []
 
         for (repeat, seed), (df, sc, md) in value.items():
-            _data[repeat] = df[y_key]
+            data.append(df[y_key])
+        data = np.array(data).T
 
-        df = pd.DataFrame(_data)
+        x = range(1, 21)
+        if not is_baseline:
+            data = data[1:]
+        y = data.mean(axis=1)
+        yu, yl = spread_measures[spread_measure](data)
 
-        x = range(df.shape[0])
-        rows = [row for _, row in df.iterrows()]
-        y = [row.mean() for row in rows]
-        yu, yl = spread_measures[spread_measure](rows)
+        all_data.append(((x, y, yu, yl), key))
 
-        data.append(((x, y, yu, yl), key))
-
-    return data
+    return all_data
 
 
 def plot_core_transfer():
     data_dir = "/media/data/Dropbox/experiment_data/active/nips2018/CEDAR/"
-    path = "core/run_search_transfer_experiment_yolo_air_VS_nips_2018_scatter_white_kind=long_cedar_seed=0_2018_05_14_01_20_52"
-    path = os.path.join(data_dir, path)
+    yolo_path = os.path.join(
+        data_dir, "core/run_search_yolo-air-transfer_env=size=14-in-colour=False-task=scatter_alg=yolo-air-transfer_duration=oak_seed=0_2018_06_11_23_28_04")
+    baseline_path = os.path.join(
+        data_dir, "core/run_search_yolo-baseline-transfer_env=size=14-in-colour=False-task=scatter_alg=yolo-transfer-baseline_duration=oak_seed=0_2018_06_13_08_43_05")
 
-    # ax = plt.gca()
+    # -----
 
-    # data = get_transfer_data(path, "n_train", "count_error", "ci95")
-
-    # for (x, y, *yerr), key in data:
-    #     label = str(tuple(key))
-    #     ax.errorbar(x, y, yerr=yerr, label=label)
-
-    # ax.axhline(y=14/15)
-
-    # ax.set_ylabel('% Count Error', fontsize=12)
-    # ax.set_xlabel('# Digits in Image', fontsize=12)
-    # ax.tick_params(axis='both', labelsize=14)
-    # ax.set_ylim((0.0, 1.0))
-    # ax.set_xticks(range(1, 16))
-
+    plt.figure(figsize=(5, 3.5))
     ax = plt.gca()
 
-    data = get_transfer_data(path, "n_train", "count_1norm", "ci95")
+    measure = "mAP"
 
-    for (x, y, *yerr), key in data:
+    yolo_data = get_transfer_data(yolo_path, "n_train", measure, "ci95", is_baseline=False)
+
+    for (x, y, *yerr), key in yolo_data:
         label = str(tuple(key))
         ax.errorbar(x, y, yerr=yerr, label=label)
 
-    ax.set_ylabel('1-norm', fontsize=12)
+    baseline_data = get_transfer_data(baseline_path, "n_train", measure, "ci95", is_baseline=True)
+
+    for (x, y, *yerr), key in baseline_data:
+        label = str(tuple(key))
+        ax.errorbar(x, y, yerr=yerr, label=label)
+
+    ax.set_ylabel('AP@0.5', fontsize=12)  # Its just AP since we aren't doing multiple classes.
     ax.set_xlabel('# Digits in Image', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
-    ax.set_ylim((0.0, 15.0))
-    ax.set_xticks(range(1, 16))
+    ax.set_ylim((0.0, 1.05))
+    ax.set_xticks([0, 5, 10, 15, 20])
+
+    plt.legend()
+    plt.show()
+
+    # -----
+
+    plt.figure(figsize=(5, 3.5))
+    ax = plt.gca()
+
+    measure = "count_1norm"
+
+    yolo_data = get_transfer_data(yolo_path, "n_train", measure, "ci95", is_baseline=False)
+
+    for (x, y, *yerr), key in yolo_data:
+        label = str(tuple(key))
+        ax.errorbar(x, y, yerr=yerr, label=label)
+
+    baseline_data = get_transfer_data(baseline_path, "n_train", measure, "ci95", is_baseline=True)
+
+    for (x, y, *yerr), key in baseline_data:
+        label = str(tuple(key))
+        ax.errorbar(x, y, yerr=yerr, label=label)
+
+    ax.set_ylabel('|true-count - pred-count|', fontsize=12)
+    ax.set_xlabel('# Digits in Image', fontsize=12)
+    ax.tick_params(axis='both', labelsize=14)
+    ax.set_ylim((0.0, 5.0))
+    ax.set_xticks([0, 5, 10, 15, 20])
+
+    plt.legend()
+    plt.show()
+
+    # -----
+
+    plt.figure(figsize=(5, 3.5))
+    ax = plt.gca()
+
+    measure = "count_error"
+
+    yolo_data = get_transfer_data(yolo_path, "n_train", measure, "ci95", is_baseline=False)
+
+    for (x, y, *yerr), key in yolo_data:
+        label = str(tuple(key))
+        ax.errorbar(x, y, yerr=yerr, label=label)
+
+    baseline_data = get_transfer_data(baseline_path, "n_train", measure, "ci95", is_baseline=True)
+
+    for (x, y, *yerr), key in baseline_data:
+        label = str(tuple(key))
+        ax.errorbar(x, y, yerr=yerr, label=label)
+
+    ax.set_ylabel('int(true-count != pred-count)', fontsize=12)
+    ax.set_xlabel('# Digits in Image', fontsize=12)
+    ax.tick_params(axis='both', labelsize=14)
+    ax.set_ylim((0.0, 1.05))
+    ax.set_xticks([0, 5, 10, 15, 20])
 
     plt.legend()
     plt.show()
 
 
+def get_arithmetic_data(paths, x_key, y_key, stage_idx, spread_measure, y_func=None):
+    data = {}
+    for path in paths:
+        job = HyperSearch(path)
+        stage_data = job.extract_stage_data()
+
+        for i, (key, value) in enumerate(sorted(stage_data.items())):
+            _data = []
+
+            for (repeat, seed), (df, sc, md) in value.items():
+                # Get performance on second stage.
+                _data.append(df[y_key][stage_idx])
+
+            data[key.n_train] = _data
+
+    x = sorted(data)
+    _data = np.array([data[key] for key in x])
+    y = _data.mean(axis=1)
+    yu, yl = spread_measures[spread_measure](_data)
+    return x, y, yu, yl
+
+
 def plot_addition():
-
     data_dir = "/media/data/Dropbox/experiment_data/active/nips2018/CEDAR/"
-    path = "addition/run_search_convolutional_sample_complexity_experiment_yolo_air_math_convolutional_VS_nips_2018_addition_14x14_kind=long_seed=0_2018_05_14_14_36_07"
-    path = os.path.join(data_dir, path)
+    yolo_path = os.path.join(
+        data_dir, "addition/2stage/run_search_sample_complexity_experiment_yolo_air_VS_nips_2018_addition_14x14_kind=long_cedar_seed=0_2018_05_14_03_04_29")
+    yolo_supplement_path = os.path.join(
+        data_dir, "addition/2stage/run_search_supplement_sample_complexity_experiment_yolo_air_VS_nips_2018_addition_14x14_kind=supplement_seed=0_2018_05_14_14_18_26")
+    simple_path = os.path.join(
+        data_dir, "addition/simple/run_search_sample_complexity-size=14_colour=False_task=addition_alg=yolo_math_simple_duration=long_seed=0_2018_05_14_23_59_50")
+    simple_2stage_path = os.path.join(
+        data_dir, "addition/simple_2stage/run_search_sample_complexity-size=14_colour=False_task=addition_alg=yolo_math_simple_2stage_duration=long_seed=0_2018_05_15_12_55_38")
 
+    # -----
+
+    plt.figure(figsize=(5, 3.5))
     ax = plt.gca()
 
-    x, y, *yerr = query_stage_data(path, 0, "n_train", "stopping_criteria", "ci95", lambda error: 1 - error)
+    measure = "math_accuracy"
 
-    label = 'test'
-    ax.errorbar(x, y, yerr=yerr, label=label, ls='--')
+    x, y, *yerr = get_arithmetic_data([yolo_path, yolo_supplement_path], "n_train", measure, 1, "ci95")
+    label = ""
+    ax.errorbar(x, y, yerr=yerr, label=label)
+
+    x, y, *yerr = get_arithmetic_data([simple_path], "n_train", measure, 0, "ci95")
+    label = ""
+    ax.errorbar(x, y, yerr=yerr, label=label)
+
+    x, y, *yerr = get_arithmetic_data([simple_2stage_path], "n_train", measure, 0, "ci95")
+    label = ""
+    ax.errorbar(x, y, yerr=yerr, label=label)
+
+    ax.set_ylabel('Accuracy', fontsize=12)
+    ax.set_xlabel('# Training Samples', fontsize=12)
+    ax.tick_params(axis='both', labelsize=14)
+    ax.set_ylim((0.0, 1.05))
+    ax.set_xticks(x)
+
+    plt.legend()
+    plt.show()
+
+
+def plot_arithmetic():
+    data_dir = "/media/data/Dropbox/experiment_data/active/nips2018/CEDAR/"
+    yolo_path = os.path.join(
+        data_dir, "arithmetic/2stage/run_search_sample_complexity-size=14_colour=False_task=arithmetic_alg=yolo_math_2stage_duration=long_seed=0_2018_05_15_00_32_28")
+    simple_path = os.path.join(
+        data_dir, "arithmetic/simple/run_search_sample_complexity-size=14_colour=False_task=arithmetic_alg=yolo_math_simple_duration=long_seed=0_2018_05_15_00_01_16")
+    simple_2stage_path = os.path.join(
+        data_dir, "arithmetic/simple_2stage/run_search_sample_complexity-size=14_colour=False_task=arithmetic_alg=yolo_math_simple_2stage_duration=long_seed=0_2018_05_15_12_59_19")
+
+    # -----
+
+    plt.figure(figsize=(5, 3.5))
+    ax = plt.gca()
+
+    measure = "math_accuracy"
+
+    x, y, *yerr = get_arithmetic_data([yolo_path], "n_train", measure, 1, "ci95")
+    label = ""
+    ax.errorbar(x, y, yerr=yerr, label=label)
+
+    x, y, *yerr = get_arithmetic_data([simple_path], "n_train", measure, 0, "ci95")
+    label = ""
+    ax.errorbar(x, y, yerr=yerr, label=label)
+
+    x, y, *yerr = get_arithmetic_data([simple_2stage_path], "n_train", measure, 0, "ci95")
+    label = ""
+    ax.errorbar(x, y, yerr=yerr, label=label)
+
+    ax.set_ylabel('Accuracy', fontsize=12)
+    ax.set_xlabel('# Training Samples', fontsize=12)
+    ax.tick_params(axis='both', labelsize=14)
+    ax.set_ylim((0.0, 1.05))
+    ax.set_xticks(x)
+
+    plt.legend()
     plt.show()
 
 
 if __name__ == "__main__":
+    plot_arithmetic()
     # plot_addition()
-    plot_core_transfer()
+    # plot_core_transfer()
     exit()
 
     parser = argparse.ArgumentParser()

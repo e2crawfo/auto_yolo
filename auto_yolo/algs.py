@@ -21,7 +21,7 @@ alg_config = Config(
     gpu_allow_growth=True,
     eval_mode="val",
     max_experiments=None,
-    preserve_env=True,
+    preserve_env=False,
     stopping_criteria="loss,min",
     threshold=-np.inf,
 
@@ -148,13 +148,14 @@ yolo_baseline_transfer_config = alg_config.copy(
     A=50,
     do_train=False,
     render_step=1,
-    curriculum=[
-        dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False)
-        for n in range(20, 21)],
     stopping_criteria="mAP,max",
     threshold=1.0,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
+    preserve_env=False,
+    curriculum=[
+        dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False)
+        for n in range(1, 21)],
 )
 
 
@@ -220,6 +221,8 @@ yolo_air_config = alg_config.copy(
     train_reconstruction=True,
     noise_schedule="Exp(0.001, 0.0, 1000, 0.1)",
 
+    preserve_env=True,
+
     curriculum=[
         dict(postprocessing="random"),
         dict(n_train=32, n_val=200, do_train=False),
@@ -234,6 +237,20 @@ yolo_air_transfer_config = yolo_air_config.copy(
     curriculum=(
         [dict(postprocessing="random")] +
         [dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False) for n in range(1, 21)]),
+)
+
+yolo_air_progression_config = yolo_air_config.copy(
+    load_path=-1,
+    preserve_env=False,
+    postprocessing="random",
+    curriculum=[
+        dict(train_example_range=(0.0, 0.0001),
+             val_example_range=(0.0, 0.0001)),
+        dict(train_example_range=(0.0, 0.1),
+             val_example_range=(0.0, 0.1)),
+        dict(train_example_range=(0.0, 0.9),
+             val_example_range=(0.9, 1.0)),
+    ]
 )
 
 
@@ -281,7 +298,7 @@ yolo_math_config = yolo_air_config.copy(
     threshold=1.0,
 
     stage_prepare_func=math_prepare_func,
-    decoder_kind="attn",
+    decoder_kind="seq",
 
     build_math_network=yolo_math.SequentialRegressionNetwork,
     build_math_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(128),
@@ -297,7 +314,6 @@ curriculum_2stage = [
         threshold=0.0,
         math_weight=0.0,
         fixed_weights="math",
-        postprocessing="random",
     ),
     dict(
         preserve_env=False,
@@ -309,9 +325,12 @@ curriculum_2stage = [
     )
 ]
 
+curriculum_simple_2stage = copy.deepcopy(curriculum_2stage)
+curriculum_simple_2stage[0]['postprocessing'] = ""
+
 yolo_math_2stage_config = yolo_math_config.copy(
     alg_name="yolo_math_2stage",
-    curriculum=curriculum_2stage,
+    curriculum=curriculum_simple_2stage,
 )
 
 # --- SIMPLE_MATH ---
@@ -326,9 +345,6 @@ yolo_math_simple_config = yolo_math_config.copy(
     train_kl=False,
     variational=False,
 )
-
-curriculum_simple_2stage = copy.deepcopy(curriculum_2stage)
-curriculum_simple_2stage[0]['postprocessing'] = ""
 
 yolo_math_simple_2stage_config = yolo_math_simple_config.copy(
     alg_name="simple_math_2stage",

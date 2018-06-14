@@ -268,6 +268,12 @@ def mAP(_tensors, updater):
     width = network.image_width * width
     right = left + width
 
+    obj = obj.reshape(batch_size, -1)
+    top = top.reshape(batch_size, -1)
+    bottom = bottom.reshape(batch_size, -1)
+    left = left.reshape(batch_size, -1)
+    right = right.reshape(batch_size, -1)
+
     ground_truth_boxes = []
     predicted_boxes = []
 
@@ -277,18 +283,17 @@ def mAP(_tensors, updater):
 
         _predicted_boxes = []
 
-        for i in range(network.H):
-            for j in range(network.W):
-                for b in range(network.B):
-                    o = obj[idx, i, j, b, 0]
+        for i in range(obj.shape[1]):
+            o = obj[idx, i]
 
-                    if o > 0.0:
-                        _predicted_boxes.append(
-                            [0, o,
-                             top[idx, i, j, b, 0],
-                             bottom[idx, i, j, b, 0],
-                             left[idx, i, j, b, 0],
-                             right[idx, i, j, b, 0]])
+            if o > 0.0:
+                _predicted_boxes.append(
+                    [0, o,
+                     top[idx, i],
+                     bottom[idx, i],
+                     left[idx, i],
+                     right[idx, i]]
+                )
 
         predicted_boxes.append(_predicted_boxes)
 

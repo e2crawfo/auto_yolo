@@ -138,8 +138,10 @@ class AttentionRegressionNetwork(FullyConvolutional):
         output = super(AttentionRegressionNetwork, self)._call(inp, output_size, is_training)
         output = tf.reshape(output, (batch_size, output.shape[1] * output.shape[2], output.shape[3]))
 
-        attention = tf.nn.softmax(output[:, :, 3:], axis=1)
-        weighted_output = output[:, :, :3] * attention
+        logits, attention = tf.split(output, [output_size, 1], axis=2)
+
+        attention = tf.nn.softmax(attention, axis=1)
+        weighted_output = logits * attention
 
         return tf.reduce_sum(weighted_output, axis=1)
 

@@ -76,7 +76,7 @@ class YoloBaseline_Network(ScopedFunction):
             self.reconstruction_weight, "reconstruction_weight")
         self.kl_weight = build_scheduled_value(self.kl_weight, "kl_weight")
 
-        self.eval_funcs = dict()  # mAP=core.mAP)
+        self.eval_funcs = dict(mAP=core.mAP)
 
         self.object_encoder = None
         self.object_decoder = None
@@ -244,6 +244,7 @@ class YoloBaseline_Network(ScopedFunction):
         obj = tf.to_float(obj[:, :, None])
 
         self.program = dict(obj=obj)
+        self._tensors["program"] = self.program
 
         self._tensors["normalized_box"] = tf.gather(object_bboxes, routing, axis=0)
         self._tensors["obj"] = obj

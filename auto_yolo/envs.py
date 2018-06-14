@@ -19,22 +19,13 @@ def sanitize(s):
 
 def run_experiment(
         name, config, readme, distributions=None, durations=None,
-        alg=None, task="grid", name_variables=None):
+        alg=None, task="grid", name_variables=None, env_kwargs=None):
 
     name = sanitize(name)
     durations = durations or {}
 
     parser = argparse.ArgumentParser()
     parser.add_argument("duration", choices=list(durations.keys()) + ["local"])
-
-    parser.add_argument('--alg', default=alg,
-                        help="Name (or unique name-prefix) of algorithm to run. Optional. "
-                             "If not provided, algorithm spec is assumed to be included "
-                             "in the environment spec.")
-    parser.add_argument("--size", choices="14 21".split(), default=14)
-    parser.add_argument("--in-colour", action="store_true")
-    parser.add_argument("--task", choices="grid scatter arithmetic xo".split(), default=task)
-    parser.add_argument("--ops", choices="addition all".split(), default="addition")
     parser.add_argument('--pdb', action='store_true',
                         help="If supplied, enter post-mortem debugging on error.")
 
@@ -42,11 +33,13 @@ def run_experiment(
 
     _config = DEFAULT_CONFIG.copy()
 
-    env_kwargs = vars(args).copy()
+    env_kwargs = env_kwargs or {}
+
+    env_kwargs['task'] = task
     env_config = get_env_config(**env_kwargs)
     _config.update(env_config)
 
-    alg_config = getattr(alg_module, "{}_config".format(args.alg))
+    alg_config = getattr(alg_module, "{}_config".format(alg))
     _config.update(alg_config)
     alg_name = sanitize(alg_config.alg_name)
 
@@ -96,11 +89,11 @@ class Nips2018Grid(object):
         train_seed, val_seed = 0, 1
         train = GridEmnistObjectDetectionDataset(
             n_examples=int(cfg.n_train), shuffle=True,
-            example_range=(0.0, 0.9), seed=train_seed)
+            example_range=cfg.train_example_range, seed=train_seed)
 
         val = GridEmnistObjectDetectionDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            example_range=(0.9, 1.), seed=val_seed)
+            example_range=cfg.val_example_range, seed=val_seed)
 
         self.datasets = dict(train=train, val=val)
 
@@ -113,11 +106,11 @@ class Nips2018Scatter(object):
         train_seed, val_seed = 0, 1
         train = EmnistObjectDetectionDataset(
             n_examples=int(cfg.n_train), shuffle=True,
-            example_range=(0.0, 0.9), seed=train_seed)
+            example_range=cfg.train_example_range, seed=train_seed)
 
         val = EmnistObjectDetectionDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            example_range=(0.9, 1.), seed=val_seed)
+            example_range=cfg.val_example_range, seed=val_seed)
 
         self.datasets = dict(train=train, val=val)
 
@@ -131,11 +124,11 @@ class Nips2018Arithmetic(object):
 
         train = VisualArithmeticDataset(
             n_examples=int(cfg.n_train), shuffle=True,
-            example_range=(0.0, 0.9), seed=train_seed)
+            example_range=cfg.train_example_range, seed=train_seed)
 
         val = VisualArithmeticDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            example_range=(0.9, 1.), seed=val_seed)
+            example_range=cfg.val_example_range, seed=val_seed)
 
         self.datasets = dict(train=train, val=val)
 
@@ -157,7 +150,13 @@ class Nips2018XO(object):
         pass
 
 
-grid_config = Config(
+env_config = Config(
+    train_example_range=(0.0, 0.9),
+    val_example_range=(0.9, 1.0),
+)
+
+
+grid_config = env_config.copy(
     env_name="nips_2018_grid",
     build_env=Nips2018Grid,
 
@@ -203,7 +202,6 @@ grid_config = Config(
 
 air_testing_config = grid_config.copy(
     env_name="nips_2018_air_testing",
-    postprocessing="",
     max_time_steps=4,
     max_chars=4,
     min_chars=4,
@@ -215,9 +213,9 @@ air_testing_config = grid_config.copy(
 )
 
 
-def get_env_config(task, size, in_colour, ops, **_):
+def get_env_config(task, size=14, in_colour=False, ops="addition", **_):
     if task == "xo":
-        return Config(
+        return env_config.copy(
             env_name="xo",
             build_env=Nips2018XO,
             one_hot=True,
@@ -264,14 +262,12 @@ def get_env_config(task, size, in_colour, ops, **_):
             max_overlap=14*14/2,
             min_chars=15,
             max_chars=15,
-            tile_shape=(48, 48),
         )
     elif size == 21:
         config.update(
             max_overlap=21*21/2,
             min_chars=12,
             max_chars=12,
-            tile_shape=(48, 48),
             patch_size_std=0.05,
         )
     else:
@@ -285,12 +281,11 @@ def get_env_config(task, size, in_colour, ops, **_):
             build_env=Nips2018Arithmetic,
             min_digits=1,
             max_digits=11,
+            image_shape=(48, 48),
 
             largest_digit=99,
             one_hot=True,
             reductions="sum" if ops == "addition" else "A:sum,N:min,X:max,C:len",
-
-            postprocessing="",
         )
     else:
         raise Exception("Unknown task `{}`".format(task))
