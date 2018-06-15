@@ -133,6 +133,8 @@ class AttentionRegressionNetwork(FullyConvolutional):
         super(AttentionRegressionNetwork, self).__init__(layout, check_output_shape=False, **kwargs)
 
     def _call(self, inp, output_size, is_training):
+        self.layout[-1]['filters'] = output_size + 1
+
         batch_size = tf.shape(inp)[0]
         inp = tf.reshape(inp, (batch_size, *inp.shape[1:3], inp.shape[3] * inp.shape[4]))
         output = super(AttentionRegressionNetwork, self)._call(inp, output_size, is_training)
@@ -144,6 +146,58 @@ class AttentionRegressionNetwork(FullyConvolutional):
         weighted_output = logits * attention
 
         return tf.reduce_sum(weighted_output, axis=1)
+
+
+class AverageRegressionNetwork(FullyConvolutional):
+    """ Run a conv-net and then global mean pooling. """
+    ar_n_filters = Param(128)
+
+    def __init__(self, **kwargs):
+        layout = [
+            dict(filters=self.ar_n_filters, kernel_size=3, padding="SAME", strides=1),
+            dict(filters=self.ar_n_filters, kernel_size=3, padding="SAME", strides=1),
+            dict(filters=4, kernel_size=1, padding="SAME", strides=1),
+        ]
+        super(AttentionRegressionNetwork, self).__init__(layout, check_output_shape=False, **kwargs)
+
+    def _call(self, inp, output_size, is_training):
+        self.layout[-1]['filters'] = output_size
+
+        batch_size = tf.shape(inp)[0]
+        inp = tf.reshape(inp, (batch_size, *inp.shape[1:3], inp.shape[3] * inp.shape[4]))
+        output = super(AttentionRegressionNetwork, self)._call(inp, output_size, is_training)
+        return tf.reduce_mean(output, axis=(1, 2))
+
+
+class RelationNetwork(ScopedFunction):
+    f = None
+    g = None
+
+    f_dim = Param(100)
+
+    def _call(self, inp, output_size, is_training):
+        batch_size = tf.shape(inp)[0]
+        n_objects = inp.shape[1] * inp.shape[2] * inp.shape[3]
+        obj_dim = inp.shape[4]
+        inp = tf.reshape(inp, (batch_size, n_objects, obj_dim))
+
+        if self.f is None:
+            self.f = cfg.build_relation_network_f(scope="relation_network_f")
+
+        if self.g is None:
+            self.g = cfg.build_relation_network_g(scope="relation_network_g")
+
+        f_inputs = []
+        for i in range(n_objects):
+            for j in range(n_objects):
+                f_inputs.append(tf.concat([inp[:, i, :], inp[:, j, :]], axis=1))
+        f_inputs = tf.concat(f_inputs, axis=0)
+
+        f_output = self.f(f_inputs, self.f_dim, is_training)
+        f_output = tf.split(f_output, n_objects**2, axis=0)
+
+        g_input = tf.concat(f_output, axis=1)
+        return self.g(g_input, output_size, is_training)
 
 
 class YoloAir_MathNetwork(yolo_air.YoloAir_Network):

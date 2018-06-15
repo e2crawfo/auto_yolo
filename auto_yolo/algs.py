@@ -335,7 +335,7 @@ yolo_math_2stage_config = yolo_math_config.copy(
 
 # --- SIMPLE_MATH ---
 
-yolo_math_simple_config = yolo_math_config.copy(
+simple_math_config = yolo_math_config.copy(
     alg_name="simple_math",
     build_network=yolo_math.SimpleMathNetwork,
     render_hook=yolo_math.SimpleMath_RenderHook(),
@@ -346,7 +346,7 @@ yolo_math_simple_config = yolo_math_config.copy(
     variational=False,
 )
 
-yolo_math_simple_2stage_config = yolo_math_simple_config.copy(
+simple_math_2stage_config = simple_math_config.copy(
     alg_name="simple_math_2stage",
     curriculum=curriculum_simple_2stage,
 )
@@ -387,31 +387,31 @@ yolo_xo_continue_config.update(
 
 # --- SIMPLE_XO ---
 
-yolo_xo_simple_config = yolo_math_simple_config.copy(
+simple_xo_config = simple_math_config.copy(
     alg_name="simple_xo",
     build_network=yolo_xo.SimpleXONetwork,
     build_math_network=yolo_math.AttentionRegressionNetwork,
 )
 
-yolo_xo_simple_2stage_config = yolo_xo_simple_config.copy(
+simple_xo_2stage_config = simple_xo_config.copy(
     alg_name="simple_xo_2stage",
     curriculum=curriculum_simple_2stage
 )
 
-yolo_xo_simple_init_config = yolo_xo_simple_config.copy()
-yolo_xo_simple_init_config.update(curriculum_simple_2stage[0])
-yolo_xo_simple_init_config.update(
-    alg_name="yolo_xo_simple_init",
+simple_xo_init_config = simple_xo_config.copy()
+simple_xo_init_config.update(curriculum_simple_2stage[0])
+simple_xo_init_config.update(
+    alg_name="simple_xo_init",
     keep_prob=0.25,
     balanced=False,
     n_train=60000,
     curriculum=[dict()],
 )
 
-yolo_xo_simple_continue_config = yolo_xo_simple_config.copy()
-yolo_xo_simple_continue_config.update(curriculum_simple_2stage[1])
-yolo_xo_simple_continue_config.update(
-    alg_name="yolo_xo_simple_continue",
+simple_xo_continue_config = simple_xo_config.copy()
+simple_xo_continue_config.update(curriculum_simple_2stage[1])
+simple_xo_continue_config.update(
+    alg_name="simple_xo_continue",
     stage_prepare_func=continue_prepare_func,
     curriculum=[dict()],
     init_path="/scratch/e2crawfo/dps_data/run_experiments/GOOD_NIPS_2018/"

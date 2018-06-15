@@ -4,13 +4,14 @@ from dps.utils import Config
 
 from auto_yolo import envs
 
-readme = "xo pretrained representation experiment: training the decoders, assuming the representation has been trained. using simple rather than yolo encoder/decoder"
+readme = ("xo pretrained representation experiment: training the decoders, assuming the "
+          "representation has been trained. using simple rather than yolo encoder/decoder")
 
 config = Config()
 distributions = dict(n_train=100 * 2 ** np.arange(8))
 
 envs.run_experiment(
-    "yolo_xo_simple_continue", config, readme, alg="yolo_xo_simple_continue", task="xo",
+    "simple_xo_continue", config, readme, alg="simple_xo_continue", task="xo",
     name_variables="decoder_kind", distributions=distributions,
     durations=dict(
         long=dict(

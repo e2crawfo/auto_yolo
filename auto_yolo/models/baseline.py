@@ -301,6 +301,82 @@ class YoloBaseline_Network(ScopedFunction):
         )
 
 
+class YoloBaseline_MathNetwork(YoloBaseline_Network):
+    math_weight = Param()
+    largest_digit = Param()
+
+    math_input_network = None
+    math_network = None
+
+    @property
+    def n_classes(self):
+        return self.largest_digit + 1
+
+    def build_math_representation(self, math_attr):
+        # Use raw_obj so that there is no discrepancy between validation and train
+        return self._tensors["raw_obj"] * math_attr
+
+    def build_graph(self, *args, **kwargs):
+        with tf.variable_scope("reconstruction", reuse=self.initialized):
+            result = super(YoloBaseline_MathNetwork, self).build_graph(*args, **kwargs)
+
+        if self.math_input_network is None:
+            self.math_input_network = cfg.build_math_input(scope="math_input_network")
+
+            if "math" in self.fixed_weights:
+                self.math_input_network.fix_variables()
+
+        attr = tf.reshape(self.program['attr'], (self.batch_size * self.HWB, self.A))
+        math_attr = self.math_input_network(attr, self.A, self.is_training)
+        math_attr = tf.reshape(math_attr, (self.batch_size, self.H, self.W, self.B, self.A))
+        self._tensors["math_attr"] = math_attr
+
+        _inp = self.build_math_representation(math_attr)
+
+        if self.math_network is None:
+            self.math_network = cfg.build_math_network(scope="math_network")
+
+            if "math" in self.fixed_weights:
+                self.math_network.fix_variables()
+
+        logits = self.math_network(_inp, self.n_classes, self.is_training)
+
+        if self.math_weight is not None:
+            result["recorded_tensors"]["raw_loss_math"] = tf.reduce_mean(
+                tf.nn.softmax_cross_entropy_with_logits_v2(
+                    labels=self._tensors["targets"],
+                    logits=logits
+                )
+            )
+
+            result["losses"]["math"] = self.math_weight * result["recorded_tensors"]["raw_loss_math"]
+
+        self._tensors["prediction"] = tf.nn.softmax(logits)
+
+        result["recorded_tensors"]["math_accuracy"] = tf.reduce_mean(
+            tf.to_float(
+                tf.equal(
+                    tf.argmax(logits, axis=1),
+                    tf.argmax(self._tensors['targets'], axis=1)
+                )
+            )
+        )
+
+        result["recorded_tensors"]["math_1norm"] = tf.reduce_mean(
+            tf.to_float(
+                tf.abs(tf.argmax(logits, axis=1) - tf.argmax(self._tensors['targets'], axis=1))
+            )
+        )
+
+        result["recorded_tensors"]["math_correct_prob"] = tf.reduce_mean(
+            tf.reduce_sum(tf.nn.softmax(logits) * self._tensors['targets'], axis=1)
+        )
+
+        return result
+
+
+
+
 class YoloBaseline_RenderHook(yolo_air.YoloAir_RenderHook):
     def _plot_patches(self, updater, fetched, N):
         # Create a plot showing what each object is generating
