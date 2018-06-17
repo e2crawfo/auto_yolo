@@ -91,6 +91,7 @@ class YoloAir_Network(ScopedFunction):
 
     train_reconstruction = Param(True)
     train_kl = Param(True)
+    noisy = Param(True)
 
     reconstruction_weight = Param(1.0)
     kl_weight = Param(1.0)
@@ -140,6 +141,9 @@ class YoloAir_Network(ScopedFunction):
 
         self.reconstruction_weight = build_scheduled_value(self.reconstruction_weight, "reconstruction_weight")
         self.kl_weight = build_scheduled_value(self.kl_weight, "kl_weight")
+
+        if not self.noisy and self.train_kl:
+            raise Exception("If `noisy` is False, `train_kl` must also be False.")
 
         self.anchor_boxes = np.array(self.anchor_boxes)
 
@@ -206,7 +210,10 @@ class YoloAir_Network(ScopedFunction):
 
     def _build_box(self, box_params, is_training):
         mean, log_std = tf.split(box_params, 2, axis=-1)
-        std = tf.exp(log_std)
+        if self.noisy:
+            std = self.float_is_training * tf.exp(log_std) + (1-self.float_is_training) * tf.zeros_like(log_std)
+        else:
+            std = tf.zeros_like(log_std)
 
         cy_mean, cx_mean, h_mean, w_mean = tf.split(mean, 4, axis=-1)
         cy_std, cx_std, h_std, w_std = tf.split(std, 4, axis=-1)
@@ -262,6 +269,16 @@ class YoloAir_Network(ScopedFunction):
             h_kl=h_kl,
             w_kl=w_kl,
 
+            cell_y_mean=cy_mean,
+            cell_x_mean=cx_mean,
+            h_mean=h_mean,
+            w_mean=w_mean,
+
+            cell_y_std=cy_std,
+            cell_x_std=cx_std,
+            h_std=h_std,
+            w_std=w_std,
+
             kl=box_kl,
             program=box,
         )
@@ -275,10 +292,14 @@ class YoloAir_Network(ScopedFunction):
             obj_log_odds, self.obj_temperature
         )
         raw_obj = tf.nn.sigmoid(obj_pre_sigmoid)
-        obj = (
-            self.float_is_training * raw_obj +
-            (1 - self.float_is_training) * tf.round(raw_obj)
-        )
+
+        if self.noisy:
+            obj = (
+                self.float_is_training * raw_obj +
+                (1 - self.float_is_training) * tf.round(raw_obj)
+            )
+        else:
+            obj = tf.round(raw_obj)
 
         if "obj" in self.no_gradient:
             obj = tf.stop_gradient(obj)
@@ -554,6 +575,8 @@ class YoloAir_Network(ScopedFunction):
             attr = tf.stop_gradient(attr)
             attr_kl = tf.stop_gradient(attr_kl)
 
+        self._tensors["attr_mean"] = attr_mean
+        self._tensors["attr_std"] = attr_std
         self._tensors["attr"] = attr
         self.program["attr"] = attr
         self._tensors["attr_kl"] = attr_kl
@@ -743,6 +766,11 @@ class YoloAir_Network(ScopedFunction):
         recorded_tensors['w'] = tf.reduce_mean(self._tensors["w"])
         recorded_tensors['area'] = tf.reduce_mean(self._tensors["area"])
 
+        recorded_tensors['cell_y_std'] = tf.reduce_mean(self._tensors["cell_y_std"])
+        recorded_tensors['cell_x_std'] = tf.reduce_mean(self._tensors["cell_x_std"])
+        recorded_tensors['h_std'] = tf.reduce_mean(self._tensors["h_std"])
+        recorded_tensors['w_std'] = tf.reduce_mean(self._tensors["w_std"])
+
         obj = self._tensors["program"]["obj"]
         pred_n_objects = self._tensors["pred_n_objects"]
 
@@ -773,7 +801,10 @@ class YoloAir_Network(ScopedFunction):
             output = self._tensors['output']
             inp = self._tensors['inp']
             self._tensors['per_pixel_reconstruction_loss'] = core.loss_builders[loss_key](output, inp)
-            losses['reconstruction'] = self.reconstruction_weight * tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
+            losses['reconstruction'] = (
+                self.reconstruction_weight *
+                tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
+            )
 
         if self.train_kl:
             losses['obj_kl'] = self.kl_weight * tf_mean_sum(self._tensors["obj_kl"])

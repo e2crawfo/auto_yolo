@@ -105,6 +105,57 @@ class YoloBaseline_Network(ScopedFunction):
     def float_is_training(self):
         return self._tensors["float_is_training"]
 
+    def _build_program_generator(self):
+        assert len(self.inp.shape) == 4
+        mask = tf.reduce_sum(tf.abs(self.inp - self.background), axis=3) >= 1e-3
+        components = tf.contrib.image.connected_components(mask)
+
+        total_n_objects = tf.to_int32(tf.reduce_max(components))
+        indices = tf.range(1, total_n_objects+1)
+
+        maxs = tf.reduce_max(components, axis=(1, 2))
+
+        # So that we don't pick up zeros.
+        for_mins = tf.where(mask, components, (total_n_objects + 1) * tf.ones_like(components))
+        mins = tf.reduce_min(for_mins, axis=(1, 2))
+
+        n_objects = tf.to_int32(tf.maximum((maxs - mins) + 1, 0))
+
+        under = indices[None, :] <= maxs[:, None]
+        over = indices[None, :] >= mins[:, None]
+
+        both = tf.to_int32(tf.logical_and(under, over))
+        batch_indices_for_objects = tf.argmax(both, axis=0)
+
+        assert_valid_batch_indices = tf.Assert(
+            tf.reduce_all(tf.equal(tf.reduce_sum(both, axis=0), 1)), [both], name="assert_valid_batch_indices")
+
+        with tf.control_dependencies([assert_valid_batch_indices]):
+            batch_indices_for_objects = tf.identity(batch_indices_for_objects)
+
+        cell = BboxCell(components, batch_indices_for_objects, self.image_height, self.image_width)
+
+        object_bboxes, _ = dynamic_rnn(
+            cell, indices[:, None, None], initial_state=cell.zero_state(1, tf.float32),
+            parallel_iterations=1, swap_memory=False, time_major=True)
+
+        # Get rid of dummy batch dim created for dynamic_rnn
+        object_bboxes = object_bboxes[:, 0, :]
+
+        obj = tf.sequence_mask(n_objects)
+        routing = tf.reshape(tf.to_int32(obj), (-1,))
+        routing = tf.cumsum(routing, exclusive=True)
+        routing = tf.reshape(routing, tf.shape(obj))
+        obj = tf.to_float(obj[:, :, None])
+
+        self.program = dict(obj=obj)
+        self._tensors["program"] = self.program
+
+        self._tensors["normalized_box"] = tf.gather(object_bboxes, routing, axis=0)
+        self._tensors["obj"] = obj
+        self._tensors["n_objects"] = n_objects
+        self._tensors["max_objects"] = tf.reduce_max(n_objects)
+
     def _build_program_interpreter(self):
         # --- Get object attributes using object encoder ---
 
@@ -204,52 +255,8 @@ class YoloBaseline_Network(ScopedFunction):
         self._process_labels(labels)
 
         # --- build graph ---
-        assert len(inp.shape) == 4
-        mask = tf.reduce_sum(tf.abs(inp - background), axis=3) >= 1e-3
-        components = tf.contrib.image.connected_components(mask)
 
-        total_n_objects = tf.to_int32(tf.reduce_max(components))
-        indices = tf.range(1, total_n_objects+1)
-
-        maxs = tf.reduce_max(components, axis=(1, 2))
-        for_mins = tf.where(mask, components, (total_n_objects + 1) * tf.ones_like(components))  # So that we don't pick up zeros.
-        mins = tf.reduce_min(for_mins, axis=(1, 2))
-        n_objects = tf.to_int32(tf.maximum((maxs - mins) + 1, 0))
-
-        under = indices[None, :] <= maxs[:, None]
-        over = indices[None, :] >= mins[:, None]
-
-        both = tf.to_int32(tf.logical_and(under, over))
-        batch_indices_for_objects = tf.argmax(both, axis=0)
-
-        assert_valid_batch_indices = tf.Assert(
-            tf.reduce_all(tf.equal(tf.reduce_sum(both, axis=0), 1)), [both], name="assert_valid_batch_indices")
-
-        with tf.control_dependencies([assert_valid_batch_indices]):
-            batch_indices_for_objects = tf.identity(batch_indices_for_objects)
-
-        cell = BboxCell(components, batch_indices_for_objects, self.image_height, self.image_width)
-
-        object_bboxes, _ = dynamic_rnn(
-            cell, indices[:, None, None], initial_state=cell.zero_state(1, tf.float32),
-            parallel_iterations=1, swap_memory=False, time_major=True)
-
-        # Get rid of dummy batch dim created for dynamic_rnn
-        object_bboxes = object_bboxes[:, 0, :]
-
-        obj = tf.sequence_mask(n_objects)
-        routing = tf.reshape(tf.to_int32(obj), (-1,))
-        routing = tf.cumsum(routing, exclusive=True)
-        routing = tf.reshape(routing, tf.shape(obj))
-        obj = tf.to_float(obj[:, :, None])
-
-        self.program = dict(obj=obj)
-        self._tensors["program"] = self.program
-
-        self._tensors["normalized_box"] = tf.gather(object_bboxes, routing, axis=0)
-        self._tensors["obj"] = obj
-        self._tensors["n_objects"] = n_objects
-        self._tensors["max_objects"] = tf.reduce_max(n_objects)
+        self._build_program_generator()
 
         if self.object_encoder is None:
             self.object_encoder = cfg.build_object_encoder(scope="object_encoder")
@@ -268,7 +275,7 @@ class YoloBaseline_Network(ScopedFunction):
         recorded_tensors = dict(
             batch_size=tf.to_float(self.batch_size),
             float_is_training=self.float_is_training,
-            n_objects=tf.reduce_mean(n_objects),
+            n_objects=tf.reduce_mean(self._tensors["n_objects"]),
             attr=tf.reduce_mean(self._tensors["attr"])
         )
 
@@ -279,10 +286,15 @@ class YoloBaseline_Network(ScopedFunction):
         if self.train_reconstruction:
             loss_key = 'xent' if self.xent_loss else 'squared'
 
+            obj = self._tensors["obj"]
+
             output = obj[:, :, :, None, None] * self._tensors["objects"]
             inp = obj[:, :, :, None, None] * self._tensors["input_glimpses"]
             self._tensors['per_pixel_reconstruction_loss'] = core.loss_builders[loss_key](output, inp)
-            losses['reconstruction'] = self.reconstruction_weight * tf.reduce_sum(self._tensors['per_pixel_reconstruction_loss'])
+            losses['reconstruction'] = (
+                self.reconstruction_weight *
+                tf.reduce_sum(self._tensors['per_pixel_reconstruction_loss'])
+            )
 
         if self.train_kl:
             losses['attr_kl'] = self.kl_weight * tf.reduce_sum(obj * self._tensors["attr_kl"])
@@ -373,8 +385,6 @@ class YoloBaseline_MathNetwork(YoloBaseline_Network):
         )
 
         return result
-
-
 
 
 class YoloBaseline_RenderHook(yolo_air.YoloAir_RenderHook):

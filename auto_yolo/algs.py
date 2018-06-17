@@ -26,7 +26,7 @@ alg_config = Config(
     threshold=-np.inf,
 
     max_steps=10000000,
-    patience=5000,
+    patience=50000,
     render_step=10000,
     eval_step=1000,
     display_step=1000,
@@ -173,7 +173,7 @@ def yolo_air_prepare_func():
 yolo_air_config = alg_config.copy(
     alg_name="yolo_air",
     build_network=yolo_air.YoloAir_Network,
-    stage_prepare_func=yolo_air_prepare_func,
+    prepare_func=yolo_air_prepare_func,
 
     stopping_criteria="mAP,max",
     threshold=1.0,
@@ -297,7 +297,7 @@ yolo_math_config = yolo_air_config.copy(
     stopping_criteria="math_accuracy,max",
     threshold=1.0,
 
-    stage_prepare_func=math_prepare_func,
+    prepare_func=math_prepare_func,
     decoder_kind="seq",
 
     build_math_network=yolo_math.SequentialRegressionNetwork,
@@ -320,17 +320,15 @@ curriculum_2stage = [
         math_weight=1.0,
         train_reconstruction=False,
         train_kl=False,
+        noisy=False,
         fixed_weights="encoder decoder object_encoder object_decoder box obj backbone edge",
         load_path={"network/reconstruction": -1},
     )
 ]
 
-curriculum_simple_2stage = copy.deepcopy(curriculum_2stage)
-curriculum_simple_2stage[0]['postprocessing'] = ""
-
 yolo_math_2stage_config = yolo_math_config.copy(
     alg_name="yolo_math_2stage",
-    curriculum=curriculum_simple_2stage,
+    curriculum=curriculum_2stage,
 )
 
 # --- SIMPLE_MATH ---
@@ -343,12 +341,12 @@ simple_math_config = yolo_math_config.copy(
     build_math_decoder=core.InverseBackbone,
     train_reconstruction=False,
     train_kl=False,
-    variational=False,
+    noisy=False,
 )
 
 simple_math_2stage_config = simple_math_config.copy(
     alg_name="simple_math_2stage",
-    curriculum=curriculum_simple_2stage,
+    curriculum=curriculum_2stage,
 )
 
 # --- XO ---
@@ -360,13 +358,16 @@ yolo_xo_config = yolo_math_config.copy(
     balanced=True,
 )
 
+curriculum_xo_2stage = copy.deepcopy(curriculum_2stage)
+curriculum_xo_2stage[0]['postprocessing'] = "random"
+
 yolo_xo_2stage_config = yolo_xo_config.copy(
     alg_name="yolo_xo_2stage",
-    curriculum=curriculum_2stage,
+    curriculum=curriculum_xo_2stage,
 )
 
 yolo_xo_init_config = yolo_xo_config.copy()
-yolo_xo_init_config.update(curriculum_2stage[0])
+yolo_xo_init_config.update(curriculum_xo_2stage[0])
 yolo_xo_init_config.update(
     alg_name="yolo_xo_init",
     keep_prob=0.25,
@@ -376,10 +377,10 @@ yolo_xo_init_config.update(
 )
 
 yolo_xo_continue_config = yolo_xo_config.copy()
-yolo_xo_continue_config.update(curriculum_2stage[1])
+yolo_xo_continue_config.update(curriculum_xo_2stage[1])
 yolo_xo_continue_config.update(
     alg_name="yolo_xo_continue",
-    stage_prepare_func=continue_prepare_func,
+    prepare_func=continue_prepare_func,
     curriculum=[dict()],
     init_path="/scratch/e2crawfo/dps_data/run_experiments/GOOD_NIPS_2018/"
               "run_search_yolo-xo-init_env=xo_alg=yolo-xo-init_duration=long_seed=0_2018_06_05_09_23_55/experiments"
@@ -395,11 +396,11 @@ simple_xo_config = simple_math_config.copy(
 
 simple_xo_2stage_config = simple_xo_config.copy(
     alg_name="simple_xo_2stage",
-    curriculum=curriculum_simple_2stage
+    curriculum=curriculum_2stage
 )
 
 simple_xo_init_config = simple_xo_config.copy()
-simple_xo_init_config.update(curriculum_simple_2stage[0])
+simple_xo_init_config.update(curriculum_2stage[0])
 simple_xo_init_config.update(
     alg_name="simple_xo_init",
     keep_prob=0.25,
@@ -409,10 +410,10 @@ simple_xo_init_config.update(
 )
 
 simple_xo_continue_config = simple_xo_config.copy()
-simple_xo_continue_config.update(curriculum_simple_2stage[1])
+simple_xo_continue_config.update(curriculum_2stage[1])
 simple_xo_continue_config.update(
     alg_name="simple_xo_continue",
-    stage_prepare_func=continue_prepare_func,
+    prepare_func=continue_prepare_func,
     curriculum=[dict()],
     init_path="/scratch/e2crawfo/dps_data/run_experiments/GOOD_NIPS_2018/"
               "run_search_yolo-xo-simple-init_env=xo_alg=yolo-xo-simple-init_duration=long_seed=0_2018_06_05_09_25_02/experiments"

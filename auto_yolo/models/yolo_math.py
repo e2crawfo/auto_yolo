@@ -212,8 +212,7 @@ class YoloAir_MathNetwork(yolo_air.YoloAir_Network):
         return self.largest_digit + 1
 
     def build_math_representation(self, math_attr):
-        # Use raw_obj so that there is no discrepancy between validation and train
-        return self._tensors["raw_obj"] * math_attr
+        return self.program["obj"] * math_attr
 
     def build_graph(self, *args, **kwargs):
         with tf.variable_scope("reconstruction", reuse=self.initialized):
@@ -225,7 +224,7 @@ class YoloAir_MathNetwork(yolo_air.YoloAir_Network):
             if "math" in self.fixed_weights:
                 self.math_input_network.fix_variables()
 
-        attr = tf.reshape(self.program['attr'], (self.batch_size * self.HWB, self.A))
+        attr = tf.reshape(self._tensors['attr_mean'], (self.batch_size * self.HWB, self.A))
         math_attr = self.math_input_network(attr, self.A, self.is_training)
         math_attr = tf.reshape(math_attr, (self.batch_size, self.H, self.W, self.B, self.A))
         self._tensors["math_attr"] = math_attr
@@ -302,7 +301,7 @@ class SimpleMathNetwork(ScopedFunction):
     fixed_weights = Param("")
     train_reconstruction = Param(True)
     train_kl = Param(True)
-    variational = Param(True)
+    noisy = Param(True)
     math_weight = Param(1.0)
     xent_loss = Param(True)
     code_prior_mean = Param(0.0)
@@ -323,6 +322,9 @@ class SimpleMathNetwork(ScopedFunction):
         self.eval_funcs = dict()
         if isinstance(self.fixed_weights, str):
             self.fixed_weights = self.fixed_weights.split()
+
+        if not self.noisy and self.train_kl:
+            raise Exception("If `noisy` is False, `train_kl` must also be False.")
 
         super(SimpleMathNetwork, self).__init__(scope=scope)
 
@@ -361,15 +363,13 @@ class SimpleMathNetwork(ScopedFunction):
         return self.build_graph(inp, labels, background, is_training)
 
     def build_graph(self, inp, labels, background, is_training):
-        attr_dim = 2 * self.A if self.variational else self.A
-
         # --- init modules ---
 
         if self.encoder is None:
             self.encoder = cfg.build_math_encoder(scope="math_encoder")
             if "encoder" in self.fixed_weights:
                 self.encoder.fix_variables()
-            self.encoder.layout[-1]['filters'] = attr_dim
+            self.encoder.layout[-1]['filters'] = 2 * self.A
 
         if self.decoder is None:
             self.decoder = cfg.build_math_decoder(scope="math_decoder")
@@ -408,19 +408,25 @@ class SimpleMathNetwork(ScopedFunction):
         # --- encode ---
 
         with tf.variable_scope("reconstruction", reuse=self.initialized):
-            code = self.encoder(inp, (self.H, self.W, attr_dim), is_training)
+            code = self.encoder(inp, (self.H, self.W, 2 * self.A), is_training)
+            code_mean, code_log_std = tf.split(code, 2, axis=-1)
 
-            if self.variational:
-                code_mean, code_log_std = tf.split(code, 2, axis=-1)
-                code_std = tf.exp(code_log_std)
-                code, code_kl = yolo_air.normal_vae(code_mean, code_std, self.code_prior_mean, self.code_prior_std)
+            if self.noisy:
+                code_std = (
+                    self.float_is_training * tf.exp(code_log_std) +
+                    (1-self.float_is_training) * tf.zeros_like(code_log_std)
+                )
+            else:
+                code_std = tf.zeros_like(code_log_std)
 
-                self._tensors["code_mean"] = code_mean
-                self._tensors["code_std"] = code_std
-                self._tensors["code_kl"] = code_kl
+            code, code_kl = yolo_air.normal_vae(code_mean, code_std, self.code_prior_mean, self.code_prior_std)
 
-                if self.train_kl:
-                    losses['code_kl'] = tf_mean_sum(self._tensors["code_kl"])
+            self._tensors["code_mean"] = code_mean
+            self._tensors["code_std"] = code_std
+            self._tensors["code_kl"] = code_kl
+
+            if self.train_kl:
+                losses['code_kl'] = tf_mean_sum(self._tensors["code_kl"])
 
             self._tensors["code"] = code
 
@@ -437,8 +443,7 @@ class SimpleMathNetwork(ScopedFunction):
 
         # --- predict ---
 
-        _code = code_mean if self.variational else code
-        _code = tf.reshape(_code, (self.batch_size * self.HW, self.A))
+        _code = tf.reshape(code_mean, (self.batch_size * self.HW, self.A))
         math_code = self.math_input_network(_code, self.A, self.is_training)
         self._tensors["math_code"] = tf.reshape(math_code, (self.batch_size, self.H, self.W, self.A))
         math_code = tf.reshape(math_code, (self.batch_size, self.H, self.W, 1, self.A))
