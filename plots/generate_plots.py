@@ -280,7 +280,7 @@ def get_arithmetic_data(paths, x_key, y_key, stage_idx, spread_measure, y_func=N
     return x, y, yu, yl
 
 
-def plot_addition():
+def plot_addition(extension):
     yolo_path = os.path.join(
         data_dir, "addition/2stage/run_search_sample_complexity_experiment_yolo_air_VS_nips_2018_addition_14x14_kind=long_cedar_seed=0_2018_05_14_03_04_29")
     yolo_supplement_path = os.path.join(
@@ -292,34 +292,40 @@ def plot_addition():
 
     # -----
 
-    plt.figure(figsize=(5, 3.5))
+    fig = plt.figure(figsize=(5, 3.5))
     ax = plt.gca()
 
     measure = "math_accuracy"
 
     x, y, *yerr = get_arithmetic_data([yolo_path, yolo_supplement_path], "n_train", measure, 1, "ci95")
-    label = ""
+    label = "SI-AIR"
     ax.errorbar(x, y, yerr=yerr, label=label)
 
     x, y, *yerr = get_arithmetic_data([simple_path], "n_train", measure, 0, "ci95")
-    label = ""
+    label = "Conv"
     ax.errorbar(x, y, yerr=yerr, label=label)
 
     x, y, *yerr = get_arithmetic_data([simple_2stage_path], "n_train", measure, 0, "ci95")
-    label = ""
+    label = "Conv - 2stage"
     ax.errorbar(x, y, yerr=yerr, label=label)
 
     ax.set_ylabel('Accuracy', fontsize=12)
-    ax.set_xlabel('# Training Samples', fontsize=12)
+    ax.set_xlabel('# Training Samples / 1000', fontsize=12)
+    ax.set_title('Addition - Between 1 and 11 numbers', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
     ax.set_ylim((0.0, 1.05))
     ax.set_xticks(x)
+    ax.set_xticklabels((np.array(x) / 1000).astype('i'))
 
-    plt.legend()
+    plt.legend(loc="upper left")
+    plot_path = os.path.join(plot_dir, 'addition/main.' + extension)
+    os.makedirs(os.path.dirname(plot_path), exist_ok=True)
+    plt.subplots_adjust(left=0.12, bottom=0.14, right=0.98, top=0.91)
+    fig.savefig(plot_path)
     plt.show()
 
 
-def plot_arithmetic():
+def plot_arithmetic(extension):
     yolo_path = os.path.join(
         data_dir, "arithmetic/2stage/run_search_sample_complexity-size=14_colour=False_task=arithmetic_alg=yolo_math_2stage_duration=long_seed=0_2018_05_15_00_32_28")
     simple_path = os.path.join(
@@ -329,31 +335,36 @@ def plot_arithmetic():
 
     # -----
 
-    plt.figure(figsize=(5, 3.5))
+    fig = plt.figure(figsize=(5, 3.5))
     ax = plt.gca()
 
     measure = "math_accuracy"
 
     x, y, *yerr = get_arithmetic_data([yolo_path], "n_train", measure, 1, "ci95")
-    label = ""
+    label = "SI-AIR"
     ax.errorbar(x, y, yerr=yerr, label=label)
 
     x, y, *yerr = get_arithmetic_data([simple_path], "n_train", measure, 0, "ci95")
-    label = ""
+    label = "Conv"
     ax.errorbar(x, y, yerr=yerr, label=label)
 
     x, y, *yerr = get_arithmetic_data([simple_2stage_path], "n_train", measure, 0, "ci95")
-    label = ""
+    label = "Conv - 2stage"
     ax.errorbar(x, y, yerr=yerr, label=label)
 
     ax.set_ylabel('Accuracy', fontsize=12)
-    ax.set_xlabel('# Training Samples', fontsize=12)
+    ax.set_xlabel('# Training Samples / 1000', fontsize=12)
+    ax.set_title('Arithmetic - Between 1 and 11 numbers', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
     ax.set_ylim((0.0, 1.05))
     ax.set_xticks(x)
     ax.set_xticklabels((np.array(x) / 1000).astype('i'))
 
-    plt.legend()
+    plt.legend(loc="upper left")
+    plot_path = os.path.join(plot_dir, 'arithmetic/main.' + extension)
+    os.makedirs(os.path.dirname(plot_path), exist_ok=True)
+    plt.subplots_adjust(left=0.12, bottom=0.14, right=0.98, top=0.91)
+    fig.savefig(plot_path)
     plt.show()
 
 
@@ -484,6 +495,7 @@ if __name__ == "__main__":
     parser.add_argument("--show", action="store_true")
     parser.add_argument("--clear-cache", action="store_true")
     parser.add_argument("--paper", action="store_true")
+    parser.add_argument("--ext", default="pdf")
     args = parser.parse_args()
     plt.rc('lines', linewidth=1)
 
@@ -500,7 +512,7 @@ if __name__ == "__main__":
 
         for name, do_plot in funcs.items():
             if name in args.plots:
-                fig = do_plot()
+                fig = do_plot(args.ext)
 
                 if args.show:
                     plt.show(block=not args.no_block)

@@ -240,16 +240,23 @@ yolo_air_transfer_config = yolo_air_config.copy(
 )
 
 yolo_air_progression_config = yolo_air_config.copy(
+    training_wheels=0,
     load_path=-1,
     preserve_env=False,
-    postprocessing="random",
+    postprocessing="",
     curriculum=[
         dict(train_example_range=(0.0, 0.0001),
-             val_example_range=(0.0, 0.0001)),
+             val_example_range=(0.0, 0.0001),
+             training_wheels="Exp(1.0, 0.0, decay_rate=0.0, decay_steps=200, staircase=True)"
+        ),
         dict(train_example_range=(0.0, 0.1),
-             val_example_range=(0.0, 0.1)),
+             val_example_range=(0.0, 0.1),
+             count_prior_log_odds=0.0125,
+        ),
         dict(train_example_range=(0.0, 0.9),
-             val_example_range=(0.9, 1.0)),
+             val_example_range=(0.9, 1.0),
+             count_prior_log_odds=0.0125,
+        ),
     ]
 )
 

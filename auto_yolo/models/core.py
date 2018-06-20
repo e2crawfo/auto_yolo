@@ -209,9 +209,6 @@ class Evaluator(object):
             self.fetches = {}
             return
 
-        self.placeholders = {name: tf.placeholder(tf.float32, ()) for name in functions.keys()}
-        self.summary_op = tf.summary.merge([tf.summary.scalar(k, v) for k, v in self.placeholders.items()])
-
         fetch_keys = set()
         for f in functions.values():
             for key in f.keys_accessed.split():
@@ -235,19 +232,10 @@ class Evaluator(object):
         self.fetches = fetches
 
     def eval(self, fetched):
-        if not self.functions:
-            return {}, b''
-
         record = {}
-        feed_dict = {}
         for name, func in self.functions.items():
             record[name] = np.mean(func(fetched, self.updater))
-            feed_dict[self.placeholders[name]] = record[name]
-
-        sess = tf.get_default_session()
-        summary = sess.run(self.summary_op, feed_dict=feed_dict)
-
-        return record, summary
+        return record
 
 
 def mAP(_tensors, updater):
@@ -333,12 +321,17 @@ class Updater(_Updater):
         feed_dict = self.data_manager.do_train()
 
         sess = tf.get_default_session()
-        record = {}
-        summary = b''
         if collect_summaries:
-            _, record, summary = sess.run(
-                [self.train_op, self.recorded_tensors, self.summary_op], feed_dict=feed_dict)
+            _, record, train_record = sess.run(
+                [self.train_op, self.recorded_tensors, self.train_records], feed_dict=feed_dict)
+
+            summary_feed_dict = {ph: record[k] for k, ph in self.recorded_tensors_ph.items()}
+            summary_feed_dict.update({ph: train_record[k] for k, ph in self.train_records_ph.items()})
+
+            summary = sess.run(self.train_summary_op, feed_dict=summary_feed_dict)
         else:
+            record = {}
+            summary = b''
             sess.run([self.train_op], feed_dict=feed_dict)
 
         return dict(train=(record, summary))
@@ -356,16 +349,13 @@ class Updater(_Updater):
 
         while True:
             try:
-                _record, summary, eval_fetched = sess.run(
-                    [self.recorded_tensors, self.summary_op, self.evaluator.fetches], feed_dict=feed_dict)
+                _record, eval_fetched = sess.run(
+                    [self.recorded_tensors, self.evaluator.fetches], feed_dict=feed_dict)
             except tf.errors.OutOfRangeError:
                 break
 
-            eval_record, eval_summary = self.evaluator.eval(eval_fetched)
+            eval_record = self.evaluator.eval(eval_fetched)
             _record.update(eval_record)
-            summary = summary + eval_summary
-
-            batch_size = _record['batch_size']
 
             for k, v in _record.items():
                 record[k] += batch_size * v
@@ -374,6 +364,11 @@ class Updater(_Updater):
 
         for k, v in record.items():
             record[k] /= n_points
+
+        summary_feed_dict = {ph: record[k] for k, ph in self.recorded_tensors_ph.items()}
+        summary_feed_dict.update({ph: record[k] for k, ph in self.eval_funcs_ph.items()})
+
+        summary = sess.run(self.val_summary_op, feed_dict=summary_feed_dict)
 
         return record, summary
 
@@ -422,16 +417,9 @@ class Updater(_Updater):
         network_recorded_tensors = network_outputs["recorded_tensors"]
         network_losses = network_outputs["losses"]
 
-        # For running functions, during evaluation, that are not implemented in tensorflow
-        self.evaluator = Evaluator(self.network.eval_funcs, network_tensors, self)
+        self.recorded_tensors = recorded_tensors = {}
 
-        recorded_tensors = {}
-
-        output = network_tensors["output"]
-        recorded_tensors.update({
-            "loss_" + name: tf_mean_sum(builder(output, inp))
-            for name, builder in loss_builders.items()
-        })
+        # --- loss ---
 
         recorded_tensors['loss'] = 0
         for name, tensor in network_losses.items():
@@ -439,20 +427,40 @@ class Updater(_Updater):
             recorded_tensors['loss_' + name] = tensor
         self.loss = recorded_tensors['loss']
 
-        intersection = recorded_tensors.keys() & network_recorded_tensors.keys()
-        assert not intersection, "Key sets have non-zero intersection: {}".format(intersection)
-        recorded_tensors.update(network_recorded_tensors)
-
-        self.recorded_tensors = recorded_tensors
-
-        _summary = [tf.summary.scalar(name, t) for name, t in recorded_tensors.items()]
-
         # --- train op ---
 
         tvars = self.trainable_variables(for_opt=True)
 
-        self.train_op, train_summary = build_gradient_train_op(
+        self.train_op, self.train_records = build_gradient_train_op(
             self.loss, tvars, self.optimizer_spec, self.lr_schedule,
-            self.max_grad_norm, self.noise_schedule)
+            self.max_grad_norm, self.noise_schedule, return_summaries=False)
 
-        self.summary_op = tf.summary.merge(_summary + train_summary)
+        # --- summaries ---
+
+        output = network_tensors["output"]
+        recorded_tensors.update({
+            "loss_" + name: tf_mean_sum(builder(output, inp))
+            for name, builder in loss_builders.items()
+        })
+
+        intersection = recorded_tensors.keys() & network_recorded_tensors.keys()
+        assert not intersection, "Key sets have non-zero intersection: {}".format(intersection)
+        recorded_tensors.update(network_recorded_tensors)
+
+        intersection = recorded_tensors.keys() & self.network.eval_funcs.keys()
+        assert not intersection, "Key sets have non-zero intersection: {}".format(intersection)
+
+        # For running functions, during evaluation, that are not implemented in tensorflow
+        self.evaluator = Evaluator(self.network.eval_funcs, network_tensors, self)
+
+        self.train_records_ph = {k: tf.placeholder(tf.float32, name=k + "_summary") for k in self.train_records}
+        train_summaries = [tf.summary.scalar(k, t) for k, t in self.train_records_ph.items()]
+
+        self.recorded_tensors_ph = {k: tf.placeholder(tf.float32, name=k + "_summary") for k in self.recorded_tensors}
+        recorded_tensors_summaries = [tf.summary.scalar(k, t) for k, t in self.recorded_tensors_ph.items()]
+
+        self.eval_funcs_ph = {k: tf.placeholder(tf.float32, name=k + "_summary") for k in self.network.eval_funcs}
+        eval_funcs_summaries = [tf.summary.scalar(k, t) for k, t in self.eval_funcs_ph.items()]
+
+        self.train_summary_op = tf.summary.merge(recorded_tensors_summaries + train_summaries)
+        self.val_summary_op = tf.summary.merge(recorded_tensors_summaries + eval_funcs_summaries)

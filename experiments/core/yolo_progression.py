@@ -1,5 +1,4 @@
 from auto_yolo import envs
-
 readme = ""
 
 durations = dict(
@@ -38,6 +37,7 @@ durations = dict(
 )
 
 envs.run_experiment(
-    "yolo_air_transfer", dict(), readme,
-    alg="yolo_air_progression", task="scatter", durations=durations,
+    "yolo_air_transfer", dict(n_train=16000), readme,
+    alg="yolo_air_progression", task="arithmetic",
+    durations=durations, env_kwargs=dict(ops="addition")
 )
