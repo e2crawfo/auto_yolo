@@ -241,7 +241,7 @@ class Evaluator(object):
 def mAP(_tensors, updater):
     network = updater.network
 
-    obj = _tensors['program']['obj']
+    obj = _tensors['obj']
     top, left, height, width = np.split(_tensors['normalized_box'], 4, axis=-1)
     annotations = _tensors["annotations"]
     n_annotations = _tensors["n_annotations"]
@@ -288,7 +288,7 @@ def mAP(_tensors, updater):
     return _mAP(predicted_boxes, ground_truth_boxes, 1, iou_threshold=[0.5])
 
 
-mAP.keys_accessed = "normalized_box program:obj annotations n_annotations"
+mAP.keys_accessed = "normalized_box obj annotations n_annotations"
 
 
 class Updater(_Updater):

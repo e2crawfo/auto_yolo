@@ -83,7 +83,6 @@ class YoloAir_Network(ScopedFunction):
     fixed_values = Param(dict())
     fixed_weights = Param("")
     no_gradient = Param("")
-    order = Param("box obj")
 
     use_concrete_kl = Param(True)
     count_prior_log_odds = Param()
@@ -116,6 +115,7 @@ class YoloAir_Network(ScopedFunction):
         on=False,
         n_lookback=1,
     ))
+    incremental_attr = Param(True)
 
     def __init__(self, env, scope=None, **kwargs):
         self.obs_shape = env.datasets['train'].obs_shape
@@ -151,39 +151,18 @@ class YoloAir_Network(ScopedFunction):
 
         self.eval_funcs = dict(mAP=core.mAP)
 
-        self.object_encoder = None
-        self.object_decoder = None
-
         if isinstance(self.fixed_weights, str):
             self.fixed_weights = self.fixed_weights.split()
 
         if isinstance(self.no_gradient, str):
             self.no_gradient = self.no_gradient.split()
 
-        if isinstance(self.order, str):
-            self.order = self.order.split()
-
-        assert set(self.order) == set("box obj".split())
-
         self.backbone = None
-        self.layer_params = dict(
-            box=dict(
-                rep_builder=self._build_box,
-                fixed="box" in self.fixed_weights,
-                output_size=8,
-                sample_size=4,
-                network=None,
-                sigmoid=True,
-            ),
-            obj=dict(
-                rep_builder=self._build_obj,
-                fixed="obj" in self.fixed_weights,
-                output_size=1,
-                sample_size=1,
-                network=None,
-                sigmoid=True,
-            ),
-        )
+        self.box_network = None
+        self.attr_network = None
+        self.obj_network = None
+        self.object_encoder = None
+        self.object_decoder = None
 
         super(YoloAir_Network, self).__init__(scope=scope)
 
@@ -261,16 +240,6 @@ class YoloAir_Network(ScopedFunction):
         box_kl = tf.concat([cy_kl, cx_kl, h_kl, w_kl], axis=-1)
 
         return dict(
-            cell_y=cell_y,
-            cell_x=cell_x,
-            h=h,
-            w=w,
-
-            cell_y_kl=cy_kl,
-            cell_x_kl=cx_kl,
-            h_kl=h_kl,
-            w_kl=w_kl,
-
             cell_y_mean=cy_mean,
             cell_x_mean=cx_mean,
             h_mean=h_mean,
@@ -281,9 +250,54 @@ class YoloAir_Network(ScopedFunction):
             h_std=h_std,
             w_std=w_std,
 
-            kl=box_kl,
-            program=box,
+            cell_y=cell_y,
+            cell_x=cell_x,
+            h=h,
+            w=w,
+
+            cell_y_kl=cy_kl,
+            cell_x_kl=cx_kl,
+            h_kl=h_kl,
+            w_kl=w_kl,
+
+            box_kl=box_kl,
+            box=box,
         )
+
+    def _build_attr_from_image(self, boxes, h, w, b, is_training):
+        # --- Compute sprite locations from box parameters ---
+
+        cell_y, cell_x, height, width = tf.split(boxes, 4, axis=-1)
+
+        # box height and width normalized to image height and width
+        ys = height * self.anchor_boxes[b, 0] / self.image_height
+        xs = width * self.anchor_boxes[b, 1] / self.image_width
+
+        # box centre normalized to image height and width
+        yt = (self.pixels_per_cell[0] / self.image_height) * (cell_y + h)
+        xt = (self.pixels_per_cell[1] / self.image_width) * (cell_x + w)
+
+        # `render_sprites` requires box top-left, whereas y and x give box center
+        yt -= ys / 2
+        xt -= xs / 2
+
+        # --- Get object attributes using object encoder ---
+
+        transform_constraints = snt.AffineWarpConstraints.no_shear_2d()
+        warper = snt.AffineGridWarper(
+            (self.image_height, self.image_width), self.object_shape, transform_constraints)
+
+        _boxes = tf.concat([xs, 2*(xt + xs/2) - 1, ys, 2*(yt + ys/2) - 1], axis=-1)
+
+        grid_coords = warper(_boxes)
+        grid_coords = tf.reshape(grid_coords, (self.batch_size, 1, *self.object_shape, 2,))
+        input_glimpses = tf.contrib.resampler.resampler(self.inp, grid_coords)
+        input_glimpses = tf.reshape(input_glimpses, (-1, *self.object_shape, self.image_depth))
+
+        attr = self.object_encoder(input_glimpses, (1, 1, self.A), self.is_training)
+        attr = tf.reshape(attr, (-1, self.A))
+
+        return input_glimpses, attr
 
     def _build_obj(self, obj_logits, is_training, **kwargs):
         obj_logits = self.training_wheels * tf.stop_gradient(obj_logits) + (1-self.training_wheels) * obj_logits
@@ -308,73 +322,12 @@ class YoloAir_Network(ScopedFunction):
             obj = tf.stop_gradient(obj)
 
         return dict(
-            program=obj,
+            obj=obj,
             raw_obj=raw_obj,
             obj_pre_sigmoid=obj_pre_sigmoid,
             obj_log_odds=obj_log_odds,
             obj_prob=tf.nn.sigmoid(obj_log_odds),
         )
-
-    def _build_program_generator(self):
-        H, W, B = self.H, self.W, self.B
-        program, features = None, None
-
-        if self.backbone is None:
-            self.backbone = cfg.build_backbone(scope="backbone")
-            self.backbone.layout[-1]['filters'] = B * self.n_backbone_features
-
-            if "backbone" in self.fixed_weights:
-                self.backbone.fix_variables()
-
-        inp = self._tensors["inp"]
-        backbone_output = self.backbone(inp, (H, W, B * self.n_backbone_features), self.is_training)
-
-        for i, kind in enumerate(self.order):
-            params = self.layer_params[kind]
-            rep_builder = params["rep_builder"]
-            output_size = params["output_size"]
-            network = params["network"]
-            fixed = params["fixed"]
-
-            first = i == 0
-            final = i == len(self.order) - 1
-
-            n_features = 0 if final else self.n_passthrough_features
-
-            if network is None:
-                network = cfg.build_next_step(scope="{}_network".format(kind))
-                network.layout[-1]['filters'] = B * output_size + n_features
-
-                if fixed:
-                    network.fix_variables()
-                self.layer_params[kind]["network"] = network
-
-            if first:
-                layer_inp = backbone_output
-            else:
-                _program = tf.reshape(program, (-1, H, W, B * int(program.shape[-1])))
-                layer_inp = tf.concat([backbone_output, features, _program], axis=3)
-
-            network_output = network(layer_inp, (H, W, B * output_size + n_features), self.is_training)
-
-            rep_input, features = tf.split(network_output, (B * output_size, n_features), axis=3)
-
-            rep_input = tf.reshape(rep_input, (-1, H, W, B, output_size))
-
-            built = rep_builder(rep_input, self.is_training)
-
-            assert 'program' in built
-            for key, value in built.items():
-                if key in self.info_types:
-                    self._tensors[key][kind] = value
-                else:
-                    assert key not in self._tensors, "Overwriting with key `{}`".format(key)
-                    self._tensors[key] = value
-
-            if first:
-                program = self.program[kind]
-            else:
-                program = tf.concat([program, self.program[kind]], axis=4)
 
     def _get_sequential_input(self, program, h, w, b, edge_element):
         inp = []
@@ -420,30 +373,25 @@ class YoloAir_Network(ScopedFunction):
 
         # --- set-up the edge element ---
 
-        total_sample_size = sum(self.layer_params[kind]["sample_size"] for kind in self.order)
+        sizes = [4, self.A, 1] if self.incremental_attr else [4, 1]
+        sigmoids = [True, False, True] if self.incremental_attr else [True, True]
+        total_sample_size = sum(sizes)
 
-        self.edge_weights = tf.get_variable("edge_weights", shape=(1, total_sample_size), dtype=tf.float32)
+        self.edge_weights = tf.get_variable("edge_weights", shape=total_sample_size, dtype=tf.float32)
 
         if "backbone" in self.fixed_weights:
             tf.add_to_collection(FIXED_COLLECTION, self.edge_weights)
 
-        sizes = [self.layer_params[kind]['sample_size'] for kind in self.order]
-        edge_weights = tf.split(self.edge_weights, sizes, axis=1)
-        _edge_weights = []
-        for ew, kind in zip(edge_weights, self.order):
-            if self.layer_params[kind]['sigmoid']:
-                ew = tf.nn.sigmoid(ew)
-            _edge_weights.append(ew)
-        edge_element = tf.concat(_edge_weights, axis=1)
-        edge_element = tf.tile(edge_element, (self.batch_size, 1))
+        _edge_weights = tf.split(self.edge_weights, sizes, axis=0)
+        _edge_weights = [
+            (tf.nn.sigmoid(ew) if sigmoid else ew)
+            for ew, sigmoid in zip(_edge_weights, sigmoids)]
+        edge_element = tf.concat(_edge_weights, axis=0)
+        edge_element = tf.tile(edge_element[None, :], (self.batch_size, 1))
 
         # --- initialize containers for storing built program ---
 
         _tensors = collections.defaultdict(self._make_empty)
-        _tensors.update({
-            info_type: collections.defaultdict(self._make_empty)
-            for info_type in self.info_types})
-
         program = np.empty((H, W, B), dtype=np.object)
 
         # --- build the program ---
@@ -455,46 +403,80 @@ class YoloAir_Network(ScopedFunction):
                     _backbone_output = backbone_output[:, h, w, b, :]
                     context = self._get_sequential_input(program, h, w, b, edge_element)
 
-                    for i, kind in enumerate(self.order):
-                        params = self.layer_params[kind]
-                        rep_builder = params["rep_builder"]
-                        output_size = params["output_size"]
-                        network = params["network"]
-                        fixed = params["fixed"]
+                    # --- box ---
 
-                        first = i == 0
-                        final = i == len(self.order) - 1
+                    if self.box_network is None:
+                        self.box_network = self.sequential_cfg.build_next_step(scope="box_sequential_network")
+                        if "box" in self.fixed_weights:
+                            self.box_network.fix_variables()
 
-                        if network is None:
-                            network = self.sequential_cfg.build_next_step(scope="{}_sequential_network".format(kind))
-                            if fixed:
-                                network.fix_variables()
-                            params["network"] = network
+                    layer_inp = tf.concat([_backbone_output, context], axis=1)
+                    n_features = self.n_passthrough_features
+                    output_size = 8
 
-                        if first:
-                            layer_inp = tf.concat([_backbone_output, context], axis=1)
-                        else:
-                            layer_inp = tf.concat([_backbone_output, context, features, partial_program], axis=1)
+                    network_output = self.box_network(layer_inp, output_size + n_features, self.is_training)
+                    rep_input, features = tf.split(network_output, (output_size, n_features), axis=1)
 
-                        n_features = 0 if final else self.n_passthrough_features
+                    built = self._build_box(rep_input, self.is_training)
 
-                        network_output = network(layer_inp, output_size + n_features, self.is_training)
+                    for key, value in built.items():
+                        _tensors[key][h, w, b] = value
+                    partial_program = built['box']
 
-                        rep_input, features = tf.split(network_output, (output_size, n_features), axis=1)
+                    # --- attr ---
 
-                        built = rep_builder(rep_input, self.is_training)
+                    if self.incremental_attr:
+                        input_glimpses, partial_attr = self._build_attr_from_image(built['box'], h, w, b, self.is_training)
 
-                        assert 'program' in built
+                        if self.attr_network is None:
+                            self.attr_network = self.sequential_cfg.build_next_step(scope="attr_sequential_network")
+                            if "attr" in self.fixed_weights:
+                                self.attr_network.fix_variables()
+
+                        layer_inp = tf.concat([_backbone_output, context, features, partial_program, partial_attr], axis=1)
+                        n_features = self.n_passthrough_features
+                        output_size = 2 * self.A
+
+                        network_output = self.attr_network(layer_inp, output_size + n_features, self.is_training)
+                        attr, features = tf.split(network_output, (output_size, n_features), axis=1)
+
+                        attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
+                        attr_std = tf.exp(attr_log_std)
+
+                        attr, attr_kl = normal_vae(attr_mean, attr_std, self.attr_prior_mean, self.attr_prior_std)
+
+                        if "attr" in self.no_gradient:
+                            attr = tf.stop_gradient(attr)
+                            attr_kl = tf.stop_gradient(attr_kl)
+
+                        built = dict(
+                            attr_mean=attr_mean,
+                            attr_std=attr_std,
+                            attr=attr,
+                            attr_kl=attr_kl,
+                            input_glimpses=input_glimpses
+                        )
+
                         for key, value in built.items():
-                            if key in self.info_types:
-                                _tensors[key][kind][h, w, b] = value
-                            else:
-                                _tensors[key][h, w, b] = value
+                            _tensors[key][h, w, b] = value
+                        partial_program = tf.concat([partial_program, built['attr']], axis=1)
 
-                        if first:
-                            partial_program = built['program']
-                        else:
-                            partial_program = tf.concat([partial_program, built['program']], axis=1)
+                    # --- obj ---
+
+                    if self.obj_network is None:
+                        self.obj_network = self.sequential_cfg.build_next_step(scope="obj_sequential_network")
+                        if "obj" in self.fixed_weights:
+                            self.obj_network.fix_variables()
+
+                    layer_inp = tf.concat([_backbone_output, context, features, partial_program], axis=1)
+                    rep_input = self.obj_network(layer_inp, 1, self.is_training)
+
+                    built = self._build_obj(rep_input, self.is_training)
+
+                    for key, value in built.items():
+                        _tensors[key][h, w, b] = value
+
+                    partial_program = tf.concat([partial_program, built['obj']], axis=1)
 
                     program[h, w, b] = partial_program
                     assert program[h, w, b].shape[1] == total_sample_size
@@ -508,19 +490,15 @@ class YoloAir_Network(ScopedFunction):
                 t1.append(tf.stack(t2, axis=1))
             return tf.stack(t1, axis=1)
 
-        for key, value in list(_tensors.items()):
-            if isinstance(value, dict):
-                for kind, v in list(value.items()):
-                    self._tensors[key][kind] = form_tensor(v)
-            else:
-                self._tensors[key] = form_tensor(value)
+        for key, value in _tensors.items():
+            self._tensors[key] = form_tensor(value)
 
     def _build_program_interpreter(self):
 
         # --- Compute sprite locations from box parameters ---
 
         # All in cell-local co-ordinates, should be invariant to image size.
-        boxes = self.program['box']
+        boxes = self._tensors['box']
         cell_y, cell_x, h, w = tf.split(boxes, 4, axis=-1)
 
         anchor_box_h = self.anchor_boxes[:, 0].reshape(1, 1, 1, self.B, 1)
@@ -546,43 +524,44 @@ class YoloAir_Network(ScopedFunction):
 
         self._tensors["normalized_box"] = tf.concat([yt, xt, ys, xs], axis=-1)
 
-        # --- Get object attributes using object encoder ---
+        if self.incremental_attr:
+            attr = self._tensors["attr"]
+        else:
+            # --- Get object attributes using object encoder ---
+            transform_constraints = snt.AffineWarpConstraints.no_shear_2d()
+            warper = snt.AffineGridWarper(
+                (self.image_height, self.image_width), self.object_shape, transform_constraints)
 
-        transform_constraints = snt.AffineWarpConstraints.no_shear_2d()
-        warper = snt.AffineGridWarper(
-            (self.image_height, self.image_width), self.object_shape, transform_constraints)
+            _boxes = tf.concat([xs, 2*(xt + xs/2) - 1, ys, 2*(yt + ys/2) - 1], axis=-1)
+            _boxes = tf.reshape(_boxes, (self.batch_size * self.HWB, 4))
+            grid_coords = warper(_boxes)
+            grid_coords = tf.reshape(grid_coords, (self.batch_size, self.HWB, *self.object_shape, 2,))
+            input_glimpses = tf.contrib.resampler.resampler(self.inp, grid_coords)
 
-        _boxes = tf.concat([xs, 2*(xt + xs/2) - 1, ys, 2*(yt + ys/2) - 1], axis=-1)
-        _boxes = tf.reshape(_boxes, (self.batch_size * self.HWB, 4))
-        grid_coords = warper(_boxes)
-        grid_coords = tf.reshape(grid_coords, (self.batch_size, self.HWB, *self.object_shape, 2,))
-        input_glimpses = tf.contrib.resampler.resampler(self.inp, grid_coords)
+            self._tensors["input_glimpses"] = tf.reshape(
+                input_glimpses, (self.batch_size, self.H, self.W, self.B, *self.object_shape, self.image_depth))
 
-        self._tensors["input_glimpses"] = tf.reshape(
-            input_glimpses, (self.batch_size, self.H, self.W, self.B, *self.object_shape, self.image_depth))
+            object_encoder_in = tf.reshape(
+                input_glimpses,
+                (self.batch_size * self.HWB, *self.object_shape, self.image_depth))
 
-        object_encoder_in = tf.reshape(
-            input_glimpses,
-            (self.batch_size * self.HWB, *self.object_shape, self.image_depth))
+            attr = self.object_encoder(object_encoder_in, (1, 1, 2*self.A), self.is_training)
 
-        attr = self.object_encoder(object_encoder_in, (1, 1, 2*self.A), self.is_training)
+            attr = tf.reshape(attr, (self.batch_size, self.H, self.W, self.B, 2*self.A))
 
-        attr = tf.reshape(attr, (self.batch_size, self.H, self.W, self.B, 2*self.A))
+            attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
+            attr_std = tf.exp(attr_log_std)
 
-        attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
-        attr_std = tf.exp(attr_log_std)
+            attr, attr_kl = normal_vae(attr_mean, attr_std, self.attr_prior_mean, self.attr_prior_std)
 
-        attr, attr_kl = normal_vae(attr_mean, attr_std, self.attr_prior_mean, self.attr_prior_std)
+            if "attr" in self.no_gradient:
+                attr = tf.stop_gradient(attr)
+                attr_kl = tf.stop_gradient(attr_kl)
 
-        if "attr" in self.no_gradient:
-            attr = tf.stop_gradient(attr)
-            attr_kl = tf.stop_gradient(attr_kl)
-
-        self._tensors["attr_mean"] = attr_mean
-        self._tensors["attr_std"] = attr_std
-        self._tensors["attr"] = attr
-        self.program["attr"] = attr
-        self._tensors["attr_kl"] = attr_kl
+            self._tensors["attr_mean"] = attr_mean
+            self._tensors["attr_std"] = attr_std
+            self._tensors["attr"] = attr
+            self._tensors["attr_kl"] = attr_kl
 
         object_decoder_in = tf.reshape(attr, (self.batch_size * self.HWB, 1, 1, self.A))
 
@@ -609,7 +588,7 @@ class YoloAir_Network(ScopedFunction):
         if "alpha" in self.fixed_values:
             obj_alpha = float(self.fixed_values["alpha"]) * tf.ones_like(obj_alpha)
 
-        obj_alpha *= tf.reshape(self.program['obj'], (self.batch_size, self.HWB, 1, 1, 1))
+        obj_alpha *= tf.reshape(self._tensors['obj'], (self.batch_size, self.HWB, 1, 1, 1))
         obj_alpha = tf.exp(obj_alpha * 5 + (1-obj_alpha) * -5)  # Inner expression is equivalent to 5 * (2*obj_alpha - 1)
 
         objects = tf.concat([obj_img, obj_alpha], axis=-1)
@@ -655,16 +634,6 @@ class YoloAir_Network(ScopedFunction):
         # --- initialize containers for storing outputs ---
 
         self._tensors = dict(
-            logits=dict(),
-            program=dict(),
-            kl=dict(),
-        )
-
-        self.info_types = list(self._tensors.keys())
-
-        self.program = self._tensors["program"]
-
-        self._tensors.update(
             inp=inp,
             is_training=is_training,
             float_is_training=tf.to_float(is_training),
@@ -676,10 +645,17 @@ class YoloAir_Network(ScopedFunction):
 
         # --- build graph ---
 
-        if self.sequential_cfg['on']:
-            self._build_program_generator_sequential()
-        else:
-            self._build_program_generator()
+        if self.object_encoder is None:
+            self.object_encoder = cfg.build_object_encoder(scope="object_encoder")
+            if "encoder" in self.fixed_weights:
+                self.object_encoder.fix_variables()
+
+        if self.object_decoder is None:
+            self.object_decoder = cfg.build_object_decoder(scope="object_decoder")
+            if "decoder" in self.fixed_weights:
+                self.object_decoder.fix_variables()
+
+        self._build_program_generator_sequential()
 
         # --- compute obj_kl ---
 
@@ -723,7 +699,7 @@ class YoloAir_Network(ScopedFunction):
 
                     obj_kl.append(_obj_kl)
 
-                    sample = tf.to_float(self.program["obj"][:, h, w, b, :] > 0.5)
+                    sample = tf.to_float(self._tensors["obj"][:, h, w, b, :] > 0.5)
                     mult = sample * p_z_given_Cz + (1-sample) * (1-p_z_given_Cz)
                     count_distribution = mult * count_distribution
                     normalizer = tf.reduce_sum(count_distribution, axis=1, keepdims=True)
@@ -742,17 +718,7 @@ class YoloAir_Network(ScopedFunction):
         # --- interpret program ---
 
         self._tensors["n_objects"] = tf.fill((self.batch_size,), self.HWB)
-        self._tensors["pred_n_objects"] = tf.reduce_sum(self.program['obj'], axis=(1, 2, 3, 4))
-
-        if self.object_encoder is None:
-            self.object_encoder = cfg.build_object_encoder(scope="object_encoder")
-            if "encoder" in self.fixed_weights:
-                self.object_encoder.fix_variables()
-
-        if self.object_decoder is None:
-            self.object_decoder = cfg.build_object_decoder(scope="object_decoder")
-            if "decoder" in self.fixed_weights:
-                self.object_decoder.fix_variables()
+        self._tensors["pred_n_objects"] = tf.reduce_sum(self._tensors['obj'], axis=(1, 2, 3, 4))
 
         self._build_program_interpreter()
 
@@ -774,7 +740,7 @@ class YoloAir_Network(ScopedFunction):
         recorded_tensors['h_std'] = tf.reduce_mean(self._tensors["h_std"])
         recorded_tensors['w_std'] = tf.reduce_mean(self._tensors["w_std"])
 
-        obj = self._tensors["program"]["obj"]
+        obj = self._tensors["obj"]
         pred_n_objects = self._tensors["pred_n_objects"]
 
         recorded_tensors['n_objects'] = tf.reduce_mean(pred_n_objects)
@@ -812,7 +778,7 @@ class YoloAir_Network(ScopedFunction):
         if self.train_kl:
             losses['obj_kl'] = self.kl_weight * tf_mean_sum(self._tensors["obj_kl"])
 
-            obj = self.program["obj"]
+            obj = self._tensors["obj"]
 
             losses['cell_y_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["cell_y_kl"])
             losses['cell_x_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["cell_x_kl"])
@@ -849,8 +815,9 @@ class YoloAir_RenderHook(object):
 
         network = updater.network
 
-        to_fetch = network.program.copy()
+        to_fetch = dict()
 
+        to_fetch["obj"] = network._tensors["obj"]
         to_fetch["images"] = network._tensors["inp"]
         to_fetch["output"] = network._tensors["output"]
         to_fetch["objects"] = network._tensors["objects"]

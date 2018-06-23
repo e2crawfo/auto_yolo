@@ -34,7 +34,6 @@ class SequentialRegressionNetwork(ScopedFunction):
     output_network = None
 
     def _call(self, _inp, output_size, is_training):
-        """ program is the program dictionary from YoloAir_Network """
         if self.h_cell is None:
             self.h_cell = cfg.build_math_cell(scope="regression_h_cell")
             self.w_cell = cfg.build_math_cell(scope="regression_w_cell")
@@ -84,8 +83,6 @@ class ObjectBasedRegressionNetwork(ScopedFunction):
     output_network = None
 
     def _call(self, _inp, output_size, is_training):
-        """ program is the program dictionary from YoloAir_Network """
-
         batch_size = tf.shape(_inp)[0]
         H, W, B, A = tuple(int(i) for i in _inp.shape[1:])
 
@@ -113,8 +110,6 @@ class ConvolutionalRegressionNetwork(ScopedFunction):
     network = None
 
     def _call(self, inp, output_size, is_training):
-        """ inp is the program dictionary from YoloAir_Network """
-
         if self.network is None:
             self.network = cfg.build_convolutional_network(scope="regression_network")
 
@@ -212,7 +207,7 @@ class YoloAir_MathNetwork(yolo_air.YoloAir_Network):
         return self.largest_digit + 1
 
     def build_math_representation(self, math_attr):
-        return self.program["obj"] * math_attr
+        return self._tensors["obj"] * math_attr
 
     def build_graph(self, *args, **kwargs):
         with tf.variable_scope("reconstruction", reuse=self.initialized):

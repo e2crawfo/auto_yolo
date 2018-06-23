@@ -44,7 +44,7 @@ durations = dict(
 )
 
 envs.run_experiment(
-    "yolo_addition_2stage", dict(n_train=1000), readme,
+    "yolo_addition_2stage", dict(n_train=16000), readme,
     alg="yolo_math_2stage", task="arithmetic",
     durations=durations, distributions=distributions,
     env_kwargs=dict(ops="addition")
