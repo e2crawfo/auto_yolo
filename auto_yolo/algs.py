@@ -24,6 +24,7 @@ alg_config = Config(
     preserve_env=False,
     stopping_criteria="loss,min",
     threshold=-np.inf,
+    load_path=-1,
 
     max_steps=10000000,
     patience=50000,
@@ -221,8 +222,6 @@ yolo_air_config = alg_config.copy(
     train_reconstruction=True,
     noise_schedule="Exp(0.001, 0.0, 1000, 0.1)",
 
-    preserve_env=True,
-
     curriculum=[
         dict(postprocessing="random"),
         dict(n_train=32, n_val=200, do_train=False),
@@ -232,32 +231,29 @@ yolo_air_config = alg_config.copy(
 yolo_air_transfer_config = yolo_air_config.copy(
     alg_name="yolo_air_transfer",
     min_chars=6, max_chars=10,
-    preserve_env=False,
     load_path=0,
     curriculum=(
         [dict(postprocessing="random")] +
         [dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False) for n in range(1, 21)]),
 )
 
+progression_curriculum = [
+    dict(train_example_range=(0.0, 0.0001),
+         val_example_range=(0.0, 0.0001),
+         training_wheels="Exp(1.0, 0.0, decay_rate=0.0, decay_steps=200, staircase=True)"),
+    dict(train_example_range=(0.0, 0.1),
+         val_example_range=(0.0, 0.1),
+         count_prior_log_odds=0.0125,),
+    dict(train_example_range=(0.0, 0.9),
+         val_example_range=(0.9, 1.0),
+         count_prior_log_odds=0.0125,),
+]
+
+
 yolo_air_progression_config = yolo_air_config.copy(
+    alg_name="yolo_air_progression",
     training_wheels=0,
-    load_path=-1,
-    preserve_env=False,
-    postprocessing="",
-    curriculum=[
-        dict(train_example_range=(0.0, 0.0001),
-             val_example_range=(0.0, 0.0001),
-             training_wheels="Exp(1.0, 0.0, decay_rate=0.0, decay_steps=200, staircase=True)"
-        ),
-        dict(train_example_range=(0.0, 0.1),
-             val_example_range=(0.0, 0.1),
-             count_prior_log_odds=0.0125,
-        ),
-        dict(train_example_range=(0.0, 0.9),
-             val_example_range=(0.9, 1.0),
-             count_prior_log_odds=0.0125,
-        ),
-    ]
+    curriculum=progression_curriculum,
 )
 
 
@@ -323,12 +319,12 @@ curriculum_2stage = [
         fixed_weights="math",
     ),
     dict(
-        preserve_env=False,
         math_weight=1.0,
         train_reconstruction=False,
         train_kl=False,
         noisy=False,
-        fixed_weights="encoder decoder object_encoder object_decoder box obj backbone edge",
+        fixed_weights="encoder decoder object_encoder object_decoder "
+                      "box obj backbone edge",
         load_path={"network/reconstruction": -1},
     )
 ]
@@ -336,6 +332,23 @@ curriculum_2stage = [
 yolo_math_2stage_config = yolo_math_config.copy(
     alg_name="yolo_math_2stage",
     curriculum=curriculum_2stage,
+)
+
+yolo_math_4stage_config = yolo_math_config.copy(
+    alg_name="yolo_math_4stage",
+
+    stopping_criteria="loss_reconstruction,min",
+    threshold=0.0,
+    math_weight=0.0,
+    fixed_weights="math",
+
+    training_wheels=0,
+    load_path={"network/reconstruction": -1},
+    curriculum=progression_curriculum + [copy.deepcopy(curriculum_2stage[1])],
+)
+yolo_math_4stage_config['curriculum'][-1].update(
+    stopping_criteria="math_accuracy,max",
+    threshold=1.0,
 )
 
 # --- SIMPLE_MATH ---

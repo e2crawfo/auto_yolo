@@ -1,5 +1,12 @@
+import numpy as np
+
 from auto_yolo import envs
-readme = ""
+
+readme = "redoing yolo_air addition experiment"
+
+distributions = dict(
+    n_train=list(1000*2**np.arange(7))
+)
 
 durations = dict(
     long=dict(
@@ -24,7 +31,7 @@ durations = dict(
         slack_time="1mins", n_repeats=2, kind="parallel", host_pool=":"),
 
     build_oak=dict(
-        max_hosts=1, ppn=3, cpp=2, gpu_set="0", wall_time="1year",
+        max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="1year",
         project="rpp-bengioy", cleanup_time="1mins",
         slack_time="1mins", n_repeats=1, kind="parallel", host_pool=":",
         config=dict(do_train=False)),
@@ -37,7 +44,8 @@ durations = dict(
 )
 
 envs.run_experiment(
-    "yolo_air_transfer", dict(n_train=16000, obj_temp="Exp(1.0, 0.01, 1000, 0.9)"), readme,
-    alg="yolo_air_progression", task="arithmetic",
-    durations=durations, env_kwargs=dict(ops="addition")
+    "yolo_addition_4stage", dict(n_train=16000), readme,
+    alg="yolo_math_4stage", task="arithmetic",
+    durations=durations, distributions=distributions,
+    env_kwargs=dict(ops="addition")
 )

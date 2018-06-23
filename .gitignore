@@ -1,3 +1,6 @@
+# auto_yolo-specific
+plots/plots
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

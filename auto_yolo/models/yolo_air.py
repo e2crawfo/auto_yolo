@@ -87,7 +87,8 @@ class YoloAir_Network(ScopedFunction):
 
     use_concrete_kl = Param(True)
     count_prior_log_odds = Param()
-    obj_temperature = Param(1.0)
+    obj_concrete_temp = Param(1.0, help="Higher values -> smoother")
+    obj_temp = Param(1.0, help="Higher values -> more uniform")
 
     train_reconstruction = Param(True)
     train_kl = Param(True)
@@ -126,7 +127,8 @@ class YoloAir_Network(ScopedFunction):
         self.HWB = self.H * self.W * self.B
 
         self.count_prior_log_odds = build_scheduled_value(self.count_prior_log_odds, "count_prior_log_odds")
-        self.obj_temperature = build_scheduled_value(self.obj_temperature, "obj_temperature")
+        self.obj_concrete_temp = build_scheduled_value(self.obj_concrete_temp, "obj_concrete_temp")
+        self.obj_temp = build_scheduled_value(self.obj_temp, "obj_temp")
 
         self.yx_prior_mean = build_scheduled_value(self.yx_prior_mean, "yx_prior_mean")
         self.yx_prior_std = build_scheduled_value(self.yx_prior_std, "yx_prior_std")
@@ -285,11 +287,12 @@ class YoloAir_Network(ScopedFunction):
 
     def _build_obj(self, obj_logits, is_training, **kwargs):
         obj_logits = self.training_wheels * tf.stop_gradient(obj_logits) + (1-self.training_wheels) * obj_logits
+        obj_logits = obj_logits / self.obj_temp
 
         obj_log_odds = tf.clip_by_value(obj_logits, -10., 10.)
 
         obj_pre_sigmoid = concrete_binary_pre_sigmoid_sample(
-            obj_log_odds, self.obj_temperature
+            obj_log_odds, self.obj_concrete_temp
         )
         raw_obj = tf.nn.sigmoid(obj_pre_sigmoid)
 
@@ -707,8 +710,8 @@ class YoloAir_Network(ScopedFunction):
                         prior_log_odds = tf.log(p_z / (1-p_z))
                         _obj_kl = concrete_binary_sample_kl(
                             self._tensors["obj_pre_sigmoid"][:, h, w, b, :],
-                            prior_log_odds, self.obj_temperature,
-                            self._tensors["obj_log_odds"][:, h, w, b, :], self.obj_temperature
+                            prior_log_odds, self.obj_concrete_temp,
+                            self._tensors["obj_log_odds"][:, h, w, b, :], self.obj_concrete_temp
                         )
                     else:
                         prob = self._tensors["obj_prob"][:, h, w, b, :]
