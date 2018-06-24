@@ -719,6 +719,17 @@ class YoloAir_Network(ScopedFunction):
 
         self._tensors["n_objects"] = tf.fill((self.batch_size,), self.HWB)
         self._tensors["pred_n_objects"] = tf.reduce_sum(self._tensors['obj'], axis=(1, 2, 3, 4))
+        self._tensors["pred_n_objects_hard"] = tf.reduce_sum(tf.round(self._tensors['obj']), axis=(1, 2, 3, 4))
+
+        if self.object_encoder is None:
+            self.object_encoder = cfg.build_object_encoder(scope="object_encoder")
+            if "encoder" in self.fixed_weights:
+                self.object_encoder.fix_variables()
+
+        if self.object_decoder is None:
+            self.object_decoder = cfg.build_object_decoder(scope="object_decoder")
+            if "decoder" in self.fixed_weights:
+                self.object_decoder.fix_variables()
 
         self._build_program_interpreter()
 
@@ -789,7 +800,7 @@ class YoloAir_Network(ScopedFunction):
         # --- other evaluation metrics
 
         if "n_annotations" in self._tensors:
-            count_1norm = tf.to_float(tf.abs(tf.to_int32(self._tensors["pred_n_objects"]) - self._tensors["n_annotations"]))
+            count_1norm = tf.to_float(tf.abs(tf.to_int32(self._tensors["pred_n_objects_hard"]) - self._tensors["n_annotations"]))
             recorded_tensors["count_1norm"] = tf.reduce_mean(count_1norm)
             recorded_tensors["count_error"] = tf.reduce_mean(tf.to_float(count_1norm > 0.5))
 

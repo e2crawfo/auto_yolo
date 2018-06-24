@@ -213,7 +213,7 @@ air_testing_config = grid_config.copy(
 )
 
 
-def get_env_config(task, size=14, in_colour=False, ops="addition", **_):
+def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="normal", **_):
     if task == "xo":
         return env_config.copy(
             env_name="xo",
@@ -287,6 +287,9 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", **_):
             one_hot=True,
             reductions="sum" if ops == "addition" else "A:sum,N:min,X:max,C:len",
         )
+
+        if image_size == "small":
+            config.update(min_digits=1, max_digits=3, image_shape=(28, 28), largest_digit=27)
     else:
         raise Exception("Unknown task `{}`".format(task))
     return config

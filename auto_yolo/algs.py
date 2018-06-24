@@ -331,13 +331,17 @@ curriculum_2stage = [
 
 yolo_math_2stage_config = yolo_math_config.copy(
     alg_name="yolo_math_2stage",
-    curriculum=curriculum_2stage,
+    curriculum=copy.deepcopy(curriculum_2stage),
+)
+yolo_math_2stage_config['curriculum'][0].update(
+    stopping_criteria="count_error,min",
+    threshold=0.0,
 )
 
 yolo_math_4stage_config = yolo_math_config.copy(
     alg_name="yolo_math_4stage",
 
-    stopping_criteria="loss_reconstruction,min",
+    stopping_criteria="count_error,min",
     threshold=0.0,
     math_weight=0.0,
     fixed_weights="math",
@@ -348,7 +352,6 @@ yolo_math_4stage_config = yolo_math_config.copy(
 )
 yolo_math_4stage_config['curriculum'][-1].update(
     stopping_criteria="math_accuracy,max",
-    threshold=1.0,
 )
 
 # --- SIMPLE_MATH ---
