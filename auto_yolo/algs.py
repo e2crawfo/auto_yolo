@@ -1,9 +1,11 @@
 import numpy as np
 import tensorflow as tf
+import tensorflow.contrib.rnn as rnn
 import copy
 
+from dps import cfg
 from dps.utils import Config
-from dps.utils.tf import MLP
+from dps.utils.tf import MLP, IdentityFunction, FullyConvolutional
 
 from auto_yolo.models import (
     core, air, yolo_rl, yolo_air, yolo_math, yolo_xo, baseline
@@ -106,41 +108,52 @@ yolo_rl_config = alg_config.copy(
     ),
 )
 
-air_config = Config(
+
+class AirImageEncoder(FullyConvolutional):
+    def __init__(self, **kwargs):
+        layout = [
+            dict(filters=128, kernel_size=3, strides=1, padding="VALID"),
+            dict(filters=128, kernel_size=5, strides=1, padding="VALID"),
+            dict(filters=128, kernel_size=3, strides=2, padding="SAME"),
+            dict(filters=3, kernel_size=3, strides=2, padding="SAME"),
+        ]
+        super(AirImageEncoder, self).__init__(layout, check_output_shape=False, **kwargs)
+
+
+# Original config from tf-attend_infer_repeat
+air_config = alg_config.copy(
     alg_name="attend_infer_repeat",
     build_network=air.AIR_Network,
-
     batch_size=64,
-
     verbose_summaries=False,
-
     render_hook=air.AIR_RenderHook(),
-
-    # model params - based on the values in tf-attend-infer-repeat/training.py
-    max_time_steps=3,
+    difference_air=False,
+    build_image_encoder=IdentityFunction,
+    build_cell=lambda scope: rnn.BasicLSTMCell(cfg.rnn_units),
     rnn_units=256,
-    object_shape=(14, 14),
-    vae_latent_dimensions=50,
-    vae_recognition_units=(512, 256),
-    vae_generative_units=(256, 512),
-    scale_prior_mean=-1.0,
-    scale_prior_variance=0.05,
-    shift_prior_mean=0.0,
-    shift_prior_variance=1.0,
-    vae_prior_mean=0.0,
-    vae_prior_variance=1.0,
-    vae_likelihood_std=0.3,
-    scale_hidden_units=64,
-    shift_hidden_units=64,
-    z_pres_hidden_units=64,
+    build_output_network=lambda scope: MLP([128], scope=scope),
+    build_object_encoder=lambda scope: MLP([512, 256], scope=scope, activation_fn=tf.nn.softplus),
+    build_object_decoder=lambda scope: MLP([256, 512], scope=scope, activation_fn=tf.nn.softplus),
+    fixed_values=dict(),
+    fixed_weights="",
+
+    max_time_steps=3,
+    object_shape=(28, 28),
+    A=50,
+
     z_pres_prior_log_odds="Exponential(start=10000.0, end=0.000000001, decay_rate=0.1, decay_steps=3000, log=True)",
     z_pres_temperature=1.0,
     stopping_threshold=0.99,
-    cnn=False,
-    cnn_filters=128,
     per_process_gpu_memory_fraction=0.3,
+    training_wheels=0.0,
+    scale_prior_mean=-1.0,
+    scale_prior_std=np.sqrt(0.05),
+    shift_prior_mean=0.0,
+    shift_prior_std=3.0,
+    attr_prior_mean=0.0,
+    attr_prior_std=1.0,
+    kl_weight=1.0,
 )
-
 
 yolo_baseline_transfer_config = alg_config.copy(
     alg_name="yolo_transfer_baseline",
@@ -274,6 +287,13 @@ def math_prepare_func():
     elif decoder_kind == "attn":
         cfg.build_math_network = yolo_math.AttentionRegressionNetwork
         cfg.ar_n_filters = 256
+    elif decoder_kind == "add":
+        cfg.build_math_network = yolo_math.AdditionNetwork
+        cfg.math_A = 10
+        n_cells = (
+            int(np.ceil(cfg.image_shape[0] / cfg.pixels_per_cell[0])) *
+            int(np.ceil(cfg.image_shape[1] / cfg.pixels_per_cell[1])))
+        cfg.largest_digit = n_cells * 9
     else:
         raise Exception("Unknown value for decoder_kind: '{}'".format(decoder_kind))
 
@@ -309,6 +329,21 @@ yolo_math_config = yolo_air_config.copy(
     build_math_input=lambda scope: MLP([100, 100], scope=scope),
 
     math_weight=1.0,
+    curriculum=[dict()],
+    math_A=None,
+)
+
+
+def yolo_math_1stage_prepare_func():
+    from dps import cfg
+    import numpy as np
+    math_prepare_func()
+    cfg.math_weight = "Exp(0.0, 50., 10000, 0.9)"
+    # cfg.math_weight = "Exp(0.0, {}, 10000, 0.9)".format(np.product(cfg.image_shape))
+
+
+yolo_math_1stage_config = yolo_math_config.copy(
+    prepare_func=yolo_math_1stage_prepare_func
 )
 
 curriculum_2stage = [
@@ -324,7 +359,7 @@ curriculum_2stage = [
         train_kl=False,
         noisy=False,
         fixed_weights="encoder decoder object_encoder object_decoder "
-                      "box obj backbone edge",
+                      "box attr obj backbone edge",
         load_path={"network/reconstruction": -1},
     )
 ]

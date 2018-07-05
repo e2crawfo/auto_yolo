@@ -196,20 +196,6 @@ grid_config = env_config.copy(
     render_step=5000,
     patience=1000000,
     max_steps=110000,
-
-    overwrite_plots=False,
-)
-
-air_testing_config = grid_config.copy(
-    env_name="nips_2018_air_testing",
-    max_time_steps=4,
-    max_chars=4,
-    min_chars=4,
-    grid_shape=(2, 2),
-    spacing=(0, 0),
-    random_offset_range=None,
-    image_shape=(28, 28),
-
 )
 
 
@@ -253,6 +239,26 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
         config.colours = "red blue green cyan yellow magenta"
 
     if task == "grid":
+        if image_size == "small":
+            config.update(
+                min_chars=1,
+                max_chars=4,
+                image_shape=(50, 50),
+                grid_shape=(3, 3),
+                spacing=(0, 0),
+                random_offset_range=(8, 8),
+                colours="",
+            )
+        elif image_size == "pretrain":
+            config.update(
+                min_chars=1,
+                max_chars=1,
+                image_shape=(15, 15),
+                grid_shape=(1, 1),
+                spacing=(-3, -3),
+                random_offset_range=(1, 1),
+            )
+
         return config
 
     size = int(size)
@@ -287,9 +293,6 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
             one_hot=True,
             reductions="sum" if ops == "addition" else "A:sum,N:min,X:max,C:len",
         )
-
-        if image_size == "small":
-            config.update(min_digits=1, max_digits=3, image_shape=(28, 28), largest_digit=27)
     else:
         raise Exception("Unknown task `{}`".format(task))
     return config

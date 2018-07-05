@@ -13,47 +13,8 @@ from dps.utils import Param
 from dps.utils.tf import ScopedFunction, tf_mean_sum, build_scheduled_value, FIXED_COLLECTION
 
 from auto_yolo.tf_ops import render_sprites
-from auto_yolo.models import core
-
-
-def normal_kl(mean, std, prior_mean, prior_std):
-    var = std**2
-    prior_var = prior_std**2
-
-    return 0.5 * (
-        tf.log(prior_var) - tf.log(var) -
-        1.0 + var / prior_var +
-        tf.square(mean - prior_mean) / prior_var
-    )
-
-
-def normal_vae(mean, std, prior_mean, prior_std):
-    sample = mean + tf.random_normal(tf.shape(mean)) * std
-    kl = normal_kl(mean, std, prior_mean, prior_std)
-    return sample, kl
-
-
-def concrete_binary_pre_sigmoid_sample(log_odds, temperature, eps=10e-10):
-    u = tf.random_uniform(tf.shape(log_odds), minval=0, maxval=1)
-    noise = tf.log(u + eps) - tf.log(1.0 - u + eps)
-    return (log_odds + noise) / temperature
-
-
-def concrete_binary_sample_kl(pre_sigmoid_sample,
-                              prior_log_odds, prior_temperature,
-                              posterior_log_odds, posterior_temperature,
-                              eps=10e-10):
-    y = pre_sigmoid_sample
-
-    y_times_prior_temp = y * prior_temperature
-    log_prior = tf.log(prior_temperature + eps) - y_times_prior_temp + prior_log_odds - \
-        2.0 * tf.log(1.0 + tf.exp(-y_times_prior_temp + prior_log_odds) + eps)
-
-    y_times_posterior_temp = y * posterior_temperature
-    log_posterior = tf.log(posterior_temperature + eps) - y_times_posterior_temp + posterior_log_odds - \
-        2.0 * tf.log(1.0 + tf.exp(-y_times_posterior_temp + posterior_log_odds) + eps)
-
-    return log_posterior - log_prior
+from auto_yolo.models.core import (
+    AP, loss_builders, normal_vae, concrete_binary_pre_sigmoid_sample, concrete_binary_sample_kl)
 
 
 def tf_safe_log(value, nan_value=100.0):
@@ -116,6 +77,7 @@ class YoloAir_Network(ScopedFunction):
         n_lookback=1,
     ))
     incremental_attr = Param(True)
+    attr_context = Param(False)
 
     def __init__(self, env, scope=None, **kwargs):
         self.obs_shape = env.datasets['train'].obs_shape
@@ -149,7 +111,11 @@ class YoloAir_Network(ScopedFunction):
 
         self.anchor_boxes = np.array(self.anchor_boxes)
 
-        self.eval_funcs = dict(mAP=core.mAP)
+        self.eval_funcs = dict(
+            AP_at_point_1=AP(0.1),
+            AP_at_point_25=AP(0.25),
+            AP_at_point_5=AP(0.5),
+            AP=AP())
 
         if isinstance(self.fixed_weights, str):
             self.fixed_weights = self.fixed_weights.split()
@@ -191,9 +157,8 @@ class YoloAir_Network(ScopedFunction):
 
     def _build_box(self, box_params, is_training):
         mean, log_std = tf.split(box_params, 2, axis=-1)
-        if self.noisy:
-            std = self.float_is_training * tf.exp(log_std) + (1-self.float_is_training) * tf.zeros_like(log_std)
-        else:
+        std = tf.exp(log_std)
+        if not self.noisy:
             std = tf.zeros_like(log_std)
 
         cy_mean, cx_mean, h_mean, w_mean = tf.split(mean, 4, axis=-1)
@@ -265,6 +230,7 @@ class YoloAir_Network(ScopedFunction):
         )
 
     def _build_attr_from_image(self, boxes, h, w, b, is_training):
+
         # --- Compute sprite locations from box parameters ---
 
         cell_y, cell_x, height, width = tf.split(boxes, 4, axis=-1)
@@ -294,8 +260,8 @@ class YoloAir_Network(ScopedFunction):
         input_glimpses = tf.contrib.resampler.resampler(self.inp, grid_coords)
         input_glimpses = tf.reshape(input_glimpses, (-1, *self.object_shape, self.image_depth))
 
-        attr = self.object_encoder(input_glimpses, (1, 1, self.A), self.is_training)
-        attr = tf.reshape(attr, (-1, self.A))
+        attr = self.object_encoder(input_glimpses, (1, 1, 2*self.A), self.is_training)
+        attr = tf.reshape(attr, (-1, 2*self.A))
 
         return input_glimpses, attr
 
@@ -426,22 +392,27 @@ class YoloAir_Network(ScopedFunction):
                     # --- attr ---
 
                     if self.incremental_attr:
-                        input_glimpses, partial_attr = self._build_attr_from_image(built['box'], h, w, b, self.is_training)
+                        input_glimpses, attr = self._build_attr_from_image(built['box'], h, w, b, self.is_training)
 
-                        if self.attr_network is None:
-                            self.attr_network = self.sequential_cfg.build_next_step(scope="attr_sequential_network")
-                            if "attr" in self.fixed_weights:
-                                self.attr_network.fix_variables()
+                        if self.attr_context:
+                            # Get attr by combining context with the output of the object encoder
+                            if self.attr_network is None:
+                                self.attr_network = self.sequential_cfg.build_next_step(scope="attr_sequential_network")
+                                if "attr" in self.fixed_weights:
+                                    self.attr_network.fix_variables()
 
-                        layer_inp = tf.concat([_backbone_output, context, features, partial_program, partial_attr], axis=1)
-                        n_features = self.n_passthrough_features
-                        output_size = 2 * self.A
+                            layer_inp = tf.concat([_backbone_output, context, features, partial_program, attr], axis=1)
+                            n_features = self.n_passthrough_features
+                            output_size = 2 * self.A
 
-                        network_output = self.attr_network(layer_inp, output_size + n_features, self.is_training)
-                        attr, features = tf.split(network_output, (output_size, n_features), axis=1)
+                            network_output = self.attr_network(layer_inp, output_size + n_features, self.is_training)
+                            attr, features = tf.split(network_output, (output_size, n_features), axis=1)
 
                         attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
                         attr_std = tf.exp(attr_log_std)
+
+                        if not self.noisy:
+                            attr_std = tf.zeros_like(attr_std)
 
                         attr, attr_kl = normal_vae(attr_mean, attr_std, self.attr_prior_mean, self.attr_prior_std)
 
@@ -475,7 +446,6 @@ class YoloAir_Network(ScopedFunction):
 
                     for key, value in built.items():
                         _tensors[key][h, w, b] = value
-
                     partial_program = tf.concat([partial_program, built['obj']], axis=1)
 
                     program[h, w, b] = partial_program
@@ -609,7 +579,7 @@ class YoloAir_Network(ScopedFunction):
             self._tensors["background"]
         )
 
-        output = tf.clip_by_value(output, 1e-6, 1-1e-6)
+        # output = tf.clip_by_value(output, 1e-6, 1-1e-6)
 
         # --- Store values ---
 
@@ -773,6 +743,7 @@ class YoloAir_Network(ScopedFunction):
         recorded_tensors['attr'] = tf.reduce_mean(self._tensors["attr"])
 
         # --- losses ---
+
         losses = dict()
 
         if self.train_reconstruction:
@@ -780,7 +751,7 @@ class YoloAir_Network(ScopedFunction):
 
             output = self._tensors['output']
             inp = self._tensors['inp']
-            self._tensors['per_pixel_reconstruction_loss'] = core.loss_builders[loss_key](output, inp)
+            self._tensors['per_pixel_reconstruction_loss'] = loss_builders[loss_key](output, inp)
             losses['reconstruction'] = (
                 self.reconstruction_weight *
                 tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
@@ -797,10 +768,11 @@ class YoloAir_Network(ScopedFunction):
             losses['w_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["w_kl"])
             losses['attr_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["attr_kl"])
 
-        # --- other evaluation metrics
+        # --- other evaluation metrics ---
 
         if "n_annotations" in self._tensors:
-            count_1norm = tf.to_float(tf.abs(tf.to_int32(self._tensors["pred_n_objects_hard"]) - self._tensors["n_annotations"]))
+            count_1norm = tf.to_float(
+                tf.abs(tf.to_int32(self._tensors["pred_n_objects_hard"]) - self._tensors["n_annotations"]))
             recorded_tensors["count_1norm"] = tf.reduce_mean(count_1norm)
             recorded_tensors["count_error"] = tf.reduce_mean(tf.to_float(count_1norm > 0.5))
 
@@ -938,6 +910,9 @@ class YoloAir_RenderHook(object):
                     (left, top), width, height, linewidth=1, edgecolor="xkcd:yellow", facecolor='none')
                 ax4.add_patch(rect)
 
+            for ax in axes.flatten():
+                ax.set_axis_off()
+
         if prediction is None:
             plt.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0.1, hspace=0.1)
         else:
@@ -999,6 +974,9 @@ class YoloAir_RenderHook(object):
                         ax.set_title("input glimpse")
 
                         ax.imshow(input_glimpses[idx, h, w, b, :, :, :], vmin=0.0, vmax=1.0)
+
+            for ax in axes.flatten():
+                ax.set_axis_off()
 
             plt.subplots_adjust(left=0.02, right=.98, top=.98, bottom=0.02, wspace=0.1, hspace=0.1)
 

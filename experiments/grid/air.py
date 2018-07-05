@@ -1,12 +1,6 @@
-import numpy as np
-
 from auto_yolo import envs
 
-readme = "redoing yolo_air addition experiment"
-
-distributions = dict(
-    n_train=list(1000*2**np.arange(7))
-)
+readme = "testing AIR on grid task for increasing numbers of digits"
 
 durations = dict(
     long=dict(
@@ -31,7 +25,7 @@ durations = dict(
         slack_time="1mins", n_repeats=2, kind="parallel", host_pool=":"),
 
     build_oak=dict(
-        max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="1year",
+        max_hosts=1, ppn=3, cpp=2, gpu_set="0", wall_time="1year",
         project="rpp-bengioy", cleanup_time="1mins",
         slack_time="1mins", n_repeats=1, kind="parallel", host_pool=":",
         config=dict(do_train=False)),
@@ -43,9 +37,14 @@ durations = dict(
         step_time_limit="1year"),
 )
 
+# envs.run_experiment(
+#     "air_grid", dict(n_train=60000), readme,
+#     alg="air", task="grid", durations=durations,
+#     env_kwargs=dict(image_size="pretrain")
+# )
+
 envs.run_experiment(
-    "yolo_addition_2stage_small", dict(n_train=16000, attr_context=True, incremental_attr=False), readme,
-    alg="yolo_math_2stage", task="arithmetic",
-    durations=durations, distributions=distributions,
-    env_kwargs=dict(ops="addition", image_size="small", in_colour=True)
+    "air_grid", dict(n_train=16000), readme,
+    alg="air_exp", task="grid", durations=durations,
+    env_kwargs=dict(image_size="small")
 )

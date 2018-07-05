@@ -7,7 +7,8 @@ import os
 
 from dps import cfg
 from dps.utils import Param
-from dps.utils.tf import ScopedFunction, FullyConvolutional, tf_mean_sum
+from dps.utils.tf import (
+    ScopedFunction, FullyConvolutional, tf_mean_sum, build_scheduled_value)
 from dps.datasets import VisualArithmeticDataset
 
 from auto_yolo.models import core, yolo_air
@@ -195,19 +196,91 @@ class RelationNetwork(ScopedFunction):
         return self.g(g_input, output_size, is_training)
 
 
+def addition(left, right):
+    m = left.shape[1]
+    n = right.shape[1]
+
+    mat = tf.to_float(
+        tf.equal(
+            tf.reshape(tf.range(m)[:, None] + tf.range(n)[None, :], (-1, 1)),
+            tf.range(m + n - 1)[None, :]))
+
+    outer_product = tf.matmul(left[:, :, None], right[:, None, :])
+    outer_product = tf.reshape(outer_product, (-1, m * n))
+
+    return tf.tensordot(outer_product, mat)
+
+
+def addition_compact(left, right):
+    # Runtime is O((m+n) * n), so smaller value should be put second.
+    batch_size = tf.shape(left)[0]
+    m = left.shape[1]
+    n = right.shape[1]
+
+    running_sum = tf.zeros((batch_size, m+n-1))
+    to_add = tf.concat([left, tf.zeros((batch_size, n-1))], axis=1)
+
+    for i in range(n):
+        running_sum += to_add * right[:, i:i+1]
+        to_add = tf.manip.roll(to_add, shift=1, axis=1)
+    return running_sum
+
+
+def addition_compact_logspace(left, right):
+    # Runtime is O((m+n) * n), so smaller value should be put second.
+    batch_size = tf.shape(left)[0]
+    n = right.shape[1]
+
+    tensors = []
+    to_add = tf.concat([left, -100 * tf.ones((batch_size, n-1))], axis=1)
+
+    for i in range(n):
+        tensors.append(to_add + right[:, i:i+1])
+        to_add = tf.manip.roll(to_add, shift=1, axis=1)
+    return tf.reduce_logsumexp(tf.stack(tensors, axis=2), axis=2)
+
+
+class AdditionNetwork(ScopedFunction):
+    def _call(self, inp, output_size, is_training):
+        H, W, B, _ = tuple(int(i) for i in inp.shape[1:])
+
+        # inp = tf.log(tf.nn.softmax(tf.clip_by_value(inp, -10., 10.), axis=4))
+        inp = inp - tf.reduce_logsumexp(inp, axis=4, keepdims=True)
+
+        running_sum = inp[:, 0, 0, 0, :]
+
+        for h in range(H):
+            for w in range(W):
+                for b in range(B):
+                    if h == 0 and w == 0 and b == 0:
+                        pass
+                    else:
+                        right = inp[:, h, w, b, :]
+                        running_sum = addition_compact_logspace(running_sum, right)
+
+        assert running_sum.shape[1] == output_size
+        return running_sum
+
+
 class YoloAir_MathNetwork(yolo_air.YoloAir_Network):
     math_weight = Param()
     largest_digit = Param()
+    math_A = Param()
 
     math_input_network = None
     math_network = None
+
+    def __init__(self, env, scope=None, **kwargs):
+        self.math_weight = build_scheduled_value(self.math_weight, "math_weight")
+        super(YoloAir_MathNetwork, self).__init__(env, scope=scope, **kwargs)
 
     @property
     def n_classes(self):
         return self.largest_digit + 1
 
     def build_math_representation(self, math_attr):
-        return self._tensors["obj"] * math_attr
+        # return self._tensors["obj"] * math_attr
+        return self._tensors["raw_obj"] * math_attr
 
     def build_graph(self, *args, **kwargs):
         with tf.variable_scope("reconstruction", reuse=self.initialized):
@@ -220,8 +293,10 @@ class YoloAir_MathNetwork(yolo_air.YoloAir_Network):
                 self.math_input_network.fix_variables()
 
         attr = tf.reshape(self._tensors['attr_mean'], (self.batch_size * self.HWB, self.A))
-        math_attr = self.math_input_network(attr, self.A, self.is_training)
-        math_attr = tf.reshape(math_attr, (self.batch_size, self.H, self.W, self.B, self.A))
+
+        math_A = self.A if self.math_A is None else self.math_A
+        math_attr = self.math_input_network(attr, math_A, self.is_training)
+        math_attr = tf.reshape(math_attr, (self.batch_size, self.H, self.W, self.B, math_A))
         self._tensors["math_attr"] = math_attr
 
         _inp = self.build_math_representation(math_attr)
@@ -320,6 +395,8 @@ class SimpleMathNetwork(ScopedFunction):
 
         if not self.noisy and self.train_kl:
             raise Exception("If `noisy` is False, `train_kl` must also be False.")
+
+        self.math_weight = build_scheduled_value(self.math_weight, "math_weight")
 
         super(SimpleMathNetwork, self).__init__(scope=scope)
 

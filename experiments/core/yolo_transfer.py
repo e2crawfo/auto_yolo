@@ -44,7 +44,7 @@ durations = dict(
 )
 
 envs.run_experiment(
-    "yolo_air_transfer", dict(), readme,
+    "yolo_air_transfer", dict(min_chars=6, max_chars=10), readme,
     alg="yolo_air_transfer", task="scatter", durations=durations,
     distributions=distributions
 )

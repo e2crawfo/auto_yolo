@@ -5,12 +5,52 @@ import collections
 
 from dps import cfg
 from dps.updater import Updater as _Updater
-from dps.env.advanced.yolo import mAP as _mAP
+from dps.env.advanced.yolo import mAP
 from dps.datasets import EmnistObjectDetectionDataset
 from dps.utils import Param, prime_factors
 from dps.utils.tf import (
     FullyConvolutional, build_gradient_train_op, tf_mean_sum)
 from dps.updater import DataManager
+
+
+def normal_kl(mean, std, prior_mean, prior_std):
+    var = std**2
+    prior_var = prior_std**2
+
+    return 0.5 * (
+        tf.log(prior_var) - tf.log(var) -
+        1.0 + var / prior_var +
+        tf.square(mean - prior_mean) / prior_var
+    )
+
+
+def normal_vae(mean, std, prior_mean, prior_std):
+    sample = mean + tf.random_normal(tf.shape(mean)) * std
+    kl = normal_kl(mean, std, prior_mean, prior_std)
+    return sample, kl
+
+
+def concrete_binary_pre_sigmoid_sample(log_odds, temperature, eps=10e-10):
+    u = tf.random_uniform(tf.shape(log_odds), minval=0, maxval=1)
+    noise = tf.log(u + eps) - tf.log(1.0 - u + eps)
+    return (log_odds + noise) / temperature
+
+
+def concrete_binary_sample_kl(pre_sigmoid_sample,
+                              prior_log_odds, prior_temperature,
+                              posterior_log_odds, posterior_temperature,
+                              eps=10e-10):
+    y = pre_sigmoid_sample
+
+    y_times_prior_temp = y * prior_temperature
+    log_prior = tf.log(prior_temperature + eps) - y_times_prior_temp + prior_log_odds - \
+        2.0 * tf.log(1.0 + tf.exp(-y_times_prior_temp + prior_log_odds) + eps)
+
+    y_times_posterior_temp = y * posterior_temperature
+    log_posterior = tf.log(posterior_temperature + eps) - y_times_posterior_temp + posterior_log_odds - \
+        2.0 * tf.log(1.0 + tf.exp(-y_times_posterior_temp + posterior_log_odds) + eps)
+
+    return log_posterior - log_prior
 
 
 class Env(object):
@@ -181,8 +221,8 @@ class ObjectDecoder28x28(FullyConvolutional):
 
 def build_xent_loss(predictions, targets):
     return -(
-        targets * tf.log(predictions) +
-        (1. - targets) * tf.log(1. - predictions))
+        targets * tf.log(predictions + 1e-9) +
+        (1. - targets) * tf.log(1. - predictions + 1e-9))
 
 
 def build_squared_loss(predictions, targets):
@@ -238,57 +278,72 @@ class Evaluator(object):
         return record
 
 
-def mAP(_tensors, updater):
-    network = updater.network
+class AP(object):
+    keys_accessed = "normalized_box obj annotations n_annotations"
 
-    obj = _tensors['obj']
-    top, left, height, width = np.split(_tensors['normalized_box'], 4, axis=-1)
-    annotations = _tensors["annotations"]
-    n_annotations = _tensors["n_annotations"]
+    def __init__(self, iou_threshold=None):
+        if iou_threshold is not None:
+            try:
+                iou_threshold = list(iou_threshold)
+            except (TypeError, ValueError):
+                iou_threshold = [float(iou_threshold)]
+        self.iou_threshold = iou_threshold
 
-    batch_size = obj.shape[0]
+    def __call__(self, _tensors, updater):
+        network = updater.network
 
-    top = network.image_height * top
-    height = network.image_height * height
-    bottom = top + height
+        obj = _tensors['obj']
+        top, left, height, width = np.split(_tensors['normalized_box'], 4, axis=-1)
+        annotations = _tensors["annotations"]
+        n_annotations = _tensors["n_annotations"]
 
-    left = network.image_width * left
-    width = network.image_width * width
-    right = left + width
+        batch_size = obj.shape[0]
 
-    obj = obj.reshape(batch_size, -1)
-    top = top.reshape(batch_size, -1)
-    bottom = bottom.reshape(batch_size, -1)
-    left = left.reshape(batch_size, -1)
-    right = right.reshape(batch_size, -1)
+        top = network.image_height * top
+        height = network.image_height * height
+        bottom = top + height
 
-    ground_truth_boxes = []
-    predicted_boxes = []
+        left = network.image_width * left
+        width = network.image_width * width
+        right = left + width
 
-    for idx in range(batch_size):
-        _a = [[0, *rest] for (cls, *rest), _ in zip(annotations[idx], range(n_annotations[idx]))]
-        ground_truth_boxes.append(_a)
+        obj = obj.reshape(batch_size, -1)
+        top = top.reshape(batch_size, -1)
+        bottom = bottom.reshape(batch_size, -1)
+        left = left.reshape(batch_size, -1)
+        right = right.reshape(batch_size, -1)
 
-        _predicted_boxes = []
+        ground_truth_boxes = []
+        predicted_boxes = []
 
-        for i in range(obj.shape[1]):
-            o = obj[idx, i]
+        for idx in range(batch_size):
+            _a = [
+                [0, *rest]
+                for (cls, *rest), _
+                in zip(annotations[idx], range(n_annotations[idx]))
+            ]
 
-            if o > 0.0:
-                _predicted_boxes.append(
-                    [0, o,
-                     top[idx, i],
-                     bottom[idx, i],
-                     left[idx, i],
-                     right[idx, i]]
-                )
+            ground_truth_boxes.append(_a)
 
-        predicted_boxes.append(_predicted_boxes)
+            _predicted_boxes = []
 
-    return _mAP(predicted_boxes, ground_truth_boxes, 1, iou_threshold=[0.5])
+            for i in range(obj.shape[1]):
+                o = obj[idx, i]
 
+                if o > 0.0:
+                    _predicted_boxes.append(
+                        [0, o,
+                         top[idx, i],
+                         bottom[idx, i],
+                         left[idx, i],
+                         right[idx, i]]
+                    )
 
-mAP.keys_accessed = "normalized_box obj annotations n_annotations"
+            predicted_boxes.append(_predicted_boxes)
+
+        return mAP(
+            predicted_boxes, ground_truth_boxes,
+            n_classes=1, iou_threshold=self.iou_threshold)
 
 
 class Updater(_Updater):
@@ -417,7 +472,7 @@ class Updater(_Updater):
         network_recorded_tensors = network_outputs["recorded_tensors"]
         network_losses = network_outputs["losses"]
 
-        self.recorded_tensors = recorded_tensors = {}
+        self.recorded_tensors = recorded_tensors = dict(global_step=tf.train.get_or_create_global_step())
 
         # --- loss ---
 
