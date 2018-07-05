@@ -6,7 +6,7 @@ readme = "testing AIR on scatter task for increasing numbers of digits"
 
 durations = dict()
 
-n_digits = 1
+n_digits = 4
 
 
 config = dict(
@@ -16,7 +16,7 @@ config = dict(
     z_pres_prior_log_odds=np.log(10000.0),
     curriculum=[dict()],
     n_train=64000, min_digits=n_digits, max_digits=n_digits,
-    max_time_steps=n_digits, verbose_summaries=False,
+    max_time_steps=n_digits, run_all_time_steps=True,
 )
 
 

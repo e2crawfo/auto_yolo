@@ -72,7 +72,7 @@ class Backbone(FullyConvolutional):
     n_channels = Param()
     n_final_layers = Param(2)
 
-    def __init__(self, **kwargs):
+    def __init__(self, check_output_shape=True, **kwargs):
         sh = sorted(prime_factors(self.pixels_per_cell[0]))
         sw = sorted(prime_factors(self.pixels_per_cell[1]))
         assert max(sh) <= 4
@@ -91,7 +91,7 @@ class Backbone(FullyConvolutional):
             dict(filters=self.n_channels, kernel_size=self.kernel_size, strides=1, padding="SAME")
             for i in range(self.n_final_layers)]
 
-        super(Backbone, self).__init__(layout, check_output_shape=True, **kwargs)
+        super(Backbone, self).__init__(layout, check_output_shape=check_output_shape, **kwargs)
 
 
 class InverseBackbone(FullyConvolutional):

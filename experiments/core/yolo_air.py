@@ -4,7 +4,7 @@ readme = "testing yolo_air on scatter task for increasing numbers of digits"
 
 durations = dict()
 
-n_digits = 5
+n_digits = 4
 
 
 config = dict(

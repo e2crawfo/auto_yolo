@@ -1,6 +1,5 @@
 import numpy as np
 import tensorflow as tf
-import tensorflow.contrib.rnn as rnn
 import copy
 
 from dps import cfg
@@ -8,7 +7,7 @@ from dps.utils import Config
 from dps.utils.tf import MLP, IdentityFunction, FullyConvolutional
 
 from auto_yolo.models import (
-    core, air, yolo_rl, yolo_air, yolo_math, yolo_xo, baseline
+    core, air, yolo_air, yolo_math, yolo_xo, baseline
 )
 
 
@@ -35,77 +34,10 @@ alg_config = Config(
     display_step=1000,
 
     curriculum=[dict()],
-)
 
-
-yolo_rl_config = alg_config.copy(
-    alg_name="yolo_rl",
-    build_network=yolo_rl.YoloRL_Network,
-
-    stopping_criteria="TOTAL_COST,min",
-
-    render_hook=yolo_rl.YoloRL_RenderHook(),
-
-    # model params
-
-    build_backbone=core.Backbone,
-    build_next_step=core.NextStep,
-    build_object_encoder=lambda scope: MLP([100, 100], scope=scope),
-    build_object_decoder=lambda scope: MLP([100, 100], scope=scope),
-
-    # build_object_decoder=core.ObjectDecoder,
-
-    use_input_attention=False,
-    decoder_logit_scale=10.0,
-
-    max_object_shape=(28, 28),
-    pixels_per_cell=(8, 8),
-    anchor_boxes=[[14, 14]],
-
-    kernel_size=(3, 3),
-
-    n_channels=128,
-    n_decoder_channels=128,
-    A=100,
-    n_passthrough_features=0,
-    n_backbone_features=100,
-
-    min_hw=0.0,
-    max_hw=1.0,
-
-    box_std=0.0,
-    attr_std=0.0,
-    z_std=0.1,
-    obj_exploration=0.05,
-    obj_default=0.5,
-    explore_during_val=False,
-
-    use_baseline=True,
-
-    # Costs
-    area_weight=1.0,
-    nonzero_weight=25.0,
-    rl_weight=1.0,
-    hw_weight=None,
-    z_weight=None,
-
-    area_neighbourhood_size=2,
-    hw_neighbourhood_size=None,
-    nonzero_neighbourhood_size=2,
-    local_reconstruction_cost=True,
-
-    target_area=0.0,
-    target_hw=0.0,
-
-    fixed_values=dict(),
-    fixed_weights="",
-    order="box obj z attr",
-
-    sequential_cfg=dict(
-        on=True,
-        lookback_shape=(2, 2, 2),
-        build_next_step=lambda scope: MLP([100, 100], scope=scope),
-    ),
+    tile_shape=(48, 48),
+    n_samples_per_image=4,
+    postprocessing="",
 )
 
 
@@ -113,9 +45,10 @@ class AirImageEncoder(FullyConvolutional):
     def __init__(self, **kwargs):
         layout = [
             dict(filters=128, kernel_size=3, strides=1, padding="VALID"),
-            dict(filters=128, kernel_size=5, strides=1, padding="VALID"),
+            dict(filters=128, kernel_size=3, strides=1, padding="VALID"),
             dict(filters=128, kernel_size=3, strides=2, padding="SAME"),
-            dict(filters=3, kernel_size=3, strides=2, padding="SAME"),
+            dict(filters=128, kernel_size=3, strides=2, padding="SAME"),
+            dict(filters=16, kernel_size=3, strides=2, padding="SAME"),
         ]
         super(AirImageEncoder, self).__init__(layout, check_output_shape=False, **kwargs)
 
@@ -129,7 +62,7 @@ air_config = alg_config.copy(
     render_hook=air.AIR_RenderHook(),
     difference_air=False,
     build_image_encoder=IdentityFunction,
-    build_cell=lambda scope: rnn.BasicLSTMCell(cfg.rnn_units),
+    build_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(cfg.rnn_units),
     rnn_units=256,
     build_output_network=lambda scope: MLP([128], scope=scope),
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope, activation_fn=tf.nn.softplus),
@@ -138,11 +71,12 @@ air_config = alg_config.copy(
     fixed_weights="",
 
     max_time_steps=3,
-    object_shape=(28, 28),
+    object_shape=(14, 14),
     A=50,
 
     z_pres_prior_log_odds="Exponential(start=10000.0, end=0.000000001, decay_rate=0.1, decay_steps=3000, log=True)",
     z_pres_temperature=1.0,
+    run_all_time_steps=False,
     stopping_threshold=0.99,
     per_process_gpu_memory_fraction=0.3,
     training_wheels=0.0,
@@ -153,6 +87,9 @@ air_config = alg_config.copy(
     attr_prior_mean=0.0,
     attr_prior_std=1.0,
     kl_weight=1.0,
+    pixels_per_cell=(12, 12),
+    n_channels=128,
+    kernel_size=1,
 )
 
 yolo_baseline_transfer_config = alg_config.copy(
@@ -162,7 +99,7 @@ yolo_baseline_transfer_config = alg_config.copy(
     A=50,
     do_train=False,
     render_step=1,
-    stopping_criteria="mAP,max",
+    stopping_criteria="AP_at_point_25,max",
     threshold=1.0,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
@@ -189,7 +126,7 @@ yolo_air_config = alg_config.copy(
     build_network=yolo_air.YoloAir_Network,
     prepare_func=yolo_air_prepare_func,
 
-    stopping_criteria="mAP,max",
+    stopping_criteria="AP_at_point_5,max",
     threshold=1.0,
 
     render_hook=yolo_air.YoloAir_RenderHook(),
@@ -225,11 +162,7 @@ yolo_air_config = alg_config.copy(
     final_count_prior_log_odds=0.0125,
     kernel_size=1,
 
-    training_wheels="Exp(1.0, 0.0, decay_rate=0.0, decay_steps=200, staircase=True)",
-
-    tile_shape=(48, 48),
-    n_samples_per_image=4,
-    postprocessing="",
+    training_wheels="Exp(1.0, 0.0, decay_rate=0.0, decay_steps=1000, staircase=True)",
 
     train_kl=True,
     train_reconstruction=True,

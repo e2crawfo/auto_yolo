@@ -12,7 +12,8 @@ from dps.utils import Param
 from dps.utils.tf import ScopedFunction, RNNCell, build_scheduled_value
 
 from auto_yolo.tf_ops import render_sprites
-from auto_yolo.models import yolo_air, core
+from auto_yolo.models import yolo_air
+from auto_yolo.models.core import loss_builders, AP
 
 
 class BboxCell(RNNCell):
@@ -76,7 +77,11 @@ class YoloBaseline_Network(ScopedFunction):
             self.reconstruction_weight, "reconstruction_weight")
         self.kl_weight = build_scheduled_value(self.kl_weight, "kl_weight")
 
-        self.eval_funcs = dict(mAP=core.mAP)
+        self.eval_funcs = dict(
+            AP_at_point_1=AP(0.1),
+            AP_at_point_25=AP(0.25),
+            AP_at_point_5=AP(0.5),
+            AP=AP())
 
         self.object_encoder = None
         self.object_decoder = None
@@ -290,7 +295,7 @@ class YoloBaseline_Network(ScopedFunction):
 
             output = obj[:, :, :, None, None] * self._tensors["objects"]
             inp = obj[:, :, :, None, None] * self._tensors["input_glimpses"]
-            self._tensors['per_pixel_reconstruction_loss'] = core.loss_builders[loss_key](output, inp)
+            self._tensors['per_pixel_reconstruction_loss'] = loss_builders[loss_key](output, inp)
             losses['reconstruction'] = (
                 self.reconstruction_weight *
                 tf.reduce_sum(self._tensors['per_pixel_reconstruction_loss'])

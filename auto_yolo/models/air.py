@@ -16,7 +16,6 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import matplotlib.colors as colors
 import shutil
 import os
 
@@ -247,6 +246,7 @@ class AIR_AP(object):
 
 class AIR_Network(ScopedFunction):
     max_time_steps = Param()
+    run_all_time_steps = Param(help="If true, always run for `max_time_steps` and don't predict `z_pres`")
     max_chars = Param()
     object_shape = Param()
 
@@ -525,22 +525,27 @@ class AIR_Network(ScopedFunction):
 
             # --- z_pres ---
 
-            z_pres_log_odds = tf.clip_by_value(z_pres_log_odds, -10, 10)
+            if self.run_all_time_steps:
+                z_pres = tf.ones_like(z_pres_log_odds)
+                z_pres_prob = tf.ones_like(z_pres_log_odds)
+                z_pres_kl = tf.zeros_like(z_pres_log_odds)
+            else:
+                z_pres_log_odds = tf.clip_by_value(z_pres_log_odds, -10, 10)
 
-            z_pres_pre_sigmoid = concrete_binary_pre_sigmoid_sample(
-                z_pres_log_odds, self.z_pres_temperature
-            )
-            z_pres = tf.nn.sigmoid(z_pres_pre_sigmoid)
-            z_pres = (
-                self.float_is_training * z_pres +
-                (1 - self.float_is_training) * tf.round(z_pres)
-            )
-            z_pres_prob = tf.nn.sigmoid(z_pres_log_odds)
-            z_pres_kl = concrete_binary_sample_kl(
-                z_pres_pre_sigmoid,
-                self.z_pres_prior_log_odds, self.z_pres_temperature,
-                z_pres_log_odds, self.z_pres_temperature
-            )
+                z_pres_pre_sigmoid = concrete_binary_pre_sigmoid_sample(
+                    z_pres_log_odds, self.z_pres_temperature
+                )
+                z_pres = tf.nn.sigmoid(z_pres_pre_sigmoid)
+                z_pres = (
+                    self.float_is_training * z_pres +
+                    (1 - self.float_is_training) * tf.round(z_pres)
+                )
+                z_pres_prob = tf.nn.sigmoid(z_pres_log_odds)
+                z_pres_kl = concrete_binary_sample_kl(
+                    z_pres_pre_sigmoid,
+                    self.z_pres_prior_log_odds, self.z_pres_temperature,
+                    z_pres_log_odds, self.z_pres_temperature
+                )
 
             stopping_sum += (1.0 - z_pres)
             alive = tf.less(stopping_sum, self.stopping_threshold)
@@ -567,21 +572,6 @@ class AIR_Network(ScopedFunction):
             kl_loss += tf.where(
                 alive, z_pres_kl, tf.zeros_like(kl_loss)
             )
-
-            # I think this doesn't work as well?
-
-            # kl_loss += tf.where(
-            #     alive, z_pres * scale_kl, tf.zeros_like(kl_loss)
-            # )
-            # kl_loss += tf.where(
-            #     alive, z_pres * shift_kl, tf.zeros_like(kl_loss)
-            # )
-            # kl_loss += tf.where(
-            #     alive, z_pres * attr_kl, tf.zeros_like(kl_loss)
-            # )
-            # kl_loss += tf.where(
-            #     alive, z_pres * z_pres_kl, tf.zeros_like(kl_loss)
-            # )
 
             # --- record values ---
 
@@ -851,7 +841,7 @@ class AIR_RenderHook(object):
         annotations = fetched["annotations"]
         n_annotations = fetched["n_annotations"]
 
-        color_order = sorted(colors.XKCD_COLORS)
+        color_order = plt.rcParams['axes.prop_cycle'].by_key()['color']
 
         max_n_digits = max(predicted_n_digits)
 

@@ -1336,3 +1336,74 @@ single_digit_config = config.copy(
         dict(obj_exploration=0.0),
     ]
 )
+
+
+# yolo_rl_config = alg_config.copy(
+#     alg_name="yolo_rl",
+#     build_network=yolo_rl.YoloRL_Network,
+# 
+#     stopping_criteria="TOTAL_COST,min",
+# 
+#     render_hook=yolo_rl.YoloRL_RenderHook(),
+# 
+#     # model params
+# 
+#     build_backbone=core.Backbone,
+#     build_next_step=core.NextStep,
+#     build_object_encoder=lambda scope: MLP([100, 100], scope=scope),
+#     build_object_decoder=lambda scope: MLP([100, 100], scope=scope),
+# 
+#     # build_object_decoder=core.ObjectDecoder,
+# 
+#     use_input_attention=False,
+#     decoder_logit_scale=10.0,
+# 
+#     max_object_shape=(28, 28),
+#     pixels_per_cell=(8, 8),
+#     anchor_boxes=[[14, 14]],
+# 
+#     kernel_size=(3, 3),
+# 
+#     n_channels=128,
+#     n_decoder_channels=128,
+#     A=100,
+#     n_passthrough_features=0,
+#     n_backbone_features=100,
+# 
+#     min_hw=0.0,
+#     max_hw=1.0,
+# 
+#     box_std=0.0,
+#     attr_std=0.0,
+#     z_std=0.1,
+#     obj_exploration=0.05,
+#     obj_default=0.5,
+#     explore_during_val=False,
+# 
+#     use_baseline=True,
+# 
+#     # Costs
+#     area_weight=1.0,
+#     nonzero_weight=25.0,
+#     rl_weight=1.0,
+#     hw_weight=None,
+#     z_weight=None,
+# 
+#     area_neighbourhood_size=2,
+#     hw_neighbourhood_size=None,
+#     nonzero_neighbourhood_size=2,
+#     local_reconstruction_cost=True,
+# 
+#     target_area=0.0,
+#     target_hw=0.0,
+# 
+#     fixed_values=dict(),
+#     fixed_weights="",
+#     order="box obj z attr",
+# 
+#     sequential_cfg=dict(
+#         on=True,
+#         lookback_shape=(2, 2, 2),
+#         build_next_step=lambda scope: MLP([100, 100], scope=scope),
+#     ),
+# )
