@@ -33,6 +33,8 @@ alg_config = Config(
     eval_step=1000,
     display_step=1000,
 
+    load_path=-1,
+
     curriculum=[dict()],
 
     tile_shape=(48, 48),
@@ -109,7 +111,6 @@ yolo_baseline_transfer_config = alg_config.copy(
     threshold=1.0,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
-    preserve_env=False,
     curriculum=[
         dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False)
         for n in range(1, 21)],
@@ -370,7 +371,6 @@ yolo_xo_init_config.update(
     keep_prob=0.25,
     balanced=False,
     n_train=60000,
-    curriculum=[dict()],
 )
 
 yolo_xo_continue_config = yolo_xo_config.copy()
@@ -378,7 +378,6 @@ yolo_xo_continue_config.update(curriculum_xo_2stage[1])
 yolo_xo_continue_config.update(
     alg_name="yolo_xo_continue",
     prepare_func=continue_prepare_func,
-    curriculum=[dict()],
     init_path="/scratch/e2crawfo/dps_data/run_experiments/GOOD_NIPS_2018/"
               "run_search_yolo-xo-init_env=xo_alg=yolo-xo-init_duration=long_seed=0_2018_06_05_09_23_55/experiments"
 )
@@ -403,7 +402,6 @@ simple_xo_init_config.update(
     keep_prob=0.25,
     balanced=False,
     n_train=60000,
-    curriculum=[dict()],
 )
 
 simple_xo_continue_config = simple_xo_config.copy()
@@ -411,7 +409,6 @@ simple_xo_continue_config.update(curriculum_2stage[1])
 simple_xo_continue_config.update(
     alg_name="simple_xo_continue",
     prepare_func=continue_prepare_func,
-    curriculum=[dict()],
     init_path="/scratch/e2crawfo/dps_data/run_experiments/GOOD_NIPS_2018/"
               "run_search_yolo-xo-simple-init_env=xo_alg=yolo-xo-simple-init_duration=long_seed=0_2018_06_05_09_25_02/experiments"
 )

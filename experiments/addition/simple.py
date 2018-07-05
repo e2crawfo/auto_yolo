@@ -15,15 +15,15 @@ durations = dict(
         slack_time="5mins", n_repeats=6, step_time_limit="24hours"),
 
     build=dict(
-        max_hosts=1, ppn=3, cpp=2, gpu_set="0", wall_time="2hours",
+        max_hosts=1, ppn=4, cpp=2, gpu_set="0", wall_time="2hours",
         project="rpp-bengioy", cleanup_time="2mins",
         slack_time="2mins", n_repeats=1, step_time_limit="2hours",
-        config=dict(do_train=False)),
+        config=dict(max_steps=1000, eval_step=100)),
 
     short=dict(
-        max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="20mins",
+        max_hosts=1, ppn=4, cpp=2, gpu_set="0", wall_time="30mins",
         project="rpp-bengioy", cleanup_time="1mins",
-        slack_time="1mins", n_repeats=1, n_param_settings=4),
+        slack_time="1mins", n_repeats=1),
 
     small_oak=dict(
         max_hosts=1, ppn=4, cpp=2, gpu_set="0", wall_time="30mins",
@@ -44,8 +44,8 @@ durations = dict(
 )
 
 envs.run_experiment(
-    "simple_addition_2stage", dict(n_train=1000), readme,
-    alg="simple_math_2stage", task="arithmetic",
+    "simple_addition", dict(n_train=1000), readme,
+    alg="simple_math", task="arithmetic",
     durations=durations, distributions=distributions,
     env_kwargs=dict(ops="addition")
 )
