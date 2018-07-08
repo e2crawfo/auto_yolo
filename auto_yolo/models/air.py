@@ -420,6 +420,11 @@ class AIR_Network(ScopedFunction):
 
         self.target_n_digits = self._tensors["n_annotations"]
 
+        if not self.difference_air:
+            encoded_inp = self.image_encoder(
+                self._tensors["inp"], 0, self.is_training)
+            self.encoded_inp = tf.layers.flatten(encoded_inp)
+
         # --- condition of while-loop ---
 
         def cond(step, stopping_sum, *_):
@@ -439,12 +444,14 @@ class AIR_Network(ScopedFunction):
                  vae_input_ta, vae_output_ta):
 
             if self.difference_air:
-                inp = self._tensors["inp"] - tf.reshape(running_recon, (self.batch_size, *self.obs_shape))
+                inp = (
+                    self._tensors["inp"] -
+                    tf.stop_gradient(tf.reshape(running_recon, (self.batch_size, *self.obs_shape)))
+                )
+                encoded_inp = self.image_encoder(inp, 0, self.is_training)
+                encoded_inp = tf.layers.flatten(encoded_inp)
             else:
-                inp = self._tensors["inp"]
-
-            encoded_inp = self.image_encoder(inp, 0, self.is_training)
-            encoded_inp = tf.layers.flatten(encoded_inp)
+                encoded_inp = self.encoded_inp
 
             hidden_rep, next_state = self.cell(encoded_inp, prev_state)
 

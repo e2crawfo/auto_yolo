@@ -4,7 +4,7 @@ import copy
 
 from dps import cfg
 from dps.utils import Config
-from dps.utils.tf import MLP, IdentityFunction, FullyConvolutional
+from dps.utils.tf import MLP, IdentityFunction, FullyConvolutional, FeedforwardCell
 
 from auto_yolo.models import (
     core, air, yolo_air, yolo_math, yolo_xo, baseline
@@ -90,6 +90,12 @@ air_config = alg_config.copy(
     pixels_per_cell=(12, 12),
     n_channels=128,
     kernel_size=1,
+)
+
+dair_config = air_config.copy(
+    difference_air=True,
+    build_cell=lambda scope: FeedforwardCell(MLP([512, 256]), cfg.rnn_units),
+    rnn_units=256,
 )
 
 yolo_baseline_transfer_config = alg_config.copy(
