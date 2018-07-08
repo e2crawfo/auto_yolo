@@ -33,8 +33,6 @@ alg_config = Config(
     eval_step=1000,
     display_step=1000,
 
-    load_path=-1,
-
     curriculum=[dict()],
 
     tile_shape=(48, 48),
@@ -107,7 +105,7 @@ yolo_baseline_transfer_config = alg_config.copy(
     A=50,
     do_train=False,
     render_step=1,
-    stopping_criteria="AP_at_point_25,max",
+    stopping_criteria="AP,max",
     threshold=1.0,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
@@ -133,7 +131,7 @@ yolo_air_config = alg_config.copy(
     build_network=yolo_air.YoloAir_Network,
     prepare_func=yolo_air_prepare_func,
 
-    stopping_criteria="AP_at_point_5,max",
+    stopping_criteria="AP,max",
     threshold=1.0,
 
     render_hook=yolo_air.YoloAir_RenderHook(),

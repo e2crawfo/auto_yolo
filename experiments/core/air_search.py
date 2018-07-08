@@ -1,4 +1,5 @@
 import numpy as np
+import argparse
 
 from auto_yolo import envs
 
@@ -12,22 +13,32 @@ distributions = dict(
     rnn_n_units=[64, 128, 256],
 )
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--n-digits", type=int, default=1)
+args, _ = parser.parse_known_args()
+
+
 durations = dict(
     long=dict(
-        max_hosts=1, ppn=12, cpp=2, gpu_set="0,1", wall_time="24hours",
-        project="rpp-bengioy", cleanup_time="20mins",
+        max_hosts=1, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="24hours",
+        project="rpp-bengioy", cleanup_time="5mins",
         slack_time="5mins", n_repeats=1, step_time_limit="24hours"),
+
+    test=dict(
+        max_hosts=1, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="30mins",
+        project="rpp-bengioy", cleanup_time="2mins",
+        slack_time="2mins", n_repeats=1, config=dict(do_train=False), n_param_settings=24),
 
     build=dict(
         max_hosts=1, ppn=1, cpp=2, gpu_set="0", wall_time="20mins",
         project="rpp-bengioy", cleanup_time="2mins",
         slack_time="2mins", n_repeats=1, step_time_limit="2hours",
-        config=dict(do_train=False)),
+        config=dict(do_train=False), n_param_settings=1,),
 
     short=dict(
-        max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="20mins",
+        max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="12mins",
         project="rpp-bengioy", cleanup_time="1mins",
-        slack_time="1mins", n_repeats=1, n_param_settings=4),
+        slack_time="1mins", n_repeats=1, n_param_settings=2),
 
     small_oak=dict(
         max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="30mins",
@@ -41,14 +52,13 @@ durations = dict(
         config=dict(do_train=False)),
 )
 
-n_digits = 1
+n_digits = args.n_digits
 
 config = dict(
     curriculum=[dict()],
     n_train=64000, min_digits=n_digits, max_digits=n_digits,
     max_time_steps=n_digits, run_all_time_steps=True,
-    stopping_criteria="AP_at_point_25,max",
-    threshold=0.99,
+    stopping_criteria="AP,max", threshold=0.99, patience=10000,
 )
 
 

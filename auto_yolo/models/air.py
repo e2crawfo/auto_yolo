@@ -277,11 +277,9 @@ class AIR_Network(ScopedFunction):
     def __init__(self, env, scope=None, **kwargs):
         self.obs_shape = env.datasets['train'].obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
-        self.eval_funcs = dict(
-            AP_at_point_1=AIR_AP(0.1),
-            AP_at_point_25=AIR_AP(0.25),
-            AP_at_point_5=AIR_AP(0.5),
-            AP=AIR_AP())
+        ap_iou_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        self.eval_funcs = {"AP_at_point_{}".format(int(10 * v)): AIR_AP(v) for v in ap_iou_values}
+        self.eval_funcs["AP"] = AIR_AP(ap_iou_values)
 
         self.training_wheels = build_scheduled_value(self.training_wheels, "training_wheels")
         self.kl_weight = build_scheduled_value(self.kl_weight, "kl_weight")
