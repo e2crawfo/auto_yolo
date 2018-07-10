@@ -77,11 +77,9 @@ class YoloBaseline_Network(ScopedFunction):
             self.reconstruction_weight, "reconstruction_weight")
         self.kl_weight = build_scheduled_value(self.kl_weight, "kl_weight")
 
-        self.eval_funcs = dict(
-            AP_at_point_1=AP(0.1),
-            AP_at_point_25=AP(0.25),
-            AP_at_point_5=AP(0.5),
-            AP=AP())
+        ap_iou_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        self.eval_funcs = {"AP_at_point_{}".format(int(10 * v)): AP(v) for v in ap_iou_values}
+        self.eval_funcs["AP"] = AP(ap_iou_values)
 
         self.object_encoder = None
         self.object_decoder = None
