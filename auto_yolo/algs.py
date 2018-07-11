@@ -62,8 +62,8 @@ air_config = alg_config.copy(
     render_hook=air.AIR_RenderHook(),
     difference_air=False,
     build_image_encoder=IdentityFunction,
-    build_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(cfg.rnn_units),
-    rnn_units=256,
+    build_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(cfg.rnn_n_units),
+    rnn_n_units=256,
     build_output_network=lambda scope: MLP([128], scope=scope),
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope, activation_fn=tf.nn.softplus),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope, activation_fn=tf.nn.softplus),
@@ -87,15 +87,13 @@ air_config = alg_config.copy(
     attr_prior_mean=0.0,
     attr_prior_std=1.0,
     kl_weight=1.0,
-    pixels_per_cell=(12, 12),
-    n_channels=128,
-    kernel_size=1,
+
+    complete_rnn_input=False,
 )
 
 dair_config = air_config.copy(
     difference_air=True,
-    build_cell=lambda scope: FeedforwardCell(MLP([512, 256]), cfg.rnn_units),
-    rnn_units=256,
+    build_cell=lambda scope: FeedforwardCell(MLP([512, 256]), cfg.rnn_n_units),
 )
 
 yolo_baseline_transfer_config = alg_config.copy(

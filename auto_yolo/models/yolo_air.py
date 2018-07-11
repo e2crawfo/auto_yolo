@@ -47,6 +47,7 @@ class YoloAir_Network(ScopedFunction):
 
     use_concrete_kl = Param(True)
     count_prior_log_odds = Param()
+    count_prior_dist = Param(None, help="If not None, overrides `count_prior_log_odds`.")
     obj_concrete_temp = Param(1.0, help="Higher values -> smoother")
     obj_temp = Param(1.0, help="Higher values -> more uniform")
 
@@ -87,6 +88,12 @@ class YoloAir_Network(ScopedFunction):
         self.W = int(np.ceil(self.image_width / self.pixels_per_cell[1]))
         self.B = len(self.anchor_boxes)
         self.HWB = self.H * self.W * self.B
+
+        if isinstance(self.count_prior_dist, str):
+            self.count_prior_dist = eval(self.count_prior_dist)
+
+        if self.count_prior_dist is not None:
+            assert len(self.count_prior_dist) == (self.HWB + 1)
 
         self.count_prior_log_odds = build_scheduled_value(self.count_prior_log_odds, "count_prior_log_odds")
         self.obj_concrete_temp = build_scheduled_value(self.obj_concrete_temp, "obj_concrete_temp")
@@ -628,8 +635,13 @@ class YoloAir_Network(ScopedFunction):
         # --- compute obj_kl ---
 
         count_support = tf.range(self.HWB+1, dtype=tf.float32)
-        count_prior_prob = tf.nn.sigmoid(self.count_prior_log_odds)
-        count_distribution = (1 - count_prior_prob) * (count_prior_prob ** count_support)
+
+        if self.count_prior_dist is not None:
+            count_distribution = tf.constant(self.count_prior_dist, dtype=tf.float32)
+        else:
+            count_prior_prob = tf.nn.sigmoid(self.count_prior_log_odds)
+            count_distribution = (1 - count_prior_prob) * (count_prior_prob ** count_support)
+
         normalizer = tf.reduce_sum(count_distribution)
         count_distribution = count_distribution / normalizer
         count_distribution = tf.tile(count_distribution[None, :], (self.batch_size, 1))

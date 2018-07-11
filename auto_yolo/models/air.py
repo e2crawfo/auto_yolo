@@ -274,6 +274,8 @@ class AIR_Network(ScopedFunction):
     fixed_values = Param()
     fixed_weights = Param()
 
+    complete_rnn_input = Param()
+
     def __init__(self, env, scope=None, **kwargs):
         self.obs_shape = env.datasets['train'].obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
@@ -439,7 +441,8 @@ class AIR_Network(ScopedFunction):
                  shift_ta, shift_kl_ta, shift_std_ta,
                  attr_ta, attr_kl_ta, attr_std_ta,
                  z_pres_probs_ta, z_pres_kl_ta,
-                 vae_input_ta, vae_output_ta):
+                 vae_input_ta, vae_output_ta,
+                 scale, shift, attr, z_pres):
 
             if self.difference_air:
                 inp = (
@@ -451,7 +454,12 @@ class AIR_Network(ScopedFunction):
             else:
                 encoded_inp = self.encoded_inp
 
-            hidden_rep, next_state = self.cell(encoded_inp, prev_state)
+            if self.complete_rnn_input:
+                rnn_input = tf.concat([encoded_inp, scale, shift, attr, z_pres], axis=1)
+            else:
+                rnn_input = encoded_inp
+
+            hidden_rep, next_state = self.cell(rnn_input, prev_state)
 
             outputs = self.output_network(hidden_rep, 9, self.is_training)
 
@@ -463,8 +471,6 @@ class AIR_Network(ScopedFunction):
 
             scale_std = tf.exp(scale_log_std)
 
-            # scale_mean = self.apply_training_wheel(scale_mean)
-            # scale_std = self.apply_training_wheel(scale_std)
             scale_mean = self.apply_fixed_value("scale_mean", scale_mean)
             scale_std = self.apply_fixed_value("scale_std", scale_std)
 
@@ -473,14 +479,10 @@ class AIR_Network(ScopedFunction):
             scale_kl = tf.reduce_sum(scale_kl, axis=1, keepdims=True)
             scale = tf.nn.sigmoid(tf.clip_by_value(scale_logits, -10, 10))
 
-            # scale = self.apply_fixed_value("scale", scale)
-
             # --- shift ---
 
             shift_std = tf.exp(shift_log_std)
 
-            # shift_mean = self.apply_training_wheel(shift_mean)
-            # shift_std = self.apply_training_wheel(shift_std)
             shift_mean = self.apply_fixed_value("shift_mean", shift_mean)
             shift_std = self.apply_fixed_value("shift_std", shift_std)
 
@@ -488,8 +490,6 @@ class AIR_Network(ScopedFunction):
                 shift_mean, shift_std, self.shift_prior_mean, self.shift_prior_std)
             shift_kl = tf.reduce_sum(shift_kl, axis=1, keepdims=True)
             shift = tf.nn.tanh(tf.clip_by_value(shift_logits, -10, 10))
-
-            # shift = self.apply_fixed_value("shift", shift)
 
             # --- Extract windows from scene ---
 
@@ -607,6 +607,8 @@ class AIR_Network(ScopedFunction):
                 attr_ta, attr_kl_ta, attr_std_ta,
                 z_pres_probs_ta, z_pres_kl_ta,
                 vae_input_ta, vae_output_ta,
+
+                scale, shift, attr, z_pres,
             )
 
         # --- end of while-loop body ---
@@ -616,7 +618,7 @@ class AIR_Network(ScopedFunction):
         (_, _, _, reconstruction, kl_loss, self.predicted_n_digits,
          scale, scale_kl, scale_std, shift, shift_kl, shift_std,
          attr, attr_kl, attr_std, z_pres_probs, z_pres_kl,
-         vae_input, vae_output) = tf.while_loop(
+         vae_input, vae_output, _, _, _, _) = tf.while_loop(
                 cond, body, [
                     tf.constant(0),                                 # RNN time step, initially zero
                     tf.zeros((self.batch_size, 1)),                 # running sum of z_pres samples
@@ -637,6 +639,11 @@ class AIR_Network(ScopedFunction):
                     tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
                     tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
                     tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+
+                    tf.zeros((self.batch_size, 2)),  # scale
+                    tf.zeros((self.batch_size, 2)),  # shift
+                    tf.zeros((self.batch_size, self.A)),  # attr
+                    tf.zeros((self.batch_size, 1)),  # z_pres
                 ]
             )
 
