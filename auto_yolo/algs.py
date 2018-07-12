@@ -7,7 +7,7 @@ from dps.utils import Config
 from dps.utils.tf import MLP, IdentityFunction, FullyConvolutional, FeedforwardCell
 
 from auto_yolo.models import (
-    core, air, yolo_air, yolo_math, yolo_xo, baseline
+    core, air, yolo_air, yolo_math, yolo_xo, baseline, nem
 )
 
 
@@ -94,6 +94,77 @@ air_config = alg_config.copy(
 dair_config = air_config.copy(
     difference_air=True,
     build_cell=lambda scope: FeedforwardCell(MLP([512, 256]), cfg.rnn_n_units),
+)
+
+nem_config = alg_config.copy(
+    alg_name="nem",
+    build_network=nem.NEM_Network,
+    batch_size=16,
+    lr_schedule=0.001,
+    max_grad_norm=None,
+
+    threshold=-np.inf,
+    max_experiments=None,
+    render_hook=nem.NeuralEM_RenderHook(4),
+    render_step=5000,
+
+    # ------- from nem.py --------
+
+    noise_prob=0.2,                              # probability of annihilating the pixel
+
+    # ------- from nem_model.py ------
+
+    # general
+    binary=False,
+    gradient_gamma=True,       # whether to back-propagate a gradient through gamma
+
+    # loss
+    inter_weight=1.0,          # weight for the inter-cluster loss
+    loss_step_weights='last',  # all, last, or list of weights
+    pixel_prior=dict(
+        p=0.0,                     # probability of success for pixel prior Bernoulli
+        mu=0.0,                    # mean of pixel prior Gaussian
+        sigma=0.25,                 # std of pixel prior Gaussian
+    ),
+
+    # em
+    k=4,                       # number of components
+    n_steps=10,                # number of (RN)N-EM steps
+    e_sigma=0.25,              # sigma used in the e-step when pixel distributions are Gaussian (acts as a temperature)
+    pred_init=0.0,             # initial prediction used to compute the input
+
+    # ------- from network.py ------
+
+    use_NEM_formulation=False,
+
+    # input_network=[],
+    # recurrent_network=[
+    #     {'name': 'rnn', 'size': 250, 'act': 'sigmoid', 'ln': False}
+    # ],
+    # output_network=[
+    #     {'name': 'fc', 'size': 3 * 784, 'act': 'sigmoid', 'ln': False},
+    #     # {'name': 'fc', 'size': 784, 'act': '*', 'ln': False},
+    # ],
+
+    build_input_network=lambda scope: nem.FeedforwardNetwork(
+        [{'name': 'input_norm'},
+         {'name': 'reshape', 'shape': (48, 48, 3)},
+         {'name': 'conv', 'size': 32, 'act': 'elu', 'stride': [2, 2], 'kernel': (4, 4), 'ln': True},
+         {'name': 'conv', 'size': 64, 'act': 'elu', 'stride': [2, 2], 'kernel': (4, 4), 'ln': True},
+         {'name': 'conv', 'size': 128, 'act': 'elu', 'stride': [2, 2], 'kernel': (4, 4), 'ln': True},
+         {'name': 'reshape', 'shape': -1},
+         {'name': 'fc', 'size': 512, 'act': 'elu', 'ln': True}], scope=scope),
+
+    build_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(128), # {'name': 'rnn', 'size': 250, 'act': 'sigmoid', 'ln': True}
+
+    build_output_network=lambda scope: nem.FeedforwardNetwork(
+        [{'name': 'fc', 'size': 512, 'act': 'relu', 'ln': True},
+         {'name': 'fc', 'size': 6 * 6 * 128, 'act': 'relu', 'ln': True},
+         {'name': 'reshape', 'shape': (6, 6, 128)},
+         {'name': 't_conv', 'size': 64, 'act': 'relu', 'stride': [2, 2], 'kernel': (4, 4), 'ln': True},
+         {'name': 't_conv', 'size': 32, 'act': 'relu', 'stride': [2, 2], 'kernel': (4, 4), 'ln': True},
+         {'name': 't_conv', 'size': 3, 'act': 'sigmoid', 'stride': [2, 2], 'kernel': (4, 4), 'ln': False},
+         {'name': 'reshape', 'shape': -1}], scope=scope)
 )
 
 yolo_baseline_transfer_config = alg_config.copy(

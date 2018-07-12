@@ -3,32 +3,22 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 from tensorflow.contrib import distributions as dist
-from tensorflow.contrib.rnn import RNNCell as _RNNCell
+from tensorflow.contrib.rnn import RNNCell
 import numpy as np
 from matplotlib.colors import hsv_to_rgb
 import matplotlib.pyplot as plt
 import os
+import shutil
 
 
 from dps import cfg
-from dps.datasets import EmnistObjectDetectionDataset
-from dps.updater import Updater
-from dps.utils import Param, Config, square_subplots
-from dps.utils.tf import trainable_variables, build_gradient_train_op
+from dps.utils import Param
+from dps.utils.tf import ScopedFunction
+
+from auto_yolo.models.core import AP
 
 
-class Env(object):
-    def __init__(self):
-        train = EmnistObjectDetectionDataset(n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9))
-        val = EmnistObjectDetectionDataset(n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.))
-
-        self.datasets = dict(train=train, val=val)
-
-    def close(self):
-        pass
-
-
-# -------------------------------- utils.py ------------------------------------------------
+# -------------------------------- utils.py -------------------------------------
 
 
 ACTIVATION_FUNCTIONS = {
@@ -121,207 +111,155 @@ def overview_plot(i, gammas, preds, inputs, corrupted=None, **kwargs):
     return fig
 
 
-# -------------------------------- network.py ------------------------------------------------
+# -------------------------------- network.py ------------------------------------
 
-class RNNCell(_RNNCell):
-    def __call__(self, inputs, state, scope=None):
-        output, state = self._call(inputs, state, scope)
-        name = getattr(self, "_name", "<None>")
-
-        if isinstance(output, tf.Tensor):
-            print("Predicted output size after {} with name {}: {}".format(self.__class__.__name__, name, output.shape))
-
-        if isinstance(state, tf.Tensor):
-            print("Predicted state size after {} with name {}: {}".format(self.__class__.__name__, name, state.shape))
-
-        return output, state
-
-
-class InputWrapper(RNNCell):
-    """Adding an input projection to the given cell."""
-
-    def __init__(self, cell, spec, name="InputWrapper"):
-        self._cell = cell
+class _ScopedFunction(ScopedFunction):
+    def __init__(self, spec, scope=None):
         self._spec = spec
-        self._name = name
+        super(_ScopedFunction, self).__init__(scope=scope)
 
-    @property
-    def state_size(self):
-        return self._cell.state_size
+    def _call(self, inputs, output_size, is_training):
+        inputs = self._subcall(inputs, output_size, is_training)
+        if self._spec.get('ln', False):
+            inputs = slim.layer_norm(inputs)
 
-    @property
-    def output_size(self):
-        return self._cell.output_size
+        act = self._spec.get('act', False)
+        if act:
+            activation = ACTIVATION_FUNCTIONS[act]
+            return activation(inputs)
 
-    def _call(self, inputs, state, scope=None):
-        projected = None
-        with tf.variable_scope(scope or self._name):
-            if self._spec['name'] == 'fc':
-                projected = slim.fully_connected(inputs, self._spec['size'], activation_fn=None)
-            elif self._spec['name'] == 'conv':
-                projected = slim.conv2d(inputs, self._spec['size'], self._spec['kernel'], self._spec['stride'], activation_fn=None)
-            else:
-                raise ValueError('Unknown layer name "{}"'.format(self._spec['name']))
-
-        return self._cell(projected, state)
+        return inputs
 
 
-class OutputWrapper(RNNCell):
-    def __init__(self, cell, spec, n_out=1, name="OutputWrapper"):
-        self._cell = cell
-        self._spec = spec
-        self._name = name
-        self._n_out = n_out
-
-    @property
-    def state_size(self):
-        return self._cell.state_size
-
-    @property
-    def output_size(self):
-        return self._spec['size']
-
-    def _call(self, inputs, state, scope=None):
-        output, res_state = self._cell(inputs, state)
-
-        projected = None
-        with tf.variable_scope((scope or self._name)):
-            if self._spec['name'] == 'fc':
-                projected = slim.fully_connected(output, self._spec['size'], activation_fn=None)
-            elif self._spec['name'] == 't_conv':
-                projected = slim.layers.conv2d_transpose(output, self._spec['size'], self._spec['kernel'], self._spec['stride'], activation_fn=None)
-            elif self._spec['name'] == 'r_conv':
-                resized = tf.image.resize_images(output, (self._spec['stride'][0] * output.get_shape()[1].value,
-                                                          self._spec['stride'][1] * output.get_shape()[2].value), method=1)
-                projected = slim.layers.conv2d(resized, self._spec['size'], self._spec['kernel'], activation_fn=None)
-            else:
-                raise ValueError('Unknown layer name "{}"'.format(self._spec['name']))
-
-        return projected, res_state
+class Conv(_ScopedFunction):
+    def _subcall(self, inputs, output_size, is_training):
+        return slim.conv2d(
+            inputs, self._spec['size'], self._spec['kernel'], self._spec['stride'], activation_fn=None)
 
 
-class ReshapeWrapper(RNNCell):
-    def __init__(self, cell, shape='flatten', apply_to='output'):
-        self._cell = cell
-        self._shape = shape
-        self._apply_to = apply_to
+class TConv(_ScopedFunction):
+    def _subcall(self, inputs, output_size, is_training):
+        return slim.layers.conv2d_transpose(
+            inputs, self._spec['size'], self._spec['kernel'], self._spec['stride'], activation_fn=None)
 
-    @property
-    def state_size(self):
-        return self._cell.state_size
 
-    @property
-    def output_size(self):
-        return self._cell.output_size
+class RConv(_ScopedFunction):
+    def _subcall(self, inputs, output_size, is_training):
+        shape = (
+            self._spec['stride'][0] * inputs.get_shape()[1].value,
+            self._spec['stride'][1] * inputs.get_shape()[2].value
+        )
+        resized = tf.image.resize_images(inputs, shape, method=1)
+        return slim.layers.conv2d(resized, self._spec['size'], self._spec['kernel'], activation_fn=None)
 
-    def _call(self, inputs, state, scope=None):
-        batch_size = tf.shape(inputs)[0]
 
-        if self._apply_to == 'input':
-            inputs = slim.flatten(inputs) if self._shape == -1 else tf.reshape(inputs, (batch_size,) + self._shape)
-            return self._cell(inputs, state)
-        elif self._apply_to == 'output':
-            output, res_state = self._cell(inputs, state)
-            output = slim.flatten(output) if self._shape == -1 else tf.reshape(output, (batch_size,) + self._shape)
-            return output, res_state
-        elif self._apply_to == 'state':
-            output, res_state = self._cell(inputs, state)
-            res_state = slim.flatten(res_state) if self._shape == -1 else tf.reshape(res_state, (batch_size,) + self._shape)
-            return output, res_state
+class FC(_ScopedFunction):
+    def _subcall(self, inputs, output_size, is_training):
+        return slim.fully_connected(inputs, self._spec['size'], activation_fn=None)
+
+
+class Reshape(_ScopedFunction):
+    def _subcall(self, inputs, output_size, is_training):
+        shape = self._spec['shape']
+        if shape == -1 or shape == "flatten":
+            return slim.flatten(inputs)
         else:
-            raise ValueError('Unknown apply_to: "{}"'.format(self._apply_to))
+            batch_size = tf.shape(inputs)[0]
+            return tf.reshape(inputs, (batch_size,) + shape)
 
 
-class ActivationFunctionWrapper(RNNCell):
-    def __init__(self, cell, activation='linear', apply_to='output'):
-        self._cell = cell
-        self._activation = ACTIVATION_FUNCTIONS[activation]
-        self._apply_to = apply_to
+class InputNorm(_ScopedFunction):
+    def _subcall(self, inputs, output_size, is_training):
+        mean, var = tf.nn.moments(inputs, axes=[1])
+        inputs = (inputs - tf.expand_dims(mean, axis=1)) / tf.sqrt(tf.expand_dims(var, axis=1))
+        return inputs
+
+
+class FeedforwardNetwork(ScopedFunction):
+    functions = dict(
+        conv=Conv,
+        t_conv=TConv,
+        r_conv=RConv,
+        fc=FC,
+        reshape=Reshape,
+        input_norm=InputNorm,
+    )
+
+    def __init__(self, layer_specs, scope=None):
+        self.layer_specs = layer_specs
+        self._layers = None
+
+        super(FeedforwardNetwork, self).__init__(scope=scope)
+
+    def _call(self, inp, output_size, is_training):
+
+        if not self._layers:
+            self._layers = []
+
+            for i, spec in enumerate(self.layer_specs):
+                name = spec['name']
+
+                layer_name = name + "_" + str(i)
+
+                function = FeedforwardNetwork.functions[name]
+                layer = function(spec, scope=layer_name)
+                self._layers.append(layer)
+
+        volume = inp
+        for layer in self._layers:
+            volume = layer(volume, 0, is_training)
+        return volume
+
+        # print("**** Handling NEM formulation *****")
+        # if use_NEM_formulation:
+        #     cell = _NEMCell(recurrent[0]['size'])
+        #     cell = tf.contrib.rnn.MultiRNNCell([cell])
+
+        #     cell = NEMOutputWrapper(cell, out_size, "multi_rnn_cell/cell_0/EMCell")
+        #     cell = ActivationFunctionWrapper(cell, output[0]['act'])
+
+        #     return cell
+
+        # cell_list = []
+        # for i, layer in enumerate(recurrent):
+        #     print(sorted([(k, v) for k, v in layer.items()]))
+        #     cell = tf.contrib.rnn.BasicRNNCell(layer['size'], activation=ACTIVATION_FUNCTIONS['linear'])
+        #     cell = LayerNormWrapper(cell, apply_to='output', name='LayerNormR{}'.format(i)) if layer['ln'] else cell
+        #     cell = ActivationFunctionWrapper(cell, activation=layer['act'], apply_to='state')
+        #     cell = ActivationFunctionWrapper(cell, activation=layer['act'], apply_to='output')
+        #     cell_list.append(cell)
+        # cell = tf.contrib.rnn.MultiRNNCell(cell_list)
+
+
+class FullCell(RNNCell):
+    def __init__(self, input_network, cell, output_network, is_training):
+        self.input_network = input_network
+        self.cell = cell
+        self.output_network = output_network
+        self.is_training = is_training
 
     @property
     def state_size(self):
-        return self._cell.state_size
+        return self.cell.state_size
 
     @property
     def output_size(self):
-        return self._cell.output_size
+        return self.cell.output_size
 
-    def _call(self, inputs, state, scope=None):
-        if self._apply_to == 'input':
-            inputs = self._activation(inputs)
-            return self._cell(inputs, state)
-        elif self._apply_to == 'output':
-            output, res_state = self._cell(inputs, state)
-            output = self._activation(output)
-            return output, res_state
-        elif self._apply_to == 'state':
-            output, res_state = self._cell(inputs, state)
-            res_state = self._activation(res_state)
-            return output, res_state
-        else:
-            raise ValueError('Unknown apply_to: "{}"'.format(self._apply_to))
-
-
-class LayerNormWrapper(RNNCell):
-    def __init__(self, cell, apply_to='output', name="LayerNorm"):
-        self._cell = cell
-        self._name = name
-        self._apply_to = apply_to
-
-    @property
-    def state_size(self):
-        return self._cell.state_size
-
-    @property
-    def output_size(self):
-        return self._cell.output_size
-
-    def _call(self, inputs, state, scope=None):
-        if self._apply_to == 'input':
-            with tf.variable_scope(scope or self._name):
-                inputs = slim.layer_norm(inputs)
-            return self._cell(inputs, state)
-        elif self._apply_to == 'output':
-            output, res_state = self._cell(inputs, state)
-            with tf.variable_scope(scope or self._name):
-                output = slim.layer_norm(output)
-                return output, res_state
-        elif self._apply_to == 'state':
-            output, res_state = self._cell(inputs, state)
-            with tf.variable_scope(scope or self._name):
-                res_state = slim.layer_norm(res_state)
-                return output, res_state
-        else:
-            raise ValueError('Unknown apply_to: "{}"'.format(self._apply_to))
-
-
-class InputNormalizationWrapper(RNNCell):
-    def __init__(self, cell, name="InputNorm"):
-        self._cell = cell
-        self._name = name
-
-    @property
-    def state_size(self):
-        return self._cell.state_size
-
-    @property
-    def output_size(self):
-        return self._cell.output_size
-
-    def _call(self, inputs, state, scope=None):
-        with tf.variable_scope(scope or self._name):
-            mean, var = tf.nn.moments(inputs, axes=[1])
-            inputs = (inputs - tf.expand_dims(mean, axis=1)) / tf.sqrt(tf.expand_dims(var, axis=1))
-
-        return self._cell(inputs, state)
+    def __call__(self, input, state, scope=None):
+        _input = self.input_network(input, 0, self.is_training)
+        output, new_state = self.cell(_input, state)
+        _output = self.output_network(output, 0, self.is_training)
+        return _output, new_state
 
 
 # EM CELL (WRAPPERS)
 
 class _NEMCell(RNNCell):
-    def __init__(self, num_units, name="_NEMCell"):
+
+    def __init__(self, num_units, name=None):
         self._num_units = num_units
-        self._name = name
+        super(_NEMCell, self).__init__(name=name)
 
     @property
     def state_size(self):
@@ -332,9 +270,10 @@ class _NEMCell(RNNCell):
         return self._num_units
 
     def _call(self, inputs, state, scope=None):
-        with tf.variable_scope(scope or self._name):
-            with tf.variable_scope(scope or "lr"):
-                lr = tf.get_variable("scalar", shape=(1, 1), dtype=tf.float32)
+        scope, reuse = self.resolve_scope()
+
+        with tf.variable_scope(scope, reuse=reuse):
+            lr = tf.get_variable("scalar", shape=(1, 1), dtype=tf.float32)
 
             # apply z = z' + lr * sigma(z')(1 - sigma(z'))* W^T * x
             output = state + lr * tf.sigmoid(state) * (1 - tf.sigmoid(state)) * slim.fully_connected(
@@ -344,11 +283,11 @@ class _NEMCell(RNNCell):
 
 
 class NEMOutputWrapper(RNNCell):
-    def __init__(self, cell, size, weight_path, name="NEMOutputWrapper"):
-        self._cell = cell
+    def __init__(self, cell, size, weight_path, name=None):
         self._size = size
         self._weight_path = weight_path
-        self._name = name
+
+        super(NEMOutputWrapper, self).__init__(cell, name)
 
     @property
     def state_size(self):
@@ -369,80 +308,7 @@ class NEMOutputWrapper(RNNCell):
         return projected, res_state
 
 
-# NETWORK BUILDER
-
-
-def build_network(out_size, output_dist, input, recurrent, output, use_NEM_formulation=False):
-    with tf.name_scope('inner_RNN'):
-        # use proper mathematical formulation
-
-        print("**** Handling NEM formulation *****")
-        if use_NEM_formulation:
-            cell = _NEMCell(recurrent[0]['size'])
-            cell = tf.contrib.rnn.MultiRNNCell([cell])
-
-            cell = NEMOutputWrapper(cell, out_size, "multi_rnn_cell/cell_0/EMCell")
-            cell = ActivationFunctionWrapper(cell, output[0]['act'])
-
-            return cell
-
-        print("**** Handling recurrent *****")
-
-        # build recurrent
-        cell_list = []
-        for i, layer in enumerate(recurrent):
-            print(sorted([(k, v) for k, v in layer.items()]))
-
-            if layer['name'] == 'rnn':
-                cell = tf.contrib.rnn.BasicRNNCell(layer['size'], activation=ACTIVATION_FUNCTIONS['linear'])
-                cell = LayerNormWrapper(cell, apply_to='output', name='LayerNormR{}'.format(i)) if layer['ln'] else cell
-                cell = ActivationFunctionWrapper(cell, activation=layer['act'], apply_to='state')
-                cell = ActivationFunctionWrapper(cell, activation=layer['act'], apply_to='output')
-
-            else:
-                raise ValueError('Unknown recurrent name "{}"'.format(layer['name']))
-
-            cell_list.append(cell)
-
-        cell = tf.contrib.rnn.MultiRNNCell(cell_list)
-
-        print("**** Handling input *****")
-
-        # build input
-        for i, layer in reversed(list(enumerate(input))):
-            print(sorted([(k, v) for k, v in layer.items()]))
-            if layer['name'] == 'reshape':
-                cell = ReshapeWrapper(cell, layer['shape'], apply_to='input')
-            elif layer['name'] == 'input_norm':
-                cell = InputNormalizationWrapper(cell, name='InputNormalization')
-            else:
-                cell = ActivationFunctionWrapper(cell, layer['act'], apply_to='input')
-                cell = LayerNormWrapper(cell, apply_to='input', name='LayerNormI{}'.format(i)) if layer['ln'] else cell
-                cell = InputWrapper(cell, layer, name="InputWrapper{}".format(i))
-
-        print("**** Handling output *****")
-
-        # build output
-        for i, layer in enumerate(output):
-            print(sorted([(k, v) for k, v in layer.items()]))
-
-            if layer['name'] == 'reshape':
-                cell = ReshapeWrapper(cell, layer['shape'])
-            else:
-                n_out = layer.get('n_out', 1)
-                cell = OutputWrapper(cell, layer, n_out=n_out, name="OutputWrapper{}".format(i))
-                cell = LayerNormWrapper(cell, apply_to='output', name='LayerNormO{}'.format(i)) if layer['ln'] else cell
-
-                if layer['act'] == '*':
-                    output_act = 'linear' if output_dist == 'gaussian' else 'sigmoid'
-                    cell = ActivationFunctionWrapper(cell, output_act, apply_to='output')
-                else:
-                    cell = ActivationFunctionWrapper(cell, layer['act'], apply_to='output')
-
-        return cell
-
-
-# -------------------------------- nem.py ------------------------------------------------
+# -------------------------------- nem.py ----------------------------------------
 
 
 def add_noise(data, noise_prob, noise_type):
@@ -492,7 +358,7 @@ def add_noise(data, noise_prob, noise_type):
 #     return opt, opt.apply_gradients(grads_and_vars)
 
 
-# -------------------------------- nem_model.py ------------------------------------------------
+# -------------------------------- nem_model.py ---------------------------------
 
 
 class NEMCell(RNNCell):
@@ -507,6 +373,8 @@ class NEMCell(RNNCell):
         self.pred_init = pred_init
         self.e_sigma = e_sigma
         self.gradient_gamma = gradient_gamma
+
+        super(NEMCell, self).__init__()
 
     @property
     def state_size(self):
@@ -618,7 +486,7 @@ class NEMCell(RNNCell):
 
             return gamma
 
-    def _call(self, inputs, state, scope=None):
+    def __call__(self, inputs, state, scope=None):
         # unpack
         input_data, target_data = inputs
         h_old, preds_old, gamma_old = state
@@ -741,7 +609,7 @@ def get_loss_step_weights(n_steps, loss_step_weights):
         raise KeyError('Unknown loss_iter_weight type: "{}"'.format(loss_step_weights))
 
 
-class NeuralEM_Updater(Updater):
+class NEM_Network(ScopedFunction):
     binary = Param()
     k = Param()
     n_steps = Param()
@@ -754,180 +622,159 @@ class NeuralEM_Updater(Updater):
     pixel_prior = Param()
 
     use_NEM_formulation = Param()
-    input_network = Param()
-    recurrent_network = Param()
-    output_network = Param()
-
-    optimizer_spec = Param()
-    lr_schedule = Param()
-    noise_schedule = Param()
-    max_grad_norm = Param()
-
-    eval_modes = "val".split()
 
     def __init__(self, env, scope=None, **kwargs):
-
-        self.datasets = env.datasets
-        for dset in self.datasets.values():
-            dset.reset()
-
-        self.obs_shape = self.datasets['train'].x.shape[1:]
+        self.obs_shape = env.datasets['train'].obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
+        # ap_iou_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        # self.eval_funcs = {"AP_at_point_{}".format(int(10 * v)): AP(v) for v in ap_iou_values}
+        # self.eval_funcs["AP"] = AP(ap_iou_values)
+        self.eval_funcs = dict()
 
-        self.scope = scope
-        self._n_experiences = 0
-        self._n_updates = 0
+        self.input_network = None
+        self.cell = None
+        self.output_network = None
+
+        super(NEM_Network, self).__init__(scope=scope)
 
     @property
-    def completion(self):
-        return self.datasets['train'].completion
+    def inp(self):
+        return self._tensors["inp"]
 
-    def trainable_variables(self, for_opt, rl_only=False):
-        tvars = trainable_variables(self.scope, for_opt=for_opt)
-        return tvars
+    @property
+    def batch_size(self):
+        return self._tensors["batch_size"]
 
-    def _update(self, batch_size, collect_summaries):
-        feed_dict = self.make_feed_dict(batch_size, 'train', False)
-        sess = tf.get_default_session()
+    @property
+    def is_training(self):
+        return self._tensors["is_training"]
 
-        summary = b''
-        if collect_summaries:
-            _, record, summary = sess.run(
-                [self.train_op, self.recorded_tensors, self.summary_op], feed_dict=feed_dict)
-        else:
-            _, record = sess.run(
-                [self.train_op, self.recorded_tensors], feed_dict=feed_dict)
+    @property
+    def float_is_training(self):
+        return self._tensors["float_is_training"]
 
-        return dict(train=(record, summary))
+    @property
+    def float_do_explore(self):
+        return self._tensors["float_do_explore"]
 
-    def _evaluate(self, batch_size, mode):
-        assert mode in self.eval_modes
+    def _call(self, inp, _, is_training):
+        inp, labels, background = inp
+        return self.build_graph(inp, labels, background, is_training)
 
-        feed_dict = self.make_feed_dict(None, 'val', True)
+    def build_graph(self, inp, labels, background, is_training):
+        self._tensors = dict(
+            inp=inp,
+            annotations=labels[0],
+            n_annotations=labels[1],
+            is_training=is_training,
+            float_is_training=tf.to_float(is_training),
+            background=background,
+            batch_size=tf.shape(inp)[0]
+        )
 
-        sess = tf.get_default_session()
-
-        record, summary = sess.run(
-            [self.recorded_tensors, self.summary_op], feed_dict=feed_dict)
-
-        return record, summary
-
-    def make_feed_dict(self, batch_size, mode, evaluate):
-        data = self.datasets[mode].next_batch(batch_size=batch_size, advance=not evaluate)
-        if len(data) == 1:
-            inp, self.annotations = data[0], None
-        elif len(data) == 2:
-            inp, self.annotations = data
-        else:
-            raise Exception()
-
-        return {self.inp_ph: inp, self.is_training: not evaluate}
-
-    def _build_placeholders(self):
-        self.inp_ph = tf.placeholder(tf.float32, (None,) + self.obs_shape, name="inp_ph")
-        inp = self.inp_ph[None, :, None, ...]
-        inp = tf.clip_by_value(inp, 1e-6, 1-1e-6)
-        self.inp = tf.tile(inp, [self.n_steps+1, 1, 1, 1, 1, 1], name="inp")
-
-        self.is_training = tf.placeholder(tf.bool, ())
-        self.float_is_training = tf.to_float(self.is_training)
-
-        self.batch_size = tf.shape(self.inp)[1]
-
-    def _build_graph(self):
-        self._build_placeholders()
+        self.tiled_inp = tf.tile(
+            inp[None, :, None, ...],
+            [self.n_steps+1, 1, 1, 1, 1, 1], name="inp")
 
         noise_type = 'bitflip' if self.binary else 'masked_uniform'
-        inp_corrupted = add_noise(self.inp, self.noise_prob, noise_type)
+        inp_corrupted = add_noise(self.tiled_inp, self.noise_prob, noise_type)
 
         # Get dimensions
-        input_shape = tf.shape(self.inp)
+        input_shape = tf.shape(self.tiled_inp)
         assert input_shape.get_shape()[0].value == 6, (
             "Requires 6D input (T, B, K, H, W, C) but {}".format(input_shape.get_shape()[0].value))
 
         # T = time, B = batch size, K = number of components, the rest are image size...
 
-        H, W, C = (x.value for x in self.inp.get_shape()[-3:])
+        H, W, C = (x.value for x in self.tiled_inp.get_shape()[-3:])
 
-        # set pixel distribution
         pixel_dist = 'bernoulli' if self.binary else 'gaussian'
 
-        # set up inner cells and nem cells
-        inner_cell = build_network(
-            H * W * C,
-            output_dist=pixel_dist,
-            input=self.input_network,
-            recurrent=self.recurrent_network,
-            output=self.output_network,
-            use_NEM_formulation=self.use_NEM_formulation)
+        # inner_cell = build_network(
+        #     H * W * C,
+        #     output_dist=pixel_dist,
+        #     input=self.input_network,
+        #     recurrent=self.recurrent_network,
+        #     output=self.output_network,
+        #     use_NEM_formulation=self.use_NEM_formulation)
+
+        if self.input_network is None:
+            self.input_network = cfg.build_input_network(scope="input_network")
+
+        if self.cell is None:
+            self.cell = cfg.build_cell(scope="cell")
+
+        if self.output_network is None:
+            self.output_network = cfg.build_output_network(scope="output_network")
+
+        inner_cell = FullCell(self.input_network, self.cell, self.output_network, self.is_training)
 
         nem_cell = NEMCell(
             inner_cell, input_shape=(H, W, C), distribution=pixel_dist,
-            pred_init=self.pred_init, e_sigma=self.e_sigma, gradient_gamma=self.gradient_gamma)
+            pred_init=self.pred_init, e_sigma=self.e_sigma,
+            gradient_gamma=self.gradient_gamma)
 
-        # compute prior
         prior = compute_prior(pixel_dist, self.pixel_prior)
-
-        # get state initializer
-        with tf.name_scope('initial_state'):
-            hidden_state = nem_cell.init_state(input_shape[1], self.k, dtype=tf.float32)
-
-        # build static iterations
+        hidden_state = nem_cell.init_state(input_shape[1], self.k, dtype=tf.float32)
         outputs = [hidden_state]
         total_losses, upper_bound_losses, intra_losses, inter_losses = [], [], [], []
         loss_step_weights = get_loss_step_weights(self.n_steps, self.loss_step_weights)
 
-        with tf.variable_scope('NEM') as varscope:
-            self.var_scope = tf.get_variable_scope()
+        for t, loss_weight in enumerate(loss_step_weights):
+            inputs = (inp_corrupted[t], self.tiled_inp[t+1])
+            hidden_state, output = nem_cell(inputs, hidden_state)
+            theta, pred, gamma = output
 
-            for t, loss_weight in enumerate(loss_step_weights):
-                varscope.reuse_variables() if t > 0 else None       # share weights across time
-                with tf.name_scope('step_{}'.format(t)):
-                    # run nem cell
-                    inputs = (inp_corrupted[t], self.inp[t+1])
-                    hidden_state, output = nem_cell(inputs, hidden_state)
-                    theta, pred, gamma = output
+            total_loss, intra_loss, inter_loss = compute_outer_loss(
+                pred, gamma, self.tiled_inp[t+1], prior, pixel_distribution=pixel_dist,
+                inter_weight=self.inter_weight, gradient_gamma=self.gradient_gamma)
 
-                    # compute nem losses
-                    total_loss, intra_loss, inter_loss = compute_outer_loss(
-                        pred, gamma, self.inp[t+1], prior, pixel_distribution=pixel_dist,
-                        inter_weight=self.inter_weight, gradient_gamma=self.gradient_gamma)
+            # compute estimated loss upper bound (which doesn't use E-step)
+            loss_upper_bound = compute_loss_upper_bound(pred, self.tiled_inp[t+1], pixel_dist)
 
-                    # compute estimated loss upper bound (which doesn't use E-step)
-                    loss_upper_bound = compute_loss_upper_bound(pred, self.inp[t+1], pixel_dist)
+            total_losses.append(loss_weight * total_loss)
 
-                total_losses.append(loss_weight * total_loss)
-                upper_bound_losses.append(loss_upper_bound)
-                intra_losses.append(intra_loss)
-                inter_losses.append(inter_loss)
-                outputs.append(output)
+            upper_bound_losses.append(loss_upper_bound)
+            intra_losses.append(intra_loss)
+            inter_losses.append(inter_loss)
+            outputs.append(output)
 
         thetas, preds, gammas = zip(*outputs)
-        self.thetas = tf.stack(thetas)               # (T, 1, B*K, M)
-        self.preds = tf.stack(preds)                 # (T, B, K, H, W, C)
-        self.gammas = tf.stack(gammas)               # (T, B, K, H, W, C)
+        self._tensors["thetas"] = tf.stack(thetas)               # (T, 1, B*K, M)
+        self._tensors["preds"] = tf.stack(preds)                 # (T, B, K, H, W, C)
+        self._tensors["gammas"] = tf.stack(gammas)               # (T, B, K, H, W, C)
+        self._tensors["output"] = self._tensors["preds"][-1, :, 0]
 
         intra_losses = tf.stack(intra_losses)   # (T,)
         inter_losses = tf.stack(inter_losses)   # (T,)
         upper_bound_losses = tf.stack(upper_bound_losses)  # (T,)
 
-        total_loss = tf.reduce_sum(tf.stack(total_losses))
+        regularization_loss = tf.stack(total_losses)
 
-        tvars = self.trainable_variables(for_opt=True)
-        self.train_op, train_summary = build_gradient_train_op(
-            total_loss, tvars, self.optimizer_spec, self.lr_schedule,
-            self.max_grad_norm, self.noise_schedule)
+        flat_inp = tf.layers.flatten(self._tensors["inp"])
+        reconstruction = tf.layers.flatten(self._tensors["output"])
+        reconstruction_loss = -tf.reduce_sum(
+            flat_inp * tf.log(reconstruction + 1e-9) +
+            (1.0 - flat_inp) * tf.log(1.0 - reconstruction + 1e-9),
+            axis=1, name="reconstruction_loss"
+        )
+
+        losses = dict(
+            regularization=tf.reduce_mean(regularization_loss),
+            reconstruction=tf.reduce_mean(reconstruction_loss)
+        )
 
         self.recorded_tensors = {
-            "loss": total_loss,
+            "upper_bound_loss_last": tf.reduce_sum(upper_bound_losses[-1]),
             "intra_loss_last": tf.reduce_sum(intra_losses[-1]),
             "inter_loss_last": tf.reduce_sum(inter_losses[-1]),
         }
 
-        _summary = [tf.summary.scalar(name, t) for name, t in self.recorded_tensors.items()]
-        self.summary_op = tf.summary.merge(_summary + train_summary)
-
-        # create_curve_plots('valid_loss', get_logs('validation.loss'), [0, 2000])
+        return {
+            "tensors": self._tensors,
+            "recorded_tensors": self.recorded_tensors,
+            "losses": losses,
+        }
 
 
 class NeuralEM_RenderHook(object):
@@ -935,28 +782,22 @@ class NeuralEM_RenderHook(object):
         self.N = N
 
     def __call__(self, updater):
-        if updater.stage_idx == 0:
-            path = updater.exp_dir.path_for('plots', 'frames.pdf')
-            if not os.path.exists(path):
-                fig, axes = square_subplots(16)
-                for ax, frame in zip(axes.flatten(), updater.datasets['train'].x):
-                    ax.imshow(frame)
-
-                fig.savefig(path)
-                plt.close(fig)
-
         fetched = self._fetch(self.N, updater)
         self._plot(updater, fetched)
 
     def _fetch(self, N, updater):
-        feed_dict = updater.make_feed_dict(N, 'val', True)
-        images = feed_dict[updater.inp_ph]
+        feed_dict = updater.data_manager.do_val()
 
-        to_fetch = {"gammas": updater.gammas, "preds": updater.preds}
+        network = updater.network
+
+        to_fetch = dict(
+            gammas=network._tensors["gammas"][:, :self.N],
+            preds=network._tensors["preds"][:, :self.N],
+            images=network._tensors["inp"][:self.N]
+        )
 
         sess = tf.get_default_session()
         fetched = sess.run(to_fetch, feed_dict=feed_dict)
-        fetched.update(images=images)
         return fetched
 
     def _plot(self, updater, fetched):
@@ -966,13 +807,14 @@ class NeuralEM_RenderHook(object):
         hard_gammas = np.argmax(gammas, axis=2)
 
         N = images.shape[0]
+        network = updater.network
 
         _, image_height, image_width, _ = images.shape
 
         for i in range(N):
-            fig, axes = plt.subplots(2*updater.k + 2, updater.n_steps+1, figsize=(20, 20))
+            fig, axes = plt.subplots(2*network.k + 2, network.n_steps+1, figsize=(20, 20))
 
-            for t in range(updater.n_steps+1):
+            for t in range(network.n_steps+1):
                 ax = axes[0, t]
                 img = images[i]
                 ax.imshow(img)
@@ -987,7 +829,7 @@ class NeuralEM_RenderHook(object):
                     ax.set_title("reconstruction")
                 ax.set_xlabel("t = {}".format(t))
 
-                for k in range(updater.k):
+                for k in range(network.k):
                     ax = axes[k+2, t]
                     img = gammas[t, i, k, :, :, 0]
                     ax.imshow(img)
@@ -995,124 +837,21 @@ class NeuralEM_RenderHook(object):
                         ax.set_title("component {} - soft".format(k))
                     ax.set_xlabel("t = {}".format(t))
 
-                for k in range(updater.k):
-                    ax = axes[updater.k + k + 2, t]
+                for k in range(network.k):
+                    ax = axes[network.k + k + 2, t]
                     img = hard_gammas[t, i, :, :, 0] == k
                     ax.imshow(img)
                     if t == 0:
                         ax.set_title("component {} - hard".format(k))
                     ax.set_xlabel("t = {}".format(t))
 
-            fig.suptitle('Stage={}. After {} experiences ({} updates, {} experiences per batch).'.format(
-                updater.stage_idx, updater.n_experiences, updater.n_updates, cfg.batch_size))
-
-            path = updater.exp_dir.path_for('plots', 'stage{}'.format(updater.stage_idx), '{}.pdf'.format(i))
+            local_step = np.inf if cfg.overwrite_plots else "{:0>10}".format(updater.n_updates)
+            path = updater.exp_dir.path_for(
+                'plots', str(i),
+                'stage={:0>4}_local_step={}.pdf'.format(updater.stage_idx, local_step))
             fig.savefig(path)
             plt.close(fig)
 
-
-config = Config(
-    alg_name="nem",
-    get_updater=NeuralEM_Updater,
-    build_env=Env,
-
-    # env
-    min_chars=1,
-    max_chars=2,
-    characters=[0, 1, 2],
-    n_patch_examples=0,
-    image_shape=(24, 24),
-    patch_shape=(14, 14),
-    max_overlap=200,
-
-    optimizer_spec="adam",
-    lr_schedule=0.001,
-    max_grad_norm=None,
-
-    n_train=1e5,
-    n_val=1e2,
-
-    preserve_env=True,
-
-    eval_step=100,
-    display_step=1000,
-    batch_size=64,
-    max_steps=1e7,
-
-    patience=10000,
-    use_gpu=True,
-    gpu_allow_growth=True,
-    seed=23499123,
-    stopping_criteria="loss,min",
-    eval_mode="val",
-
-    threshold=-np.inf,
-    max_experiments=None,
-    render_hook=NeuralEM_RenderHook(4),
-    render_step=5000,
-
-    # ------- from nem.py --------
-
-    noise_prob=0.2,                              # probability of annihilating the pixel
-
-    # ------- from nem_model.py ------
-
-    # general
-    binary=False,
-    gradient_gamma=True,       # whether to back-propagate a gradient through gamma
-
-    # loss
-    inter_weight=1.0,          # weight for the inter-cluster loss
-    loss_step_weights='last',  # all, last, or list of weights
-    pixel_prior=dict(
-        p=0.0,                     # probability of success for pixel prior Bernoulli
-        mu=0.0,                    # mean of pixel prior Gaussian
-        sigma=0.25,                 # std of pixel prior Gaussian
-    ),
-
-    # em
-    k=3,                       # number of components
-    n_steps=10,                # number of (RN)N-EM steps
-    e_sigma=0.25,              # sigma used in the e-step when pixel distributions are Gaussian (acts as a temperature)
-    pred_init=0.0,             # initial prediction used to compute the input
-
-    # ------- from network.py ------
-
-    use_NEM_formulation=False,
-
-    # input_network=[],
-    # recurrent_network=[
-    #     {'name': 'rnn', 'size': 250, 'act': 'sigmoid', 'ln': False}
-    # ],
-    # output_network=[
-    #     {'name': 'fc', 'size': 3 * 784, 'act': 'sigmoid', 'ln': False},
-    #     # {'name': 'fc', 'size': 784, 'act': '*', 'ln': False},
-    # ],
-
-    input_network=[
-        {'name': 'input_norm'},
-        {'name': 'reshape', 'shape': (24, 24, 3)},
-        {'name': 'conv', 'size': 32, 'act': 'elu', 'stride': [2, 2], 'kernel': (4, 4), 'ln': True},
-        {'name': 'conv', 'size': 64, 'act': 'elu', 'stride': [2, 2], 'kernel': (4, 4), 'ln': True},
-        {'name': 'conv', 'size': 128, 'act': 'elu', 'stride': [2, 2], 'kernel': (4, 4), 'ln': True},
-        {'name': 'reshape', 'shape': -1},
-        {'name': 'fc', 'size': 512, 'act': 'elu', 'ln': True}
-    ],
-    recurrent_network=[
-        {'name': 'rnn', 'size': 250, 'act': 'sigmoid', 'ln': True}
-    ],
-    output_network=[
-        {'name': 'fc', 'size': 512, 'act': 'relu', 'ln': True},
-        {'name': 'fc', 'size': 3 * 3 * 128, 'act': 'relu', 'ln': True},
-        {'name': 'reshape', 'shape': (3, 3, 128)},
-        {'name': 'r_conv', 'size': 64, 'act': 'relu', 'stride': [2, 2], 'kernel': (4, 4), 'ln': True},
-        {'name': 'r_conv', 'size': 32, 'act': 'relu', 'stride': [2, 2], 'kernel': (4, 4), 'ln': True},
-        {'name': 'r_conv', 'size': 3, 'act': 'sigmoid', 'stride': [2, 2], 'kernel': (4, 4), 'ln': False},
-        {'name': 'reshape', 'shape': -1}
-    ]
-)
-
-reset_config = config.copy(
-    load_path="/media/data/dps_data/logs/nem/exp_nem_seed=23499123_2018_04_06_15_11_20/weights/best_of_stage_0",
-    do_train=False
-)
+            shutil.copyfile(
+                path,
+                os.path.join(os.path.dirname(path), 'latest_stage{:0>4}.pdf'.format(updater.stage_idx)))
