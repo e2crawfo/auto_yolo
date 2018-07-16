@@ -86,7 +86,7 @@ def run_experiment(
 
 class Nips2018Grid(object):
     def __init__(self):
-        train_seed, val_seed = 0, 1
+        train_seed, val_seed, test_seed = 0, 1, 2
         train = GridEmnistObjectDetectionDataset(
             n_examples=int(cfg.n_train), shuffle=True,
             example_range=cfg.train_example_range, seed=train_seed)
@@ -95,7 +95,11 @@ class Nips2018Grid(object):
             n_examples=int(cfg.n_val), shuffle=True,
             example_range=cfg.val_example_range, seed=val_seed)
 
-        self.datasets = dict(train=train, val=val)
+        test = GridEmnistObjectDetectionDataset(
+            n_examples=int(cfg.n_val), shuffle=True,
+            example_range=cfg.test_example_range, seed=test_seed)
+
+        self.datasets = dict(train=train, val=val, test=test)
 
     def close(self):
         pass
@@ -103,7 +107,7 @@ class Nips2018Grid(object):
 
 class Nips2018Scatter(object):
     def __init__(self):
-        train_seed, val_seed = 0, 1
+        train_seed, val_seed, test_seed = 0, 1, 2
         train = EmnistObjectDetectionDataset(
             n_examples=int(cfg.n_train), shuffle=True,
             example_range=cfg.train_example_range, seed=train_seed)
@@ -112,7 +116,11 @@ class Nips2018Scatter(object):
             n_examples=int(cfg.n_val), shuffle=True,
             example_range=cfg.val_example_range, seed=val_seed)
 
-        self.datasets = dict(train=train, val=val)
+        test = EmnistObjectDetectionDataset(
+            n_examples=int(cfg.n_val), shuffle=True,
+            example_range=cfg.test_example_range, seed=test_seed)
+
+        self.datasets = dict(train=train, val=val, test=test)
 
     def close(self):
         pass
@@ -120,7 +128,7 @@ class Nips2018Scatter(object):
 
 class Nips2018Arithmetic(object):
     def __init__(self):
-        train_seed, val_seed = 0, 1
+        train_seed, val_seed, test_seed = 0, 1, 2
 
         train = VisualArithmeticDataset(
             n_examples=int(cfg.n_train), shuffle=True,
@@ -130,7 +138,11 @@ class Nips2018Arithmetic(object):
             n_examples=int(cfg.n_val), shuffle=True,
             example_range=cfg.val_example_range, seed=val_seed)
 
-        self.datasets = dict(train=train, val=val)
+        test = VisualArithmeticDataset(
+            n_examples=int(cfg.n_val), shuffle=True,
+            example_range=cfg.test_example_range, seed=test_seed)
+
+        self.datasets = dict(train=train, val=val, test=test)
 
     def close(self):
         pass
@@ -138,21 +150,23 @@ class Nips2018Arithmetic(object):
 
 class Nips2018XO(object):
     def __init__(self):
-        train_seed, val_seed = 0, 1
+        train_seed, val_seed, test_seed = 0, 1, 2
 
         train = XO_RewardClassificationDataset(n_examples=cfg.n_train, seed=train_seed)
 
         val = XO_RewardClassificationDataset(n_examples=cfg.n_val, seed=val_seed)
+        test = XO_RewardClassificationDataset(n_examples=cfg.n_val, seed=test_seed)
 
-        self.datasets = dict(train=train, val=val)
+        self.datasets = dict(train=train, val=val, test=test)
 
     def close(self):
         pass
 
 
 env_config = Config(
-    train_example_range=(0.0, 0.9),
-    val_example_range=(0.9, 1.0),
+    train_example_range=(0.0, 0.8),
+    val_example_range=(0.8, 0.9),
+    test_example_range=(0.9, 1.0),
 )
 
 

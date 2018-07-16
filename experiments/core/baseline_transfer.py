@@ -38,6 +38,6 @@ durations = dict(
 )
 
 envs.run_experiment(
-    "yolo_baseline_transfer", dict(), readme,
-    alg="yolo_baseline_transfer", task="scatter", durations=durations,
+    "baseline_transfer", dict(), readme,
+    alg="baseline_transfer", task="scatter", durations=durations,
 )

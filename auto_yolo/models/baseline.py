@@ -59,6 +59,7 @@ class YoloBaseline_Network(ScopedFunction):
     train_kl = Param(True)
     kl_weight = Param(1.0)
     reconstruction_weight = Param(1.0)
+    cc_threshold = Param(1e-3)
 
     xent_loss = Param(True)
     A = Param(100, help="Dimension of attribute vector.")
@@ -110,11 +111,11 @@ class YoloBaseline_Network(ScopedFunction):
 
     def _build_program_generator(self):
         assert len(self.inp.shape) == 4
-        mask = tf.reduce_sum(tf.abs(self.inp - self.background), axis=3) >= 1e-3
+        mask = tf.reduce_sum(tf.abs(self.inp - self._tensors["background"]), axis=3) >= self.cc_threshold
         components = tf.contrib.image.connected_components(mask)
 
         total_n_objects = tf.to_int32(tf.reduce_max(components))
-        indices = tf.range(1, total_n_objects+1)
+        indices = tf.range(1, total_n_objects + 1)
 
         maxs = tf.reduce_max(components, axis=(1, 2))
 
@@ -230,7 +231,6 @@ class YoloBaseline_Network(ScopedFunction):
             self._tensors["background"]
         )
 
-        output = tf.clip_by_value(output, 1e-6, 1-1e-6)
         self._tensors['output'] = output
 
     def _process_labels(self, labels):

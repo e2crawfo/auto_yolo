@@ -167,8 +167,8 @@ nem_config = alg_config.copy(
          {'name': 'reshape', 'shape': -1}], scope=scope)
 )
 
-yolo_baseline_transfer_config = alg_config.copy(
-    alg_name="yolo_transfer_baseline",
+baseline_config = alg_config.copy(
+    alg_name="baseline",
     build_network=baseline.YoloBaseline_Network,
     render_hook=baseline.YoloBaseline_RenderHook(),
     A=50,
@@ -178,6 +178,10 @@ yolo_baseline_transfer_config = alg_config.copy(
     threshold=1.0,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
+    cc_threshold=1e-3
+)
+
+baseline_transfer_config = baseline_config.copy(
     curriculum=[
         dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False)
         for n in range(1, 21)],

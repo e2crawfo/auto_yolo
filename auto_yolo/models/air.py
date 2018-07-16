@@ -16,12 +16,10 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import shutil
-import os
 
 from dps import cfg
 from dps.utils import Param
-from dps.utils.tf import build_scheduled_value, ScopedFunction
+from dps.utils.tf import build_scheduled_value, ScopedFunction, RenderHook
 from dps.env.advanced.yolo import mAP
 
 from auto_yolo.models.core import normal_vae, concrete_binary_pre_sigmoid_sample, concrete_binary_sample_kl
@@ -619,33 +617,33 @@ class AIR_Network(ScopedFunction):
          scale, scale_kl, scale_std, shift, shift_kl, shift_std,
          attr, attr_kl, attr_std, z_pres_probs, z_pres_kl,
          vae_input, vae_output, _, _, _, _) = tf.while_loop(
-                cond, body, [
-                    tf.constant(0),                                 # RNN time step, initially zero
-                    tf.zeros((self.batch_size, 1)),                 # running sum of z_pres samples
-                    rnn_init_state,                                 # initial RNN state
-                    tf.zeros((self.batch_size, np.product(self.obs_shape))),  # reconstruction canvas, initially empty
-                    tf.zeros((self.batch_size, 1)),                    # running value of the loss function
-                    tf.zeros((self.batch_size, 1), dtype=tf.int32),    # running inferred number of digits
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
-                    tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+            cond, body, [
+                tf.constant(0),                                 # RNN time step, initially zero
+                tf.zeros((self.batch_size, 1)),                 # running sum of z_pres samples
+                rnn_init_state,                                 # initial RNN state
+                tf.zeros((self.batch_size, np.product(self.obs_shape))),  # reconstruction canvas, initially empty
+                tf.zeros((self.batch_size, 1)),                    # running value of the loss function
+                tf.zeros((self.batch_size, 1), dtype=tf.int32),    # running inferred number of digits
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
 
-                    tf.zeros((self.batch_size, 2)),  # scale
-                    tf.zeros((self.batch_size, 2)),  # shift
-                    tf.zeros((self.batch_size, self.A)),  # attr
-                    tf.zeros((self.batch_size, 1)),  # z_pres
-                ]
-            )
+                tf.zeros((self.batch_size, 2)),  # scale
+                tf.zeros((self.batch_size, 2)),  # shift
+                tf.zeros((self.batch_size, self.A)),  # attr
+                tf.zeros((self.batch_size, 1)),  # z_pres
+            ]
+        )
 
         def process_tensor_array(tensor_array, name):
             tensor = tf.transpose(tensor_array.stack(), (1, 0, 2))
@@ -790,52 +788,19 @@ class AIR_Network(ScopedFunction):
         }
 
 
-def imshow(ax, frame):
-    if frame.ndim == 3 and frame.shape[2] == 1:
-        frame = frame[:, :, 0]
-    frame = np.clip(frame, 0.0, 1.0)
-    ax.imshow(frame, vmin=0.0, vmax=1.0)
-
-
-class AIR_RenderHook(object):
-    def __init__(self, N=16):
-        self.N = N
+class AIR_RenderHook(RenderHook):
+    fetches = (
+        "inp annotations n_annotations output scale shift "
+        "predicted_n_digits vae_input vae_output background")
 
     def __call__(self, updater):
         fetched = self._fetch(updater)
-
         self._plot_reconstruction(updater, fetched)
-
-    def _fetch(self, updater):
-        feed_dict = updater.data_manager.do_val()
-
-        network = updater.network
-
-        to_fetch = {}
-
-        to_fetch["images"] = network._tensors["inp"]
-        to_fetch["annotations"] = network._tensors["annotations"]
-        to_fetch["n_annotations"] = network._tensors["n_annotations"]
-
-        to_fetch["output"] = network._tensors["output"]
-        to_fetch["scale"] = network._tensors["scale"]
-        to_fetch["shift"] = network._tensors["shift"]
-        to_fetch["predicted_n_digits"] = network._tensors["predicted_n_digits"]
-        to_fetch["vae_input"] = network._tensors["vae_input"]
-        to_fetch["vae_output"] = network._tensors["vae_output"]
-        to_fetch["background"] = network._tensors["background"]
-
-        to_fetch = {k: v[:self.N] for k, v in to_fetch.items()}
-
-        sess = tf.get_default_session()
-        fetched = sess.run(to_fetch, feed_dict=feed_dict)
-
-        return fetched
 
     def _plot_reconstruction(self, updater, fetched):
         network = updater.network
 
-        images = fetched['images'].reshape(self.N, *network.obs_shape)
+        inp = fetched['inp'].reshape(self.N, *network.obs_shape)
         output = fetched['output'].reshape(self.N, *network.obs_shape)
         object_shape = network.object_shape
 
@@ -864,11 +829,11 @@ class AIR_RenderHook(object):
 
         for i in range(self.N):
             ax_gt = axes[0, 2*i]
-            imshow(ax_gt, images[i])
+            self.imshow(ax_gt, inp[i])
             ax_gt.set_axis_off()
 
             ax_rec = axes[0, 2*i+1]
-            imshow(ax_rec, output[i])
+            self.imshow(ax_rec, output[i])
             ax_rec.set_axis_off()
 
             # Plot true bounding boxes
@@ -915,7 +880,7 @@ class AIR_RenderHook(object):
                 ax_gt.add_patch(rect)
 
                 ax = axes[t+1, 2*i]
-                imshow(ax, vae_input[i, t])
+                self.imshow(ax, vae_input[i, t])
                 ax.set_ylabel("t={}".format(t))
 
                 obj_rect = patches.Rectangle(
@@ -923,18 +888,48 @@ class AIR_RenderHook(object):
                 ax.add_patch(obj_rect)
 
                 ax = axes[t+1, 2*i+1]
-                imshow(ax, vae_output[i, t])
+                self.imshow(ax, vae_output[i, t])
 
         plt.subplots_adjust(left=0.01, right=.99, top=.99, bottom=0.01, wspace=0.14, hspace=0.1)
+        self.savefig("sampled_reconstruction", fig, updater)
 
-        local_step = np.inf if cfg.overwrite_plots else "{:0>10}".format(updater.n_updates)
-        path = updater.exp_dir.path_for(
-            'plots',
-            'sampled_reconstruction',
-            'stage={:0>4}_local_step={}.pdf'.format(updater.stage_idx, local_step))
-        fig.savefig(path)
-        plt.close(fig)
 
-        shutil.copyfile(
-            path,
-            os.path.join(os.path.dirname(path), 'latest_stage{:0>4}.pdf'.format(updater.stage_idx)))
+class AIR_ComparisonRenderHook(AIR_RenderHook):
+    def _plot_reconstruction(self, updater, fetched):
+        network = updater.network
+
+        inp = fetched['inp'].reshape(self.N, *network.obs_shape)
+
+        scale = fetched['scale'].reshape(self.N, network.max_time_steps, 2)
+        shift = fetched['shift'].reshape(self.N, network.max_time_steps, 2)
+        predicted_n_digits = fetched['predicted_n_digits']
+
+        color = "xkcd:azure"
+
+        for i in range(self.N):
+            fig = plt.figure(figsize=(5, 5))
+            ax = plt.gca()
+
+            self.imshow(ax, inp[i])
+            ax.set_axis_off()
+
+            for t in range(predicted_n_digits[i]):
+                w, h = scale[i, t, :]
+                x, y = shift[i, t, :]
+
+                transformed_x = 0.5 * (x + 1.)
+                transformed_y = 0.5 * (y + 1.)
+
+                height = h * network.image_height
+                width = w * network.image_width
+
+                top = network.image_height * transformed_y - height / 2
+                left = network.image_width * transformed_x - width / 2
+
+                rect = patches.Rectangle(
+                    (left, top), width, height, linewidth=2,
+                    edgecolor=color, facecolor='none')
+                ax.add_patch(rect)
+
+            plt.subplots_adjust(left=.01, right=.99, top=.99, bottom=0.01, wspace=0.1, hspace=0.1)
+            self.savefig("ground_truth/" + str(i), fig, updater, is_dir=False)

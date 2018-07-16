@@ -56,11 +56,13 @@ def concrete_binary_sample_kl(pre_sigmoid_sample,
 class Env(object):
     def __init__(self):
         train = EmnistObjectDetectionDataset(
-            n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.9))
+            n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.8))
         val = EmnistObjectDetectionDataset(
+            n_examples=int(cfg.n_val), shuffle=True, example_range=(0.8, 0.9))
+        test = EmnistObjectDetectionDataset(
             n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.))
 
-        self.datasets = dict(train=train, val=val)
+        self.datasets = dict(train=train, val=val, test=test)
 
     def close(self):
         pass
@@ -352,22 +354,16 @@ class Updater(_Updater):
     noise_schedule = Param()
     max_grad_norm = Param()
 
-    eval_modes = "val".split()
-
     def __init__(self, env, scope=None, **kwargs):
         self.obs_shape = env.datasets['train'].obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
-
         self.network = cfg.build_network(env, scope="network")
-        self.datasets = env.datasets
 
-        self.scope = scope
-        self._n_experiences = 0
-        self._n_updates = 0
+        super(Updater, self).__init__(env, scope=scope, **kwargs)
 
     @property
     def completion(self):
-        return self.datasets['train'].completion
+        return self.env.datasets['train'].completion
 
     def trainable_variables(self, for_opt):
         return self.network.trainable_variables(for_opt)
@@ -392,9 +388,12 @@ class Updater(_Updater):
         return dict(train=(record, summary))
 
     def _evaluate(self, batch_size, mode):
-        assert mode in self.eval_modes
-
-        feed_dict = self.data_manager.do_val()
+        if mode == "val":
+            feed_dict = self.data_manager.do_val()
+        elif mode == "test":
+            feed_dict = self.data_manager.do_test()
+        else:
+            raise Exception("Unknown evaluation mode: {}".format(mode))
 
         record = collections.defaultdict(float)
         summary = b''
@@ -428,8 +427,9 @@ class Updater(_Updater):
         return record, summary
 
     def _build_graph(self):
-        self.data_manager = DataManager(self.datasets['train'],
-                                        self.datasets['val'],
+        self.data_manager = DataManager(self.env.datasets['train'],
+                                        self.env.datasets['val'],
+                                        self.env.datasets['test'],
                                         cfg.batch_size)
         self.data_manager.build_graph()
 
@@ -441,7 +441,7 @@ class Updater(_Updater):
                 print("Clustering...")
                 print(cfg.background_cfg.static_cfg)
 
-                cluster_data = self.datasets["train"].X
+                cluster_data = self.env.datasets["train"].X
                 image_shape = cluster_data.shape[1:]
                 indices = np.random.choice(
                     cluster_data.shape[0], replace=False, size=cfg.n_clustering_examples)

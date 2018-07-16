@@ -5,12 +5,10 @@ import matplotlib.patches as patches
 from matplotlib.colors import to_rgb
 import collections
 import sonnet as snt
-import os
-import shutil
 
 from dps import cfg
 from dps.utils import Param
-from dps.utils.tf import ScopedFunction, tf_mean_sum, build_scheduled_value, FIXED_COLLECTION
+from dps.utils.tf import ScopedFunction, tf_mean_sum, build_scheduled_value, FIXED_COLLECTION, RenderHook
 
 from auto_yolo.tf_ops import render_sprites
 from auto_yolo.models.core import (
@@ -793,56 +791,32 @@ class YoloAir_Network(ScopedFunction):
         }
 
 
-class YoloAir_RenderHook(object):
-    def __init__(self, N=16):
-        self.N = N
-
+class YoloAir_RenderHook(RenderHook):
     def __call__(self, updater):
+        self.fetches = "obj inp output objects n_objects normalized_box input_glimpses"
+
+        network = updater.network
+        if "n_annotations" in network._tensors:
+            self.fetches += " annotations n_annotations"
+
+        if 'prediction' in network._tensors:
+            self.fetches += " prediction targets"
+
+        if "actions" in network._tensors:
+            self.fetches += " actions"
+
         fetched = self._fetch(updater)
 
         self._plot_reconstruction(updater, fetched)
         self._plot_patches(updater, fetched, 4)
 
-    def _fetch(self, updater):
-        feed_dict = updater.data_manager.do_val()
-
-        network = updater.network
-
-        to_fetch = dict()
-
-        to_fetch["obj"] = network._tensors["obj"]
-        to_fetch["images"] = network._tensors["inp"]
-        to_fetch["output"] = network._tensors["output"]
-        to_fetch["objects"] = network._tensors["objects"]
-        to_fetch["n_objects"] = network._tensors["n_objects"]
-        to_fetch["normalized_box"] = network._tensors["normalized_box"]
-        to_fetch["input_glimpses"] = network._tensors["input_glimpses"]
-
-        if "n_annotations" in network._tensors:
-            to_fetch["annotations"] = network._tensors["annotations"]
-            to_fetch["n_annotations"] = network._tensors["n_annotations"]
-
-        if 'prediction' in network._tensors:
-            to_fetch["prediction"] = network._tensors["prediction"]
-            to_fetch["targets"] = network._tensors["targets"]
-
-        if "actions" in network._tensors:
-            to_fetch["actions"] = network._tensors["actions"]
-
-        to_fetch = {k: v[:self.N] for k, v in to_fetch.items()}
-
-        sess = tf.get_default_session()
-        fetched = sess.run(to_fetch, feed_dict=feed_dict)
-
-        return fetched
-
     def _plot_reconstruction(self, updater, fetched):
-        images = fetched['images']
+        inp = fetched['inp']
         output = fetched['output']
         prediction = fetched.get("prediction", None)
         targets = fetched.get("targets", None)
 
-        _, image_height, image_width, _ = images.shape
+        _, image_height, image_width, _ = inp.shape
 
         obj = fetched['obj'].reshape(self.N, -1)
 
@@ -865,12 +839,12 @@ class YoloAir_RenderHook(object):
 
         fig, axes = plt.subplots(2*sqrt_N, 2*sqrt_N, figsize=(20, 20))
         axes = np.array(axes).reshape(2*sqrt_N, 2*sqrt_N)
-        for n, (pred, gt) in enumerate(zip(output, images)):
+        for n, (pred, gt) in enumerate(zip(output, inp)):
             i = int(n / sqrt_N)
             j = int(n % sqrt_N)
 
             ax1 = axes[2*i, 2*j]
-            ax1.imshow(gt, vmin=0.0, vmax=1.0)
+            self.imshow(ax1, gt)
 
             title = ""
             if prediction is not None:
@@ -880,25 +854,25 @@ class YoloAir_RenderHook(object):
             ax1.set_title(title)
 
             ax2 = axes[2*i, 2*j+1]
-            ax2.imshow(pred, vmin=0.0, vmax=1.0)
+            self.imshow(ax2, pred)
 
             ax3 = axes[2*i+1, 2*j]
-            ax3.imshow(pred, vmin=0.0, vmax=1.0)
+            self.imshow(ax3, pred)
 
             ax4 = axes[2*i+1, 2*j+1]
-            ax4.imshow(pred, vmin=0.0, vmax=1.0)
+            self.imshow(ax4, pred)
 
             # Plot proposed bounding boxes
             for o, (top, left, height, width) in zip(obj[n], box[n]):
                 colour = o * on_colour + (1-o) * off_colour
 
                 rect = patches.Rectangle(
-                    (left, top), width, height, linewidth=1, edgecolor=colour, facecolor='none')
+                    (left, top), width, height, linewidth=2, edgecolor=colour, facecolor='none')
                 ax4.add_patch(rect)
 
                 if o > cutoff:
                     rect = patches.Rectangle(
-                        (left, top), width, height, linewidth=1, edgecolor=colour, facecolor='none')
+                        (left, top), width, height, linewidth=2, edgecolor=colour, facecolor='none')
                     ax3.add_patch(rect)
 
             # Plot true bounding boxes
@@ -928,17 +902,7 @@ class YoloAir_RenderHook(object):
         else:
             plt.subplots_adjust(left=0, right=1, top=.9, bottom=0, wspace=0.1, hspace=0.2)
 
-        local_step = np.inf if cfg.overwrite_plots else "{:0>10}".format(updater.n_updates)
-        path = updater.exp_dir.path_for(
-            'plots',
-            'sampled_reconstruction',
-            'stage={:0>4}_local_step={}.pdf'.format(updater.stage_idx, local_step))
-        fig.savefig(path)
-        plt.close(fig)
-
-        shutil.copyfile(
-            path,
-            os.path.join(os.path.dirname(path), 'latest_stage{:0>4}.pdf'.format(updater.stage_idx)))
+        self.savefig("sampled_reconstruction", fig, updater)
 
     def _plot_patches(self, updater, fetched, N):
         # Create a plot showing what each object is generating
@@ -963,7 +927,7 @@ class YoloAir_RenderHook(object):
                         _obj = obj[idx, h, w, b, 0]
 
                         ax = axes[3*h, w * B + b]
-                        ax.imshow(objects[idx, h, w, b, :, :, :3], vmin=0.0, vmax=1.0)
+                        self.imshow(ax, objects[idx, h, w, b, :, :, :3])
 
                         colour = _obj * on_colour + (1-_obj) * off_colour
                         obj_rect = patches.Rectangle(
@@ -976,29 +940,68 @@ class YoloAir_RenderHook(object):
                             ax.set_ylabel("h={}".format(h))
 
                         ax = axes[3*h+1, w * B + b]
-                        ax.imshow(objects[idx, h, w, b, :, :, 3], cmap="gray", vmin=0.0, vmax=1.0)
+                        self.imshow(ax, objects[idx, h, w, b, :, :, 3], cmap="gray")
 
                         ax.set_title("obj={}, b={}".format(_obj, b))
 
                         ax = axes[3*h+2, w * B + b]
                         ax.set_title("input glimpse")
 
-                        ax.imshow(input_glimpses[idx, h, w, b, :, :, :], vmin=0.0, vmax=1.0)
+                        self.imshow(ax, input_glimpses[idx, h, w, b, :, :, :])
 
             for ax in axes.flatten():
                 ax.set_axis_off()
 
             plt.subplots_adjust(left=0.02, right=.98, top=.98, bottom=0.02, wspace=0.1, hspace=0.1)
 
-            local_step = np.inf if cfg.overwrite_plots else "{:0>10}".format(updater.n_updates)
-            path = updater.exp_dir.path_for(
-                'plots',
-                'sampled_patches', str(idx),
-                'stage={:0>4}_local_step={}.pdf'.format(updater.stage_idx, local_step))
+            self.savefig("sampled_patches/" + str(idx), fig, updater)
 
-            fig.savefig(path)
-            plt.close(fig)
 
-            shutil.copyfile(
-                path,
-                os.path.join(os.path.dirname(path), 'latest_stage{:0>4}.pdf'.format(updater.stage_idx)))
+class YoloAir_ComparisonRenderHook(RenderHook):
+    fetches = "obj inp output objects n_objects normalized_box"
+
+    show_zero_boxes = True
+
+    def __call__(self, updater):
+        fetched = self._fetch(updater)
+        self._plot_reconstruction(updater, fetched)
+
+    def _plot_reconstruction(self, updater, fetched):
+        inp = fetched['inp']
+        output = fetched['output']
+
+        _, image_height, image_width, _ = inp.shape
+
+        obj = fetched['obj'].reshape(self.N, -1)
+
+        box = (
+            fetched['normalized_box'] *
+            [image_height, image_width, image_height, image_width]
+        )
+        box = box.reshape(self.N, -1, 4)
+
+        on_colour = np.array(to_rgb("xkcd:azure"))
+        off_colour = np.array(to_rgb("xkcd:red"))
+
+        for n, (pred, gt) in enumerate(zip(output, inp)):
+            fig = plt.figure(figsize=(5, 5))
+            ax = plt.gca()
+
+            self.imshow(ax, gt)
+            ax.set_axis_off()
+
+            # Plot proposed bounding boxes
+            for o, (top, left, height, width) in zip(obj[n], box[n]):
+                if not self.show_zero_boxes and o <= 1e-6:
+                    continue
+
+                colour = o * on_colour + (1-o) * off_colour
+
+                rect = patches.Rectangle(
+                    (left, top), width, height, linewidth=2, edgecolor=colour, facecolor='none')
+                ax.add_patch(rect)
+
+            # self.imshow(ax, pred)
+
+            plt.subplots_adjust(left=.01, right=.99, top=.99, bottom=0.01, wspace=0.1, hspace=0.1)
+            self.savefig("ground_truth/" + str(n), fig, updater, is_dir=False)
