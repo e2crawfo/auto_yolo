@@ -8,7 +8,7 @@ import os
 from dps import cfg
 from dps.utils import Param
 from dps.utils.tf import (
-    ScopedFunction, FullyConvolutional, tf_mean_sum, build_scheduled_value)
+    ScopedFunction, FullyConvolutional, tf_mean_sum, build_scheduled_value, MLP)
 from dps.datasets import VisualArithmeticDataset
 
 from auto_yolo.models import core, yolo_air
@@ -25,6 +25,40 @@ class Env(object):
 
     def close(self):
         pass
+
+
+class SimpleRecurrentRegressionNetwork(ScopedFunction):
+    cell = None
+    output_network = None
+
+    def _call(self, inp, output_size, is_training):
+        if self.cell is None:
+            self.cell = cfg.build_math_cell(scope="regression_cell")
+        if self.output_network is None:
+            self.output_network = cfg.build_math_output(scope="math_output")
+
+        batch_size = tf.shape(inp)[0]
+        H, W, B, A = tuple(int(i) for i in inp.shape[1:])
+        HWB = H*W*B
+        _inp = tf.reshape(inp, (batch_size, HWB, A))
+
+        state = self.cell.zero_state(batch_size, tf.float32)
+        for i in range(HWB):
+            _, state = self.cell(_inp[:, i, :], state)
+
+        return self.output_network(state, output_size, is_training)
+
+
+class SoftmaxMLP(MLP):
+    def __init__(self, n_outputs, temp, n_units=None, scope=None, **fc_kwargs):
+        self.n_outputs = n_outputs
+        self.temp = temp
+
+        super(SoftmaxMLP, self).__init__(scope=scope, n_units=n_units, **fc_kwargs)
+
+    def _call(self, inp, output_size, is_training):
+        output = super(SoftmaxMLP, self)._call(inp, output_size, is_training)
+        return tf.nn.softmax(output / self.temp)
 
 
 class SequentialRegressionNetwork(ScopedFunction):

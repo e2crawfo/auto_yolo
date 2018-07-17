@@ -5,10 +5,10 @@ readme = "Running YOLO AIR experiment."
 
 distributions = [
     dict(n_digits=1, cc_threshold=1e-3),
-    dict(n_digits=3, cc_threshold=0.0599),
-    dict(n_digits=5, cc_threshold=0.0599),
-    dict(n_digits=7, cc_threshold=0.5699),
-    dict(n_digits=9, cc_threshold=0.6599),
+    dict(n_digits=3, cc_threshold=0.01099),
+    dict(n_digits=5, cc_threshold=0.023),
+    dict(n_digits=7, cc_threshold=0.6229),
+    dict(n_digits=9, cc_threshold=0.5999),
 ]
 
 for d in distributions:
@@ -33,7 +33,7 @@ config = dict(
     min_digits=1,
     max_digits=1,
     max_time_steps=1,
-    render_hook=yolo_air.YoloAir_ComparisonRenderHook(),
+    render_hook=yolo_air.YoloAir_ComparisonRenderHook(show_zero_boxes=False),
 )
 
 envs.run_experiment(

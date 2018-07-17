@@ -15,7 +15,7 @@ durations = dict(
         slack_time="5mins", n_repeats=6, step_time_limit="24hours"),
 
     build=dict(
-        max_hosts=1, ppn=3, cpp=2, gpu_set="0", wall_time="2hours",
+        max_hosts=1, ppn=1, cpp=2, gpu_set="0", wall_time="2hours",
         project="rpp-bengioy", cleanup_time="2mins",
         slack_time="2mins", n_repeats=1, step_time_limit="2hours",
         config=dict(do_train=False)),
@@ -31,7 +31,7 @@ durations = dict(
         slack_time="1mins", n_repeats=2, kind="parallel", host_pool=":"),
 
     build_oak=dict(
-        max_hosts=1, ppn=3, cpp=2, gpu_set="0", wall_time="1year",
+        max_hosts=1, ppn=1, cpp=2, gpu_set="0", wall_time="1year",
         project="rpp-bengioy", cleanup_time="1mins",
         slack_time="1mins", n_repeats=1, kind="parallel", host_pool=":",
         config=dict(do_train=False)),
@@ -44,7 +44,7 @@ durations = dict(
 )
 
 envs.run_experiment(
-    "yolo_air_transfer", dict(min_chars=6, max_chars=10), readme,
+    "yolo_air_transfer", dict(), readme,
     alg="yolo_air_transfer", task="scatter", durations=durations,
     distributions=distributions
 )

@@ -4,19 +4,19 @@ import numpy as np
 readme = "redoing yolo_air addition experiment"
 
 distributions = dict(
-    n_train=list(1000*2**np.arange(7))
+    n_train=list(1000*2**np.arange(8))
 )
 
 durations = dict(
     long=dict(
-        max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="48hours",
+        max_hosts=1, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="48hours",
         project="rpp-bengioy", cleanup_time="20mins",
         slack_time="5mins", n_repeats=6, step_time_limit="48hours"),
 
     build=dict(
-        max_hosts=1, ppn=3, cpp=2, gpu_set="0", wall_time="2hours",
-        project="rpp-bengioy", cleanup_time="2mins",
-        slack_time="2mins", n_repeats=1, step_time_limit="2hours",
+        max_hosts=1, ppn=1, cpp=2, gpu_set="0", wall_time="4hours",
+        project="rpp-bengioy", cleanup_time="5mins",
+        slack_time="5mins", n_repeats=1, step_time_limit="4hours",
         config=dict(do_train=False)),
 
     short=dict(
@@ -25,9 +25,19 @@ durations = dict(
         slack_time="1mins", n_repeats=1, config=dict(max_steps=100)),
 )
 
+config = dict(
+    n_train=16000, min_digits=9, max_digits=9, largest_digit=81,
+    max_time_steps=9, run_all_time_steps=True,
+    decoder_kind="recurrent",
+    stopping_criteria="AP,max",
+    threshold=1.0,
+    math_weight=0.0,
+    fixed_weights="math",
+)
+
 envs.run_experiment(
-    "yolo_addition_2stage", dict(n_train=16000), readme,
-    alg="yolo_math_2stage", task="arithmetic",
+    "yolo_addition_first_stage", config, readme,
+    alg="yolo_math", task="arithmetic",
     durations=durations, distributions=distributions,
     env_kwargs=dict(ops="addition")
 )

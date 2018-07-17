@@ -292,6 +292,9 @@ def math_prepare_func():
     decoder_kind = cfg.decoder_kind
     if decoder_kind == "mlp":
         cfg.build_math_network = lambda scope: MLP([256, 256, 256, 128], scope=scope)
+    elif decoder_kind == "recurrent":
+        cfg.build_math_network = yolo_math.SimpleRecurrentRegressionNetwork
+        cfg.build_math_cell = lambda scope: tf.contrib.rnn.LSTMBlockCell(128)
     elif decoder_kind == "seq":
         cfg.build_math_network = yolo_math.SequentialRegressionNetwork
         cfg.build_math_cell = lambda scope: tf.contrib.rnn.LSTMBlockCell(128)
@@ -336,8 +339,10 @@ yolo_math_config = yolo_air_config.copy(
 
     build_math_network=yolo_math.SequentialRegressionNetwork,
     build_math_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(128),
+    build_math_input=lambda scope: IdentityFunction(scope=scope),
     build_math_output=lambda scope: MLP([100, 100], scope=scope),
-    build_math_input=lambda scope: MLP([100, 100], scope=scope),
+
+    # build_math_input=lambda scope: MLP([100, 100], scope=scope),
 
     math_weight=1.0,
     curriculum=[dict()],
@@ -380,8 +385,8 @@ yolo_math_2stage_config = yolo_math_config.copy(
     curriculum=copy.deepcopy(curriculum_2stage),
 )
 yolo_math_2stage_config['curriculum'][0].update(
-    stopping_criteria="count_error,min",
-    threshold=0.0,
+    stopping_criteria="AP,max",
+    threshold=1.0,
 )
 
 yolo_math_4stage_config = yolo_math_config.copy(

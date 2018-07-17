@@ -43,50 +43,6 @@ def std_err(ys):
 spread_measures = {func.__name__: func for func in [std_dev, ci95, std_err]}
 
 
-def gen_ablations():
-    plt.figure(figsize=(5, 3.5))
-
-    ax = plt.gca()
-
-    ax.set_ylabel('% Test Error', fontsize=12)
-    ax.set_xlabel('# Training Examples', fontsize=12)
-    ax.tick_params(axis='both', labelsize=14)
-    ax.set_ylim((0.0, 100.0))
-    ax.set_xscale('log', basex=2)
-
-    spread_measure = 'std_err'
-
-    label_order = []
-
-    x, y, *yerr = _extract_rl_data(ablation_paths['full_interface'], spread_measure, lambda r: 100 * r['test_loss'])
-    label = 'Full Interface'
-    ax.errorbar(x, y, yerr=yerr, label=label, ls='-')
-    label_order.append(label)
-
-    x, y, *yerr = _extract_rl_data(ablation_paths['no_modules'], spread_measure, test_01_loss)
-    label = 'No Modules'
-    ax.errorbar(x, y, yerr=yerr, label=label, ls='-')
-    label_order.append(label)
-
-    x, y, *yerr = _extract_rl_data(ablation_paths['no_transformations'], spread_measure, test_01_loss)
-    label = 'No Transformations'
-    ax.errorbar(x, y, yerr=yerr, label=label, ls='-')
-    label_order.append(label)
-
-    x, y, *yerr = _extract_rl_data(ablation_paths['no_classifiers'], spread_measure, test_01_loss)
-    label = 'No Classifiers'
-    ax.errorbar(x, y, yerr=yerr, label=label, ls='-')
-    label_order.append(label)
-
-    legend_handles = {l: h for h, l in zip(*ax.get_legend_handles_labels())}
-    ordered_handles = [legend_handles[l] for l in label_order]
-
-    ax.legend(ordered_handles, label_order, loc='best', ncol=1, fontsize=8)
-    plt.subplots_adjust(left=0.16, bottom=0.15, right=0.97, top=0.96)
-    fig.savefig(os.path.join(plot_dir, 'ablations.pdf'))
-    return fig
-
-
 def _get_stage_data_helper(path, stage_idx):
     """
     Return a dataframe, each row of which corresponds to the `stage_idx`-th stage
@@ -116,7 +72,7 @@ def _get_stage_data_helper(path, stage_idx):
 
 
 def get_stage_data(path, stage_idx, x_key, y_key, spread_measure, y_func=None):
-    # Now group by idx, get average and spread measure, return x values, mean y-values, sprea
+    # Group by idx, get average and spread measure, return x values, mean and spread-measures for y values
     y_func = y_func or (lambda x: x)
     df = _get_stage_data_helper(path, stage_idx)
     groups = sorted(df.groupby(x_key))
@@ -200,7 +156,7 @@ def plot_core_transfer(extension):
     ax.set_ylabel('AP@0.5', fontsize=12)
     ax.set_xlabel('\# Digits / Image', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
-    ax.set_ylim((-5., 105.))
+    ax.set_ylim((0., 105.))
     ax.set_xticks([0, 5, 10, 15, 20])
 
     plt.legend()
@@ -332,7 +288,7 @@ def plot_addition(extension):
     ax.errorbar(x, y, yerr=yerr, label=label)
 
     ax.set_ylabel('Accuracy', fontsize=12)
-    ax.set_xlabel('# Training Samples / 1000', fontsize=12)
+    ax.set_xlabel('\# Training Samples / 1000', fontsize=12)
     ax.set_title('Addition - Between 1 and 11 numbers', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
     ax.set_ylim((0.0, 1.05))
@@ -438,7 +394,7 @@ def plot_xo_full_decoder_kind(extension):
     ax.errorbar(x, y, yerr=yerr, label="seq-simple", c=seq_colour, ls="--")
 
     ax.set_ylabel('Accuracy', fontsize=12)
-    ax.set_xlabel('# Training Samples', fontsize=12)
+    ax.set_xlabel('\# Training Samples', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
     ax.set_ylim((0.0, 1.05))
     ax.set_xticks(x)
@@ -495,7 +451,7 @@ def plot_xo_2stage_decoder_kind(extension):
     ax.errorbar(x, y, yerr=yerr, label="seq-simple", c=seq_colour, ls="--")
 
     ax.set_ylabel('Accuracy', fontsize=12)
-    ax.set_xlabel('# Training Samples', fontsize=12)
+    ax.set_xlabel('\# Training Samples', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
     ax.set_ylim((0.0, 1.05))
     ax.set_xticks(x)
@@ -508,7 +464,7 @@ def plot_comparison(extension):
     yolo_air_path = os.path.join(data_dir, "comparison/run_search_resubmit_seed=0_2018_07_12_11_17_08")
     air_path = os.path.join(data_dir, "comparison/run_search_air-run_env=size=14-in-colour=False-task=arithmetic-ops=addition_alg=attend-infer-repeat_duration=long_seed=0_2018_07_10_09_08_58")
     dair_path = os.path.join(data_dir, "comparison/run_search_dair-run_env=size=14-in-colour=False-task=arithmetic-ops=addition_alg=attend-infer-repeat_duration=long_seed=0_2018_07_10_09_22_24")
-    baseline_path = os.path.join(data_dir, "comparison/run_search_baseline-run_env=size=14-in-colour=False-task=arithmetic-ops=addition_alg=transfer-baseline_duration=oak_seed=0_2018_07_13_13_23_26")
+    baseline_path = os.path.join(data_dir, "comparison/run_search_baseline-run_env=size=14-in-colour=False-task=arithmetic-ops=addition_alg=baseline_duration=oak_seed=0_2018_07_16_15_52_32")
 
     # -----
 
@@ -529,13 +485,13 @@ def plot_comparison(extension):
     line = ax.errorbar(x, y, yerr=yerr, label="DAIR", marker="v", ls="--")
     line.lines[0].get_c()
 
-    x, y, *yerr = get_arithmetic_data([baseline_path], "n_digits", "AP", 0, "ci95", y_func=y_func)
+    x, y, *yerr = get_arithmetic_data([baseline_path], "n_digits", "_test_AP", 0, "ci95", y_func=y_func)
     ax.plot(x, y, label="Baseline", marker="s", ls=":")
 
     ax.set_ylabel('AP', fontsize=12)
     ax.set_xlabel('\# Digits / Image', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
-    ax.set_ylim((-5., 105.))
+    ax.set_ylim((0., 105.))
     ax.set_xticks(x)
 
     plt.legend(loc="upper right", handlelength=4)
