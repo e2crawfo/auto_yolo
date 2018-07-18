@@ -303,6 +303,7 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
             max_digits=11,
             image_shape=(48, 48),
 
+            n_classes=100,
             largest_digit=99,
             one_hot=True,
             reductions="sum" if ops == "addition" else "A:sum,N:min,X:max,C:len",
@@ -310,68 +311,3 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
     else:
         raise Exception("Unknown task `{}`".format(task))
     return config
-
-
-def prepare_func():
-    from dps import cfg
-    cfg.curriculum[1]['nonzero_weight'] = "Poly(0.0, {}, 100000)".format(cfg.nonzero_weight)
-
-
-# So this pretty much works!!
-yolo_rl_double_digit_config = grid_config.copy(
-    env_name="nips_2018_double_digit",
-    build_env=Nips2018Scatter,
-    min_chars=1,
-    max_chars=2,
-    image_shape=(48, 48),
-    box_std=0.1,
-
-    min_hw=0.25,
-    max_hw=3.,
-    pixels_per_cell=(12, 12),
-
-    postprocessing="",
-    patience=1000000,
-    render_step=5000,
-
-    # patch_shape=(21, 21),
-    # max_overlap=196,
-    # patch_shape=(14, 14),
-    # max_overlap=196/4,
-    patch_shape=(28, 28),
-    max_overlap=196,
-
-    min_yx=-0.5,
-    max_yx=1.5,
-
-    use_input_attention=True,
-    order="obj z box",
-
-    prepare_func=prepare_func,
-
-    area_neighbourhood_size=2,
-    hw_neighbourhood_size=None,  # This is what it was set to, but only by accident
-    nonzero_neighbourhood_size=2,
-    local_reconstruction_cost=True,
-
-    area_weight=1.0,
-    hw_weight=40.,
-    nonzero_weight=30.,
-    reconstruction_weight=1.0,
-    max_steps=100000,
-
-    curriculum=[
-        {'hw_weight': None,
-         'rl_weight': None,
-         'obj_default': 0.5,
-         'obj_exploration': 1.0},
-        {'obj_exploration': 0.2},
-        {'obj_exploration': 0.1},
-        {'obj_exploration': 0.05},
-        {'obj_exploration': 0.01}
-    ],
-    sequential_cfg=dict(on=True),
-    n_passthrough_features=100,
-
-    readme="Testing the standard set up, which we've determined should work fairly well."
-)

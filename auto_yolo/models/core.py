@@ -6,10 +6,10 @@ import collections
 from dps import cfg
 from dps.updater import Updater as _Updater
 from dps.env.advanced.yolo import mAP
-from dps.datasets import EmnistObjectDetectionDataset
 from dps.utils import Param, prime_factors
 from dps.utils.tf import (
-    FullyConvolutional, build_gradient_train_op, tf_mean_sum)
+    ConvNet, build_gradient_train_op, tf_mean_sum,
+    ScopedFunction, build_scheduled_value, MLP)
 from dps.updater import DataManager
 
 
@@ -53,28 +53,13 @@ def concrete_binary_sample_kl(pre_sigmoid_sample,
     return log_posterior - log_prior
 
 
-class Env(object):
-    def __init__(self):
-        train = EmnistObjectDetectionDataset(
-            n_examples=int(cfg.n_train), shuffle=True, example_range=(0.0, 0.8))
-        val = EmnistObjectDetectionDataset(
-            n_examples=int(cfg.n_val), shuffle=True, example_range=(0.8, 0.9))
-        test = EmnistObjectDetectionDataset(
-            n_examples=int(cfg.n_val), shuffle=True, example_range=(0.9, 1.))
-
-        self.datasets = dict(train=train, val=val, test=test)
-
-    def close(self):
-        pass
-
-
-class Backbone(FullyConvolutional):
+class Backbone(ConvNet):
     pixels_per_cell = Param()
     kernel_size = Param()
     n_channels = Param()
     n_final_layers = Param(2)
 
-    def __init__(self, check_output_shape=True, **kwargs):
+    def __init__(self, check_output_shape=False, **kwargs):
         sh = sorted(prime_factors(self.pixels_per_cell[0]))
         sw = sorted(prime_factors(self.pixels_per_cell[1]))
         assert max(sh) <= 4
@@ -96,7 +81,7 @@ class Backbone(FullyConvolutional):
         super(Backbone, self).__init__(layout, check_output_shape=check_output_shape, **kwargs)
 
 
-class InverseBackbone(FullyConvolutional):
+class InverseBackbone(ConvNet):
     pixels_per_cell = Param()
     kernel_size = Param()
     n_channels = Param()
@@ -121,10 +106,10 @@ class InverseBackbone(FullyConvolutional):
         layout += [dict(filters=self.n_channels, kernel_size=4, strides=(_sh, _sw), padding="SAME", transpose=True)
                    for _sh, _sw in zip(sh, sw)]
 
-        super(InverseBackbone, self).__init__(layout, check_output_shape=True, **kwargs)
+        super(InverseBackbone, self).__init__(layout, check_output_shape=False, **kwargs)
 
 
-class NewBackbone(FullyConvolutional):
+class NewBackbone(ConvNet):
     pixels_per_cell = Param()
     max_object_shape = Param()
     n_channels = Param()
@@ -183,7 +168,7 @@ class NewBackbone(FullyConvolutional):
         return super(NewBackbone, self)._call(inp, output_size, is_training)
 
 
-class NextStep(FullyConvolutional):
+class NextStep(ConvNet):
     kernel_size = Param()
     n_channels = Param()
 
@@ -195,7 +180,7 @@ class NextStep(FullyConvolutional):
         super(NextStep, self).__init__(layout, check_output_shape=True, **kwargs)
 
 
-class ObjectDecoder(FullyConvolutional):
+class ObjectDecoder(ConvNet):
     n_decoder_channels = Param()
 
     def __init__(self, **kwargs):
@@ -208,7 +193,7 @@ class ObjectDecoder(FullyConvolutional):
         super(ObjectDecoder, self).__init__(layout, check_output_shape=True, **kwargs)
 
 
-class ObjectDecoder28x28(FullyConvolutional):
+class ObjectDecoder28x28(ConvNet):
     n_decoder_channels = Param()
 
     def __init__(self, **kwargs):
@@ -519,3 +504,458 @@ class Updater(_Updater):
 
         self.train_summary_op = tf.summary.merge(recorded_tensors_summaries + train_summaries)
         self.val_summary_op = tf.summary.merge(recorded_tensors_summaries + eval_funcs_summaries)
+
+
+class VariationalAutoencoder(ScopedFunction):
+    fixed_weights = Param()
+    fixed_values = Param()
+    no_gradient = Param()
+
+    xent_loss = Param()
+
+    attr_prior_mean = Param()
+    attr_prior_std = Param()
+
+    A = Param()
+
+    train_reconstruction = Param()
+    reconstruction_weight = Param()
+
+    train_kl = Param()
+    kl_weight = Param()
+
+    train_math = Param()
+    math_weight = Param()
+    math_A = Param()
+
+    noisy = Param()
+
+    representation_network = None
+    math_input_network = None
+    math_network = None
+
+    eval_funcs = dict()
+
+    def __init__(self, env, scope=None, **kwargs):
+        self.obs_shape = env.datasets['train'].obs_shape
+        self.image_height, self.image_width, self.image_depth = self.obs_shape
+
+        if isinstance(self.fixed_weights, str):
+            self.fixed_weights = self.fixed_weights.split()
+
+        self.attr_prior_mean = build_scheduled_value(self.attr_prior_mean, "attr_prior_mean")
+        self.attr_prior_std = build_scheduled_value(self.attr_prior_std, "attr_prior_std")
+
+        self.reconstruction_weight = build_scheduled_value(
+            self.reconstruction_weight, "reconstruction_weight")
+        self.kl_weight = build_scheduled_value(self.kl_weight, "kl_weight")
+        self.math_weight = build_scheduled_value(self.math_weight, "math_weight")
+
+        if not self.noisy and self.train_kl:
+            raise Exception("If `noisy` is False, `train_kl` must also be False.")
+
+        if isinstance(self.fixed_weights, str):
+            self.fixed_weights = self.fixed_weights.split()
+
+        if isinstance(self.no_gradient, str):
+            self.no_gradient = self.no_gradient.split()
+
+        super(VariationalAutoencoder, self).__init__(scope=scope, **kwargs)
+
+    def build_math_representation(self, math_code):
+        return math_code
+
+    @property
+    def inp(self):
+        return self._tensors["inp"]
+
+    @property
+    def batch_size(self):
+        return self._tensors["batch_size"]
+
+    @property
+    def is_training(self):
+        return self._tensors["is_training"]
+
+    @property
+    def float_is_training(self):
+        return self._tensors["float_is_training"]
+
+    def _process_labels(self, labels):
+        self._tensors.update(
+            annotations=labels[0],
+            n_annotations=labels[1],
+            targets=labels[2],
+        )
+
+    def _call(self, inp, _, is_training):
+        self.original_inp = inp
+        inp, labels, background = inp
+
+        self._tensors = dict(
+            inp=inp,
+            is_training=is_training,
+            float_is_training=tf.to_float(is_training),
+            background=background,
+            batch_size=tf.shape(inp)[0],
+        )
+
+        self.labels = labels
+        self._process_labels(labels)
+
+        self.recorded_tensors = dict(
+            batch_size=tf.to_float(self.batch_size),
+            float_is_training=self.float_is_training
+        )
+
+        self.losses = dict()
+
+        with tf.variable_scope("representation", reuse=self.initialized):
+            self.build_representation()
+
+        if self.train_math:
+            with tf.variable_scope("math", reuse=self.initialized):
+                self.build_math()
+
+        return dict(
+            tensors=self._tensors,
+            recorded_tensors=self.recorded_tensors,
+            losses=self.losses,
+        )
+
+    def build_math(self):
+        # --- init modules ---
+
+        if self.math_input_network is None:
+            self.math_input_network = cfg.build_math_input(scope="math_input_network")
+            if "math" in self.fixed_weights:
+                self.math_input_network.fix_variables()
+
+        if self.math_network is None:
+            self.math_network = cfg.build_math_network(scope="math_network")
+
+            if "math" in self.fixed_weights:
+                self.math_network.fix_variables()
+
+        # --- process representation ---
+
+        attr_shape = tf.shape(self._tensors['attr'])
+        attr = tf.reshape(self._tensors['attr'], (-1, self.A))
+
+        math_A = self.A if self.math_A is None else self.math_A
+        math_attr = self.math_input_network(attr, math_A, self.is_training)
+
+        new_shape = tf.concat([attr_shape[:-1], [math_A]], axis=0)
+        math_attr = tf.reshape(math_attr, new_shape)
+
+        math_rep = self.build_math_representation(math_attr)
+
+        logits = self.math_network(math_rep, cfg.n_classes, self.is_training)
+
+        # --- record values and losses ---
+
+        self._tensors["math_attr"] = math_attr
+        self._tensors["prediction"] = tf.nn.softmax(logits)
+
+        recorded_tensors = self.recorded_tensors
+
+        if self.math_weight is not None:
+            recorded_tensors["raw_loss_math"] = tf.reduce_mean(
+                tf.nn.softmax_cross_entropy_with_logits_v2(
+                    labels=self._tensors["targets"],
+                    logits=logits
+                )
+            )
+
+            self.losses["math"] = self.math_weight * recorded_tensors["raw_loss_math"]
+
+        recorded_tensors["math_accuracy"] = tf.reduce_mean(
+            tf.to_float(
+                tf.equal(
+                    tf.argmax(logits, axis=1),
+                    tf.argmax(self._tensors['targets'], axis=1)
+                )
+            )
+        )
+
+        recorded_tensors["math_1norm"] = tf.reduce_mean(
+            tf.to_float(
+                tf.abs(tf.argmax(logits, axis=1) - tf.argmax(self._tensors['targets'], axis=1))
+            )
+        )
+
+        recorded_tensors["math_correct_prob"] = tf.reduce_mean(
+            tf.reduce_sum(tf.nn.softmax(logits) * self._tensors['targets'], axis=1)
+        )
+
+
+class SimpleRecurrentRegressionNetwork(ScopedFunction):
+    cell = None
+    output_network = None
+
+    def _call(self, inp, output_size, is_training):
+        if self.cell is None:
+            self.cell = cfg.build_math_cell(scope="regression_cell")
+        if self.output_network is None:
+            self.output_network = cfg.build_math_output(scope="math_output")
+
+        batch_size = tf.shape(inp)[0]
+        A = inp.shape[-1]
+        _inp = tf.reshape(inp, (batch_size, -1, A))
+
+        output, final_state = tf.nn.dynamic_rnn(
+            self.cell, _inp, initial_state=self.cell.zero_state(batch_size, tf.float32),
+            parallel_iterations=1, swap_memory=False)
+
+        return self.output_network(output[:, -1, :], output_size, is_training)
+
+
+class SoftmaxMLP(MLP):
+    def __init__(self, n_outputs, temp, n_units=None, scope=None, **fc_kwargs):
+        self.n_outputs = n_outputs
+        self.temp = temp
+
+        super(SoftmaxMLP, self).__init__(scope=scope, n_units=n_units, **fc_kwargs)
+
+    def _call(self, inp, output_size, is_training):
+        output = super(SoftmaxMLP, self)._call(inp, output_size, is_training)
+        return tf.nn.softmax(output / self.temp)
+
+
+class SequentialRegressionNetwork(ScopedFunction):
+    h_cell = None
+    w_cell = None
+    b_cell = None
+
+    output_network = None
+
+    def _call(self, _inp, output_size, is_training):
+        if self.h_cell is None:
+            self.h_cell = cfg.build_math_cell(scope="regression_h_cell")
+            self.w_cell = cfg.build_math_cell(scope="regression_w_cell")
+            self.b_cell = cfg.build_math_cell(scope="regression_b_cell")
+
+        edge_state = self.h_cell.zero_state(tf.shape(_inp)[0], tf.float32)
+
+        H, W, B = tuple(int(i) for i in _inp.shape[1:4])
+        h_states = np.empty((H, W, B), dtype=np.object)
+        w_states = np.empty((H, W, B), dtype=np.object)
+        b_states = np.empty((H, W, B), dtype=np.object)
+
+        for h in range(H):
+            for w in range(W):
+                for b in range(B):
+                    h_state = h_states[h-1, w, b] if h > 0 else edge_state
+                    w_state = w_states[h, w-1, b] if w > 0 else edge_state
+                    b_state = b_states[h, w, b-1] if b > 0 else edge_state
+
+                    inp = _inp[:, h, w, b, :]
+
+                    h_inp = tf.concat([inp, w_state.h, b_state.h], axis=1)
+                    _, h_states[h, w, b] = self.h_cell(h_inp, h_state)
+
+                    w_inp = tf.concat([inp, h_state.h, b_state.h], axis=1)
+                    _, w_states[h, w, b] = self.w_cell(w_inp, w_state)
+
+                    b_inp = tf.concat([inp, h_state.h, w_state.h], axis=1)
+                    _, b_states[h, w, b] = self.b_cell(b_inp, b_state)
+
+        if self.output_network is None:
+            self.output_network = cfg.build_math_output(scope="math_output")
+
+        final_layer_input = tf.concat(
+            [h_states[-1, -1, -1].h,
+             w_states[-1, -1, -1].h,
+             b_states[-1, -1, -1].h],
+            axis=1)
+
+        return self.output_network(final_layer_input, output_size, is_training)
+
+
+class ObjectBasedRegressionNetwork(ScopedFunction):
+    n_objects = Param(5)
+
+    embedding = None
+    output_network = None
+
+    def _call(self, _inp, output_size, is_training):
+        batch_size = tf.shape(_inp)[0]
+        H, W, B, A = tuple(int(i) for i in _inp.shape[1:])
+
+        if self.embedding is None:
+            self.embedding = tf.get_variable(
+                "embedding", shape=(int(A/2), self.n_objects), dtype=tf.float32)
+
+        inp = tf.reshape(_inp, (batch_size, H * W * B, A))
+        key, value = tf.split(inp, 2, axis=2)
+        raw_attention = tf.tensordot(key, self.embedding, [[2], [0]])
+        attention = tf.nn.softmax(raw_attention, axis=1)
+
+        attention_t = tf.transpose(attention, (0, 2, 1))
+        weighted_value = tf.matmul(attention_t, value)
+
+        flat_weighted_value = tf.reshape(
+            weighted_value, (batch_size, self.n_objects * int(A/2)))
+
+        if self.output_network is None:
+            self.output_network = cfg.build_math_output(scope="math_output")
+
+        return self.output_network(flat_weighted_value, output_size, is_training)
+
+
+class ConvolutionalRegressionNetwork(ScopedFunction):
+    network = None
+
+    def _call(self, inp, output_size, is_training):
+        if self.network is None:
+            self.network = cfg.build_convolutional_network(scope="regression_network")
+
+        return self.network(inp['attr'], output_size, is_training)
+
+
+class AttentionRegressionNetwork(ConvNet):
+    ar_n_filters = Param(128)
+
+    def __init__(self, **kwargs):
+        layout = [
+            dict(filters=self.ar_n_filters, kernel_size=3, padding="SAME", strides=1),
+            dict(filters=self.ar_n_filters, kernel_size=3, padding="SAME", strides=1),
+            dict(filters=4, kernel_size=1, padding="SAME", strides=1),
+        ]
+        super(AttentionRegressionNetwork, self).__init__(
+            layout, check_output_shape=False, **kwargs)
+
+    def _call(self, inp, output_size, is_training):
+        self.layout[-1]['filters'] = output_size + 1
+
+        batch_size = tf.shape(inp)[0]
+        inp = tf.reshape(
+            inp, (batch_size, *inp.shape[1:3], inp.shape[3] * inp.shape[4]))
+        output = super(AttentionRegressionNetwork, self)._call(inp, output_size, is_training)
+        output = tf.reshape(
+            output, (batch_size, output.shape[1] * output.shape[2], output.shape[3]))
+
+        logits, attention = tf.split(output, [output_size, 1], axis=2)
+
+        attention = tf.nn.softmax(attention, axis=1)
+        weighted_output = logits * attention
+
+        return tf.reduce_sum(weighted_output, axis=1)
+
+
+class AverageRegressionNetwork(ConvNet):
+    """ Run a conv-net and then global mean pooling. """
+    ar_n_filters = Param(128)
+
+    def __init__(self, **kwargs):
+        layout = [
+            dict(filters=self.ar_n_filters, kernel_size=3, padding="SAME", strides=1),
+            dict(filters=self.ar_n_filters, kernel_size=3, padding="SAME", strides=1),
+            dict(filters=4, kernel_size=1, padding="SAME", strides=1),
+        ]
+        super(AttentionRegressionNetwork, self).__init__(layout, check_output_shape=False, **kwargs)
+
+    def _call(self, inp, output_size, is_training):
+        self.layout[-1]['filters'] = output_size
+
+        batch_size = tf.shape(inp)[0]
+        inp = tf.reshape(inp, (batch_size, *inp.shape[1:3], inp.shape[3] * inp.shape[4]))
+        output = super(AttentionRegressionNetwork, self)._call(inp, output_size, is_training)
+        return tf.reduce_mean(output, axis=(1, 2))
+
+
+class RelationNetwork(ScopedFunction):
+    f = None
+    g = None
+
+    f_dim = Param(100)
+
+    def _call(self, inp, output_size, is_training):
+        batch_size = tf.shape(inp)[0]
+        n_objects = inp.shape[1] * inp.shape[2] * inp.shape[3]
+        obj_dim = inp.shape[4]
+        inp = tf.reshape(inp, (batch_size, n_objects, obj_dim))
+
+        if self.f is None:
+            self.f = cfg.build_relation_network_f(scope="relation_network_f")
+
+        if self.g is None:
+            self.g = cfg.build_relation_network_g(scope="relation_network_g")
+
+        f_inputs = []
+        for i in range(n_objects):
+            for j in range(n_objects):
+                f_inputs.append(tf.concat([inp[:, i, :], inp[:, j, :]], axis=1))
+        f_inputs = tf.concat(f_inputs, axis=0)
+
+        f_output = self.f(f_inputs, self.f_dim, is_training)
+        f_output = tf.split(f_output, n_objects**2, axis=0)
+
+        g_input = tf.concat(f_output, axis=1)
+        return self.g(g_input, output_size, is_training)
+
+
+def addition(left, right):
+    m = left.shape[1]
+    n = right.shape[1]
+
+    mat = tf.to_float(
+        tf.equal(
+            tf.reshape(tf.range(m)[:, None] + tf.range(n)[None, :], (-1, 1)),
+            tf.range(m + n - 1)[None, :]))
+
+    outer_product = tf.matmul(left[:, :, None], right[:, None, :])
+    outer_product = tf.reshape(outer_product, (-1, m * n))
+
+    return tf.tensordot(outer_product, mat)
+
+
+def addition_compact(left, right):
+    # Runtime is O((m+n) * n), so smaller value should be put second.
+    batch_size = tf.shape(left)[0]
+    m = left.shape[1]
+    n = right.shape[1]
+
+    running_sum = tf.zeros((batch_size, m+n-1))
+    to_add = tf.concat([left, tf.zeros((batch_size, n-1))], axis=1)
+
+    for i in range(n):
+        running_sum += to_add * right[:, i:i+1]
+        to_add = tf.manip.roll(to_add, shift=1, axis=1)
+    return running_sum
+
+
+def addition_compact_logspace(left, right):
+    # Runtime is O((m+n) * n), so smaller value should be put second.
+    batch_size = tf.shape(left)[0]
+    n = right.shape[1]
+
+    tensors = []
+    to_add = tf.concat([left, -100 * tf.ones((batch_size, n-1))], axis=1)
+
+    for i in range(n):
+        tensors.append(to_add + right[:, i:i+1])
+        to_add = tf.manip.roll(to_add, shift=1, axis=1)
+    return tf.reduce_logsumexp(tf.stack(tensors, axis=2), axis=2)
+
+
+class AdditionNetwork(ScopedFunction):
+    def _call(self, inp, output_size, is_training):
+        H, W, B, _ = tuple(int(i) for i in inp.shape[1:])
+
+        # inp = tf.log(tf.nn.softmax(tf.clip_by_value(inp, -10., 10.), axis=4))
+        inp = inp - tf.reduce_logsumexp(inp, axis=4, keepdims=True)
+
+        running_sum = inp[:, 0, 0, 0, :]
+
+        for h in range(H):
+            for w in range(W):
+                for b in range(B):
+                    if h == 0 and w == 0 and b == 0:
+                        pass
+                    else:
+                        right = inp[:, h, w, b, :]
+                        running_sum = addition_compact_logspace(running_sum, right)
+
+        assert running_sum.shape[1] == output_size
+        return running_sum

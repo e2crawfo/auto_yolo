@@ -8,11 +8,12 @@ import sonnet as snt
 
 from dps import cfg
 from dps.utils import Param
-from dps.utils.tf import ScopedFunction, tf_mean_sum, build_scheduled_value, FIXED_COLLECTION, RenderHook
+from dps.utils.tf import tf_mean_sum, build_scheduled_value, FIXED_COLLECTION, RenderHook
 
 from auto_yolo.tf_ops import render_sprites
 from auto_yolo.models.core import (
-    AP, loss_builders, normal_vae, concrete_binary_pre_sigmoid_sample, concrete_binary_sample_kl)
+    AP, loss_builders, normal_vae, concrete_binary_pre_sigmoid_sample,
+    concrete_binary_sample_kl, VariationalAutoencoder)
 
 
 def tf_safe_log(value, nan_value=100.0):
@@ -21,66 +22,51 @@ def tf_safe_log(value, nan_value=100.0):
     return log_value
 
 
-class YoloAir_Network(ScopedFunction):
+class YoloAir_Network(VariationalAutoencoder):
     pixels_per_cell = Param()
     object_shape = Param()
-    anchor_boxes = Param(help="List of (h, w) pairs.")
+    anchor_boxes = Param()
 
-    A = Param(100, help="Dimension of attribute vector.")
+    min_hw = Param()
+    max_hw = Param()
 
-    min_hw = Param(0.0)
-    max_hw = Param(1.0)
+    min_yx = Param()
+    max_yx = Param()
 
-    min_yx = Param(0.0)
-    max_yx = Param(1.0)
+    n_backbone_features = Param()
+    n_passthrough_features = Param()
 
-    n_backbone_features = Param(100)
-    n_passthrough_features = Param(100)
-
-    xent_loss = Param(True)
-
-    fixed_values = Param(dict())
-    fixed_weights = Param("")
-    no_gradient = Param("")
-
-    use_concrete_kl = Param(True)
+    use_concrete_kl = Param()
     count_prior_log_odds = Param()
-    count_prior_dist = Param(None, help="If not None, overrides `count_prior_log_odds`.")
-    obj_concrete_temp = Param(1.0, help="Higher values -> smoother")
-    obj_temp = Param(1.0, help="Higher values -> more uniform")
+    count_prior_dist = Param()
+    obj_concrete_temp = Param(help="Higher values -> smoother")
+    obj_temp = Param(help="Higher values -> more uniform")
 
-    train_reconstruction = Param(True)
-    train_kl = Param(True)
-    noisy = Param(True)
+    yx_prior_mean = Param()
+    yx_prior_std = Param()
 
-    reconstruction_weight = Param(1.0)
-    kl_weight = Param(1.0)
+    hw_prior_mean = Param()
+    hw_prior_std = Param()
 
-    yx_prior_mean = Param(0.0)
-    yx_prior_std = Param(1.0)
+    obj_logit_scale = Param()
+    alpha_logit_scale = Param()
+    alpha_logit_bias = Param()
 
-    hw_prior_mean = Param(0.0)
-    hw_prior_std = Param(1.0)
+    training_wheels = Param()
 
-    attr_prior_mean = Param(0.0)
-    attr_prior_std = Param(1.0)
+    sequential_cfg = Param()
+    incremental_attr = Param()
+    attr_context = Param()
 
-    obj_logit_scale = Param(2.0)
-    alpha_logit_scale = Param(0.1)
-    alpha_logit_bias = Param(5.0)
-
-    training_wheels = Param(0.0)
-
-    sequential_cfg = Param(dict(
-        on=False,
-        n_lookback=1,
-    ))
-    incremental_attr = Param(True)
-    attr_context = Param(False)
+    backbone = None
+    box_network = None
+    attr_network = None
+    obj_network = None
+    object_encoder = None
+    object_decoder = None
 
     def __init__(self, env, scope=None, **kwargs):
-        self.obs_shape = env.datasets['train'].obs_shape
-        self.image_height, self.image_width, self.image_depth = self.obs_shape
+        super(YoloAir_Network, self).__init__(env, scope=scope, **kwargs)
 
         self.H = int(np.ceil(self.image_height / self.pixels_per_cell[0]))
         self.W = int(np.ceil(self.image_width / self.pixels_per_cell[1]))
@@ -93,7 +79,8 @@ class YoloAir_Network(ScopedFunction):
         if self.count_prior_dist is not None:
             assert len(self.count_prior_dist) == (self.HWB + 1)
 
-        self.count_prior_log_odds = build_scheduled_value(self.count_prior_log_odds, "count_prior_log_odds")
+        self.count_prior_log_odds = build_scheduled_value(
+            self.count_prior_log_odds, "count_prior_log_odds")
         self.obj_concrete_temp = build_scheduled_value(self.obj_concrete_temp, "obj_concrete_temp")
         self.obj_temp = build_scheduled_value(self.obj_temp, "obj_temp")
 
@@ -103,13 +90,7 @@ class YoloAir_Network(ScopedFunction):
         self.hw_prior_mean = build_scheduled_value(self.hw_prior_mean, "hw_prior_mean")
         self.hw_prior_std = build_scheduled_value(self.hw_prior_std, "hw_prior_std")
 
-        self.attr_prior_mean = build_scheduled_value(self.attr_prior_mean, "attr_prior_mean")
-        self.attr_prior_std = build_scheduled_value(self.attr_prior_std, "attr_prior_std")
-
         self.training_wheels = build_scheduled_value(self.training_wheels, "training_wheels")
-
-        self.reconstruction_weight = build_scheduled_value(self.reconstruction_weight, "reconstruction_weight")
-        self.kl_weight = build_scheduled_value(self.kl_weight, "kl_weight")
 
         if not self.noisy and self.train_kl:
             raise Exception("If `noisy` is False, `train_kl` must also be False.")
@@ -119,37 +100,6 @@ class YoloAir_Network(ScopedFunction):
         ap_iou_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
         self.eval_funcs = {"AP_at_point_{}".format(int(10 * v)): AP(v) for v in ap_iou_values}
         self.eval_funcs["AP"] = AP(ap_iou_values)
-
-        if isinstance(self.fixed_weights, str):
-            self.fixed_weights = self.fixed_weights.split()
-
-        if isinstance(self.no_gradient, str):
-            self.no_gradient = self.no_gradient.split()
-
-        self.backbone = None
-        self.box_network = None
-        self.attr_network = None
-        self.obj_network = None
-        self.object_encoder = None
-        self.object_decoder = None
-
-        super(YoloAir_Network, self).__init__(scope=scope)
-
-    @property
-    def inp(self):
-        return self._tensors["inp"]
-
-    @property
-    def batch_size(self):
-        return self._tensors["batch_size"]
-
-    @property
-    def is_training(self):
-        return self._tensors["is_training"]
-
-    @property
-    def float_is_training(self):
-        return self._tensors["float_is_training"]
 
     def _get_scheduled_value(self, name):
         scalar = self._tensors.get(name, None)
@@ -512,7 +462,8 @@ class YoloAir_Network(ScopedFunction):
             input_glimpses = tf.contrib.resampler.resampler(self.inp, grid_coords)
 
             self._tensors["input_glimpses"] = tf.reshape(
-                input_glimpses, (self.batch_size, self.H, self.W, self.B, *self.object_shape, self.image_depth))
+                input_glimpses,
+                (self.batch_size, self.H, self.W, self.B, *self.object_shape, self.image_depth))
 
             object_encoder_in = tf.reshape(
                 input_glimpses,
@@ -562,7 +513,7 @@ class YoloAir_Network(ScopedFunction):
             obj_alpha = float(self.fixed_values["alpha"]) * tf.ones_like(obj_alpha)
 
         obj_alpha *= tf.reshape(self._tensors['obj'], (self.batch_size, self.HWB, 1, 1, 1))
-        obj_alpha = tf.exp(obj_alpha * 5 + (1-obj_alpha) * -5)  # Inner expression is equivalent to 5 * (2*obj_alpha - 1)
+        obj_alpha = tf.exp(obj_alpha * 5 + (1-obj_alpha) * -5)
 
         objects = tf.concat([obj_img, obj_alpha], axis=-1)
 
@@ -582,8 +533,6 @@ class YoloAir_Network(ScopedFunction):
             self._tensors["background"]
         )
 
-        # output = tf.clip_by_value(output, 1e-6, 1-1e-6)
-
         # --- Store values ---
 
         self._tensors['latent_hw'] = boxes[..., 2:]
@@ -592,29 +541,7 @@ class YoloAir_Network(ScopedFunction):
 
         self._tensors['output'] = output
 
-    def _process_labels(self, labels):
-        self._tensors.update(
-            annotations=labels[0],
-            n_annotations=labels[1],
-            targets=labels[2],
-        )
-
-    def _call(self, inp, _, is_training):
-        inp, labels, background = inp
-        return self.build_graph(inp, labels, background, is_training)
-
-    def build_graph(self, inp, labels, background, is_training):
-        # --- initialize containers for storing outputs ---
-
-        self._tensors = dict(
-            inp=inp,
-            is_training=is_training,
-            float_is_training=tf.to_float(is_training),
-            background=background,
-            batch_size=tf.shape(inp)[0],
-        )
-
-        self._process_labels(labels)
+    def build_representation(self):
 
         # --- build graph ---
 
@@ -691,13 +618,16 @@ class YoloAir_Network(ScopedFunction):
         if "obj" in self.no_gradient:
             obj_kl = tf.stop_gradient(obj_kl)
 
-        self._tensors["obj_kl"] = tf.reshape(tf.concat(obj_kl, axis=1), (self.batch_size, self.H, self.W, self.B, 1))
+        self._tensors["obj_kl"] = tf.reshape(
+            tf.concat(obj_kl, axis=1),
+            (self.batch_size, self.H, self.W, self.B, 1))
 
         # --- interpret program ---
 
         self._tensors["n_objects"] = tf.fill((self.batch_size,), self.HWB)
         self._tensors["pred_n_objects"] = tf.reduce_sum(self._tensors['obj'], axis=(1, 2, 3, 4))
-        self._tensors["pred_n_objects_hard"] = tf.reduce_sum(tf.round(self._tensors['obj']), axis=(1, 2, 3, 4))
+        self._tensors["pred_n_objects_hard"] = tf.reduce_sum(
+            tf.round(self._tensors['obj']), axis=(1, 2, 3, 4))
 
         if self.object_encoder is None:
             self.object_encoder = cfg.build_object_encoder(scope="object_encoder")
@@ -713,7 +643,7 @@ class YoloAir_Network(ScopedFunction):
 
         # --- specify values to record/summarize ---
 
-        recorded_tensors = {}
+        recorded_tensors = self.recorded_tensors
 
         recorded_tensors['batch_size'] = tf.to_float(self.batch_size)
         recorded_tensors['float_is_training'] = self.float_is_training
@@ -752,29 +682,27 @@ class YoloAir_Network(ScopedFunction):
 
         # --- losses ---
 
-        losses = dict()
-
         if self.train_reconstruction:
             loss_key = 'xent' if self.xent_loss else 'squared'
 
             output = self._tensors['output']
             inp = self._tensors['inp']
             self._tensors['per_pixel_reconstruction_loss'] = loss_builders[loss_key](output, inp)
-            losses['reconstruction'] = (
+            self.losses['reconstruction'] = (
                 self.reconstruction_weight *
                 tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
             )
 
         if self.train_kl:
-            losses['obj_kl'] = self.kl_weight * tf_mean_sum(self._tensors["obj_kl"])
+            self.losses['obj_kl'] = self.kl_weight * tf_mean_sum(self._tensors["obj_kl"])
 
             obj = self._tensors["obj"]
 
-            losses['cell_y_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["cell_y_kl"])
-            losses['cell_x_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["cell_x_kl"])
-            losses['h_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["h_kl"])
-            losses['w_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["w_kl"])
-            losses['attr_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["attr_kl"])
+            self.losses['cell_y_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["cell_y_kl"])
+            self.losses['cell_x_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["cell_x_kl"])
+            self.losses['h_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["h_kl"])
+            self.losses['w_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["w_kl"])
+            self.losses['attr_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["attr_kl"])
 
         # --- other evaluation metrics ---
 
@@ -783,12 +711,6 @@ class YoloAir_Network(ScopedFunction):
                 tf.abs(tf.to_int32(self._tensors["pred_n_objects_hard"]) - self._tensors["n_annotations"]))
             recorded_tensors["count_1norm"] = tf.reduce_mean(count_1norm)
             recorded_tensors["count_error"] = tf.reduce_mean(tf.to_float(count_1norm > 0.5))
-
-        return {
-            "tensors": self._tensors,
-            "recorded_tensors": recorded_tensors,
-            "losses": losses
-        }
 
 
 class YoloAir_RenderHook(RenderHook):

@@ -2,17 +2,12 @@ import tensorflow as tf
 
 from dps.utils import Param
 
-from auto_yolo.models import yolo_math
+from auto_yolo.models import yolo_air, simple
 
 
-class YoloAIR_XONetwork(yolo_math.YoloAir_MathNetwork):
-    largest_digit = None
+class YoloAirXO_Network(yolo_air.YoloAir_Network):
     n_actions = Param()
     classes = Param()
-
-    def __init__(self, env, scope=None, **kwargs):
-        super(YoloAIR_XONetwork, self).__init__(env, scope=scope, **kwargs)
-        self.eval_funcs = dict()
 
     @property
     def n_classes(self):
@@ -33,8 +28,7 @@ class YoloAIR_XONetwork(yolo_math.YoloAir_MathNetwork):
         )
 
 
-class SimpleXONetwork(yolo_math.SimpleMathNetwork):
-    largest_digit = None
+class SimpleXO_Network(simple.SimpleVAE):
     n_actions = Param()
     classes = Param()
 
@@ -42,10 +36,10 @@ class SimpleXONetwork(yolo_math.SimpleMathNetwork):
     def n_classes(self):
         return len(self.classes)
 
-    def build_math_representation(self, math_code):
+    def build_math_representation(self, math_rep):
         one_hot_actions = tf.one_hot(tf.to_int32(self._tensors["actions"][:, 0]), self.n_actions)
         actions = tf.tile(one_hot_actions[:, None, None, None, :], (1, self.H, self.W, 1, 1))
-        return tf.concat([math_code, actions], axis=4)
+        return tf.concat([math_rep, actions], axis=4)
 
     def _process_labels(self, labels):
         self._tensors.update(

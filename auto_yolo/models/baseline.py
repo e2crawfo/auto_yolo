@@ -9,11 +9,11 @@ import os
 
 from dps import cfg
 from dps.utils import Param
-from dps.utils.tf import ScopedFunction, RNNCell, build_scheduled_value
+from dps.utils.tf import RNNCell, tf_mean_sum
 
 from auto_yolo.tf_ops import render_sprites
 from auto_yolo.models import yolo_air
-from auto_yolo.models.core import loss_builders, AP
+from auto_yolo.models.core import loss_builders, AP, VariationalAutoencoder
 
 
 class BboxCell(RNNCell):
@@ -50,64 +50,19 @@ class BboxCell(RNNCell):
         return tf.zeros((batch_size, 1), dtype=dtype)
 
 
-class YoloBaseline_Network(ScopedFunction):
-    fixed_weights = Param("")
-    no_gradient = Param("")
-    attr_prior_mean = Param(0.0)
-    attr_prior_std = Param(1.0)
-    train_reconstruction = Param(True)
-    train_kl = Param(True)
-    kl_weight = Param(1.0)
-    reconstruction_weight = Param(1.0)
-    cc_threshold = Param(1e-3)
-
-    xent_loss = Param(True)
-    A = Param(100, help="Dimension of attribute vector.")
+class Baseline_Network(VariationalAutoencoder):
+    cc_threshold = Param()
     object_shape = Param()
 
+    object_encoder = None
+    object_decoder = None
+
     def __init__(self, env, scope=None, **kwargs):
-        self.obs_shape = env.datasets['train'].obs_shape
-        self.image_height, self.image_width, self.image_depth = self.obs_shape
-
-        self.attr_prior_mean = build_scheduled_value(
-            self.attr_prior_mean, "attr_prior_mean")
-        self.attr_prior_std = build_scheduled_value(
-            self.attr_prior_std, "attr_prior_std")
-
-        self.reconstruction_weight = build_scheduled_value(
-            self.reconstruction_weight, "reconstruction_weight")
-        self.kl_weight = build_scheduled_value(self.kl_weight, "kl_weight")
-
         ap_iou_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
         self.eval_funcs = {"AP_at_point_{}".format(int(10 * v)): AP(v) for v in ap_iou_values}
         self.eval_funcs["AP"] = AP(ap_iou_values)
 
-        self.object_encoder = None
-        self.object_decoder = None
-
-        if isinstance(self.fixed_weights, str):
-            self.fixed_weights = self.fixed_weights.split()
-
-        if isinstance(self.no_gradient, str):
-            self.no_gradient = self.no_gradient.split()
-
-        super(YoloBaseline_Network, self).__init__(scope=scope)
-
-    @property
-    def inp(self):
-        return self._tensors["inp"]
-
-    @property
-    def batch_size(self):
-        return self._tensors["batch_size"]
-
-    @property
-    def is_training(self):
-        return self._tensors["is_training"]
-
-    @property
-    def float_is_training(self):
-        return self._tensors["float_is_training"]
+        super(Baseline_Network, self).__init__(env, scope=scope, **kwargs)
 
     def _build_program_generator(self):
         assert len(self.inp.shape) == 4
@@ -132,7 +87,8 @@ class YoloBaseline_Network(ScopedFunction):
         batch_indices_for_objects = tf.argmax(both, axis=0)
 
         assert_valid_batch_indices = tf.Assert(
-            tf.reduce_all(tf.equal(tf.reduce_sum(both, axis=0), 1)), [both], name="assert_valid_batch_indices")
+            tf.reduce_all(tf.equal(tf.reduce_sum(both, axis=0), 1)),
+            [both], name="assert_valid_batch_indices")
 
         with tf.control_dependencies([assert_valid_batch_indices]):
             batch_indices_for_objects = tf.identity(batch_indices_for_objects)
@@ -151,9 +107,6 @@ class YoloBaseline_Network(ScopedFunction):
         routing = tf.cumsum(routing, exclusive=True)
         routing = tf.reshape(routing, tf.shape(obj))
         obj = tf.to_float(obj[:, :, None])
-
-        self.program = dict(obj=obj)
-        self._tensors["program"] = self.program
 
         self._tensors["normalized_box"] = tf.gather(object_bboxes, routing, axis=0)
         self._tensors["obj"] = obj
@@ -184,9 +137,7 @@ class YoloBaseline_Network(ScopedFunction):
             input_glimpses, (self.batch_size * max_objects, *self.object_shape, self.image_depth))
 
         attr = self.object_encoder(object_encoder_in, (1, 1, 2*self.A), self.is_training)
-
         attr = tf.reshape(attr, (self.batch_size, max_objects, 2*self.A))
-
         attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
         attr_std = tf.exp(attr_log_std)
 
@@ -212,7 +163,7 @@ class YoloBaseline_Network(ScopedFunction):
             objects, (self.batch_size, max_objects, *self.object_shape, self.image_depth,))
 
         objects = tf.reshape(objects, (self.batch_size, max_objects, *self.object_shape, self.image_depth,))
-        alpha = self._tensors["obj"][:, :, :, None, None] * tf.ones_like(objects[:, :, :, :, :1])
+        alpha = 10 * self._tensors["obj"][:, :, :, None, None] * tf.ones_like(objects[:, :, :, :, :1])
         objects = tf.concat([objects, alpha], axis=-1)
 
         # -- Reconstruct image ---
@@ -233,29 +184,7 @@ class YoloBaseline_Network(ScopedFunction):
 
         self._tensors['output'] = output
 
-    def _process_labels(self, labels):
-        self._tensors.update(
-            annotations=labels[0],
-            n_annotations=labels[1],
-            targets=labels[2],
-        )
-
-    def _call(self, inp, _, is_training):
-        inp, labels, background = inp
-        return self.build_graph(inp, labels, background, is_training)
-
-    def build_graph(self, inp, labels, background, is_training):
-        # --- initialize containers for storing outputs ---
-
-        self._tensors = dict(
-            inp=inp,
-            is_training=is_training,
-            float_is_training=tf.to_float(is_training),
-            background=background,
-            batch_size=tf.shape(inp)[0],
-        )
-
-        self._process_labels(labels)
+    def build_representation(self):
 
         # --- build graph ---
 
@@ -275,122 +204,38 @@ class YoloBaseline_Network(ScopedFunction):
 
         # --- specify values to record/summarize ---
 
-        recorded_tensors = dict(
-            batch_size=tf.to_float(self.batch_size),
-            float_is_training=self.float_is_training,
+        self.recorded_tensors.update(
             n_objects=tf.reduce_mean(self._tensors["n_objects"]),
             attr=tf.reduce_mean(self._tensors["attr"])
         )
 
         # --- losses ---
 
-        losses = dict()
-
         if self.train_reconstruction:
             loss_key = 'xent' if self.xent_loss else 'squared'
 
-            obj = self._tensors["obj"]
-
-            output = obj[:, :, :, None, None] * self._tensors["objects"]
-            inp = obj[:, :, :, None, None] * self._tensors["input_glimpses"]
+            output = self._tensors['output']
+            inp = self._tensors['inp']
             self._tensors['per_pixel_reconstruction_loss'] = loss_builders[loss_key](output, inp)
-            losses['reconstruction'] = (
+            self.losses['reconstruction'] = (
                 self.reconstruction_weight *
-                tf.reduce_sum(self._tensors['per_pixel_reconstruction_loss'])
+                tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
             )
 
         if self.train_kl:
-            losses['attr_kl'] = self.kl_weight * tf.reduce_sum(obj * self._tensors["attr_kl"])
+            obj = self._tensors["obj"]
+            self.losses['attr_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["attr_kl"])
 
         # --- other evaluation metrics
 
         if "n_annotations" in self._tensors:
-            count_1norm = tf.to_float(tf.abs(tf.to_int32(self._tensors["n_objects"]) - self._tensors["n_annotations"]))
-            recorded_tensors["count_1norm"] = tf.reduce_mean(count_1norm)
-            recorded_tensors["count_error"] = tf.reduce_mean(tf.to_float(count_1norm > 0.5))
-
-        return dict(
-            tensors=self._tensors,
-            recorded_tensors=recorded_tensors,
-            losses=losses
-        )
+            count_1norm = tf.to_float(
+                tf.abs(tf.to_int32(self._tensors["n_objects"]) - self._tensors["n_annotations"]))
+            self.recorded_tensors["count_1norm"] = tf.reduce_mean(count_1norm)
+            self.recorded_tensors["count_error"] = tf.reduce_mean(tf.to_float(count_1norm > 0.5))
 
 
-class YoloBaseline_MathNetwork(YoloBaseline_Network):
-    math_weight = Param()
-    largest_digit = Param()
-
-    math_input_network = None
-    math_network = None
-
-    @property
-    def n_classes(self):
-        return self.largest_digit + 1
-
-    def build_math_representation(self, math_attr):
-        # Use raw_obj so that there is no discrepancy between validation and train
-        return self._tensors["raw_obj"] * math_attr
-
-    def build_graph(self, *args, **kwargs):
-        with tf.variable_scope("reconstruction", reuse=self.initialized):
-            result = super(YoloBaseline_MathNetwork, self).build_graph(*args, **kwargs)
-
-        if self.math_input_network is None:
-            self.math_input_network = cfg.build_math_input(scope="math_input_network")
-
-            if "math" in self.fixed_weights:
-                self.math_input_network.fix_variables()
-
-        attr = tf.reshape(self.program['attr'], (self.batch_size * self.HWB, self.A))
-        math_attr = self.math_input_network(attr, self.A, self.is_training)
-        math_attr = tf.reshape(math_attr, (self.batch_size, self.H, self.W, self.B, self.A))
-        self._tensors["math_attr"] = math_attr
-
-        _inp = self.build_math_representation(math_attr)
-
-        if self.math_network is None:
-            self.math_network = cfg.build_math_network(scope="math_network")
-
-            if "math" in self.fixed_weights:
-                self.math_network.fix_variables()
-
-        logits = self.math_network(_inp, self.n_classes, self.is_training)
-
-        if self.math_weight is not None:
-            result["recorded_tensors"]["raw_loss_math"] = tf.reduce_mean(
-                tf.nn.softmax_cross_entropy_with_logits_v2(
-                    labels=self._tensors["targets"],
-                    logits=logits
-                )
-            )
-
-            result["losses"]["math"] = self.math_weight * result["recorded_tensors"]["raw_loss_math"]
-
-        self._tensors["prediction"] = tf.nn.softmax(logits)
-
-        result["recorded_tensors"]["math_accuracy"] = tf.reduce_mean(
-            tf.to_float(
-                tf.equal(
-                    tf.argmax(logits, axis=1),
-                    tf.argmax(self._tensors['targets'], axis=1)
-                )
-            )
-        )
-
-        result["recorded_tensors"]["math_1norm"] = tf.reduce_mean(
-            tf.to_float(
-                tf.abs(tf.argmax(logits, axis=1) - tf.argmax(self._tensors['targets'], axis=1))
-            )
-        )
-
-        result["recorded_tensors"]["math_correct_prob"] = tf.reduce_mean(
-            tf.reduce_sum(tf.nn.softmax(logits) * self._tensors['targets'], axis=1)
-        )
-
-        return result
-
-
-class YoloBaseline_RenderHook(yolo_air.YoloAir_RenderHook):
+class Baseline_RenderHook(yolo_air.YoloAir_RenderHook):
     def _plot_patches(self, updater, fetched, N):
         # Create a plot showing what each object is generating
         import matplotlib.pyplot as plt

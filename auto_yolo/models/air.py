@@ -19,10 +19,12 @@ import matplotlib.patches as patches
 
 from dps import cfg
 from dps.utils import Param
-from dps.utils.tf import build_scheduled_value, ScopedFunction, RenderHook
+from dps.utils.tf import build_scheduled_value, RenderHook
 from dps.env.advanced.yolo import mAP
 
-from auto_yolo.models.core import normal_vae, concrete_binary_pre_sigmoid_sample, concrete_binary_sample_kl
+from auto_yolo.models.core import (
+    VariationalAutoencoder, normal_vae,
+    concrete_binary_pre_sigmoid_sample, concrete_binary_sample_kl)
 
 
 # ------ transformer.py -------
@@ -242,22 +244,16 @@ class AIR_AP(object):
             iou_threshold=self.iou_threshold)
 
 
-class AIR_Network(ScopedFunction):
+class AIR_Network(VariationalAutoencoder):
     max_time_steps = Param()
     run_all_time_steps = Param(help="If true, always run for `max_time_steps` and don't predict `z_pres`")
-    max_chars = Param()
     object_shape = Param()
-
-    A = Param()
 
     scale_prior_mean = Param()
     scale_prior_std = Param()
 
     shift_prior_mean = Param()
     shift_prior_std = Param()
-
-    attr_prior_mean = Param()
-    attr_prior_std = Param()
 
     z_pres_prior_log_odds = Param()
     z_pres_temperature = Param()
@@ -269,20 +265,22 @@ class AIR_Network(ScopedFunction):
 
     difference_air = Param()
 
-    fixed_values = Param()
-    fixed_weights = Param()
-
     complete_rnn_input = Param()
 
+    image_encoder = None
+    cell = None
+    output_network = None
+    object_encoder = None
+    object_decoder = None
+
     def __init__(self, env, scope=None, **kwargs):
-        self.obs_shape = env.datasets['train'].obs_shape
-        self.image_height, self.image_width, self.image_depth = self.obs_shape
+        super(AIR_Network, self).__init__(env, scope=scope, **kwargs)
+
         ap_iou_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
         self.eval_funcs = {"AP_at_point_{}".format(int(10 * v)): AIR_AP(v) for v in ap_iou_values}
         self.eval_funcs["AP"] = AIR_AP(ap_iou_values)
 
         self.training_wheels = build_scheduled_value(self.training_wheels, "training_wheels")
-        self.kl_weight = build_scheduled_value(self.kl_weight, "kl_weight")
 
         self.scale_prior_mean = build_scheduled_value(self.scale_prior_mean, "scale_prior_mean")
         self.scale_prior_std = build_scheduled_value(self.scale_prior_std, "scale_prior_std")
@@ -291,84 +289,6 @@ class AIR_Network(ScopedFunction):
         self.shift_prior_std = build_scheduled_value(self.shift_prior_std, "shift_prior_std")
 
         self.z_pres_prior_log_odds = build_scheduled_value(self.z_pres_prior_log_odds, "z_pres_prior_log_odds")
-
-        if isinstance(self.fixed_weights, str):
-            self.fixed_weights = self.fixed_weights.split()
-
-        self.image_encoder = None
-        self.cell = None
-        self.output_network = None
-        self.object_encoder = None
-        self.object_decoder = None
-
-        super(AIR_Network, self).__init__(scope=scope)
-
-    @property
-    def inp(self):
-        return self._tensors["inp"]
-
-    @property
-    def batch_size(self):
-        return self._tensors["batch_size"]
-
-    @property
-    def is_training(self):
-        return self._tensors["is_training"]
-
-    @property
-    def float_is_training(self):
-        return self._tensors["float_is_training"]
-
-    @property
-    def float_do_explore(self):
-        return self._tensors["float_do_explore"]
-
-    def _summarize_by_digit_count(self, tensor, digits, name):
-        float_tensor = tf.to_float(tensor)
-
-        recorded_tensors = {}
-        for i in range(self.max_chars+1):
-            key = "{}_dig_{}".format(name, i)
-            recorded_tensors[key] = (
-                tf.reduce_mean(tf.boolean_mask(float_tensor, tf.equal(digits, i))))
-
-        recorded_tensors[name + "_all_dig"] = tf.reduce_mean(float_tensor)
-
-        return recorded_tensors
-
-    def _summarize_by_step(self, tensor, steps, name, one_more_step=False, all_steps=False):
-        """
-        Params
-        ------
-        tensor: tf.Tensor (batch_size, max_time_steps)
-            Tensor to summarize.
-        one_more_step: bool
-            If True, and `all_steps` is not True, extend each summary for one more step.
-        all_steps: bool
-            If True, each summary contains data from ALL batch items, even batch items that did
-            not go the required number of steps.
-
-        """
-        tensor = tf.pad(tensor, [[0, 0], [0, self.max_time_steps - tf.shape(tensor)[1]]])
-
-        recorded_tensors = {}
-
-        for i in range(self.max_time_steps):
-            _name = name + "_step_" + str(i+1)
-            if all_steps:
-                _recorded_tensors = self._summarize_by_digit_count(
-                    tensor[:, i], self.target_n_digits, _name
-                )
-            else:
-                mask = tf.greater(steps, i - (1 if one_more_step else 0))
-                _recorded_tensors = self._summarize_by_digit_count(
-                    tf.boolean_mask(tensor[:, i], mask),
-                    tf.boolean_mask(self.target_n_digits, mask),
-                    _name
-                )
-
-            recorded_tensors.update(_recorded_tensors)
-        return recorded_tensors
 
     def apply_training_wheel(self, signal):
         return (
@@ -382,22 +302,8 @@ class AIR_Network(ScopedFunction):
         else:
             return signal
 
-    def _call(self, inp, _, is_training):
-        inp, labels, background = inp
-        return self.build_graph(inp, labels, background, is_training)
-
-    def build_graph(self, inp, labels, background, is_training):
+    def build_graph(self):
         # --- process input ---
-
-        self._tensors = dict(
-            inp=inp,
-            annotations=labels[0],
-            n_annotations=labels[1],
-            is_training=is_training,
-            float_is_training=tf.to_float(is_training),
-            background=background,
-            batch_size=tf.shape(inp)[0]
-        )
 
         if self.image_encoder is None:
             self.image_encoder = cfg.build_image_encoder(scope="image_encoder")
@@ -687,105 +593,35 @@ class AIR_Network(ScopedFunction):
 
         self._tensors['output'] = tf.reshape(reconstruction, (self.batch_size,) + self.obs_shape)
 
-        losses = dict(
+        self.losses.update(
             reconstruction=tf.reduce_mean(reconstruction_loss),
             running=self.kl_weight * tf.reduce_mean(kl_loss),
         )
 
-        recorded_tensors = {}
-
-        recorded_tensors['batch_size'] = tf.to_float(self.batch_size)
-        recorded_tensors['float_is_training'] = self.float_is_training
+        recorded_tensors = self.recorded_tensors
 
         # accuracy of inferred number of digits
         count_error = 1 - tf.to_float(tf.equal(self.target_n_digits, self.predicted_n_digits))
         count_1norm = tf.to_float(tf.abs(self.target_n_digits - self.predicted_n_digits))
 
-        if self.verbose_summaries:
-            # summaries grouped by digit count
+        recorded_tensors["predicted_n_digits"] = tf.reduce_mean(self.predicted_n_digits)
+        recorded_tensors["count_error"] = tf.reduce_mean(count_error)
+        recorded_tensors["count_1norm"] = tf.reduce_mean(count_1norm)
+        recorded_tensors["predicted_n_digits"] = tf.reduce_mean(self.predicted_n_digits)
 
-            rt = self._summarize_by_digit_count(self.predicted_n_digits, self.target_n_digits, "steps")
-            recorded_tensors.update(rt)
+        recorded_tensors["scale"] = tf.reduce_mean(self._tensors["scale"])
+        recorded_tensors["x"] = tf.reduce_mean(self._tensors["shift"][:, :, 0])
+        recorded_tensors["y"] = tf.reduce_mean(self._tensors["shift"][:, :, 1])
+        recorded_tensors["z_pres_prob"] = tf.reduce_mean(self._tensors["z_pres_probs"])
+        recorded_tensors["z_pres_kl"] = tf.reduce_mean(self._tensors["z_pres_kl"])
 
-            rt = self._summarize_by_digit_count(count_error, self.target_n_digits, "count_error")
-            recorded_tensors.update(rt)
+        recorded_tensors["scale_kl"] = tf.reduce_mean(self._tensors["scale_kl"])
+        recorded_tensors["shift_kl"] = tf.reduce_mean(self._tensors["shift_kl"])
+        recorded_tensors["attr_kl"] = tf.reduce_mean(self._tensors["attr_kl"])
 
-            rt = self._summarize_by_digit_count(count_1norm, self.target_n_digits, "count_1norm")
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_digit_count(kl_loss, self.target_n_digits, "kl_loss")
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_digit_count(reconstruction_loss, self.target_n_digits, "reconstruction_loss")
-            recorded_tensors.update(rt)
-
-            # --- grouped by digit count of ground-truth image and step ---
-
-            rt = self._summarize_by_step(self._tensors["scale"][:, :, 0], self.predicted_n_digits, "w")
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_step(self._tensors["scale"][:, :, 1], self.predicted_n_digits, "h")
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_step(self._tensors["shift"][:, :, 0], self.predicted_n_digits, "x")
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_step(self._tensors["shift"][:, :, 1], self.predicted_n_digits, "y")
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_step(
-                self._tensors["z_pres_probs"][:, :, 0], self.predicted_n_digits, "z_pres_prob", all_steps=True)
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_step(
-                self._tensors["z_pres_kl"][:, :, 0], self.predicted_n_digits, "z_pres_kl", one_more_step=True)
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_step(self._tensors["scale_kl"][:, :, 0], self.predicted_n_digits, "scale_kl")
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_step(self._tensors["shift_kl"][:, :, 0], self.predicted_n_digits, "shift_kl")
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_step(self._tensors["attr_kl"][:, :, 0], self.predicted_n_digits, "attr_kl")
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_step(self._tensors["scale_std"][:, :, 0], self.predicted_n_digits, "w_std")
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_step(self._tensors["scale_std"][:, :, 1], self.predicted_n_digits, "h_std")
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_step(self._tensors["shift_std"][:, :, 0], self.predicted_n_digits, "x_std")
-            recorded_tensors.update(rt)
-
-            rt = self._summarize_by_step(self._tensors["shift_std"][:, :, 1], self.predicted_n_digits, "y_std")
-            recorded_tensors.update(rt)
-        else:
-            recorded_tensors["predicted_n_digits"] = tf.reduce_mean(self.predicted_n_digits)
-            recorded_tensors["count_error"] = tf.reduce_mean(count_error)
-            recorded_tensors["count_1norm"] = tf.reduce_mean(count_1norm)
-            recorded_tensors["predicted_n_digits"] = tf.reduce_mean(self.predicted_n_digits)
-
-            recorded_tensors["scale"] = tf.reduce_mean(self._tensors["scale"])
-            recorded_tensors["x"] = tf.reduce_mean(self._tensors["shift"][:, :, 0])
-            recorded_tensors["y"] = tf.reduce_mean(self._tensors["shift"][:, :, 1])
-            recorded_tensors["z_pres_prob"] = tf.reduce_mean(self._tensors["z_pres_probs"])
-            recorded_tensors["z_pres_kl"] = tf.reduce_mean(self._tensors["z_pres_kl"])
-
-            recorded_tensors["scale_kl"] = tf.reduce_mean(self._tensors["scale_kl"])
-            recorded_tensors["shift_kl"] = tf.reduce_mean(self._tensors["shift_kl"])
-            recorded_tensors["attr_kl"] = tf.reduce_mean(self._tensors["attr_kl"])
-
-            recorded_tensors["scale_std"] = tf.reduce_mean(self._tensors["scale_std"])
-            recorded_tensors["shift_std"] = tf.reduce_mean(self._tensors["shift_std"])
-            recorded_tensors["attr_std"] = tf.reduce_mean(self._tensors["attr_std"])
-
-        return {
-            "tensors": self._tensors,
-            "recorded_tensors": recorded_tensors,
-            "losses": losses,
-        }
+        recorded_tensors["scale_std"] = tf.reduce_mean(self._tensors["scale_std"])
+        recorded_tensors["shift_std"] = tf.reduce_mean(self._tensors["shift_std"])
+        recorded_tensors["attr_std"] = tf.reduce_mean(self._tensors["attr_std"])
 
 
 class AIR_RenderHook(RenderHook):

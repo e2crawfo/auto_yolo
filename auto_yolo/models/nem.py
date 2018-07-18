@@ -15,8 +15,6 @@ from dps import cfg
 from dps.utils import Param
 from dps.utils.tf import ScopedFunction
 
-from auto_yolo.models.core import AP
-
 
 # -------------------------------- utils.py -------------------------------------
 
