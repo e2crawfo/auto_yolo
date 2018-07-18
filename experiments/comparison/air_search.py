@@ -10,11 +10,11 @@ distributions = dict(
     scale_prior_mean=np.log(p/(1-p)),
     scale_prior_std=[.25, .5, .75, 1.0],
     shift_prior_std=[0.5, 1.0, 2.0],
-    complete_rnn_input=[True, False],
 )
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--n-digits", type=int, default=1)
+parser.add_argument("--dair", action="store_true")
 args, _ = parser.parse_known_args()
 
 
@@ -32,8 +32,15 @@ durations = dict(
 
     short=dict(
         max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="12mins",
-        project="rpp-bengioy", cleanup_time="1mins",
+        project="rpp-bengioy", cleanup_time="1mins", config=dict(max_steps=100),
         slack_time="1mins", n_repeats=1, n_param_settings=2),
+
+    oak=dict(
+        max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="12mins",
+        project="rpp-bengioy", cleanup_time="1mins", config=dict(max_steps=100),
+        slack_time="1mins", n_repeats=1, n_param_settings=4, host_pool=[":"],
+        kind="parallel"
+    ),
 )
 
 n_digits = args.n_digits
@@ -43,10 +50,12 @@ config = dict(
     n_train=64000, min_digits=n_digits, max_digits=n_digits,
     max_time_steps=n_digits, run_all_time_steps=True,
     stopping_criteria="AP,max", threshold=0.99, patience=10000,
-    rnn_n_units=128,
+    rnn_n_units=256,
 )
 
+alg = "dair" if args.dair else "air"
+
 envs.run_experiment(
-    "air_search_n_digits={}".format(n_digits), config, readme,
-    distributions=distributions, alg="air", task="arithmetic", durations=durations,
+    "{}_search_n_digits={}".format(alg, n_digits), config, readme,
+    distributions=distributions, alg=alg, task="arithmetic", durations=durations,
 )

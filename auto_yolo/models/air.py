@@ -302,7 +302,7 @@ class AIR_Network(VariationalAutoencoder):
         else:
             return signal
 
-    def build_graph(self):
+    def build_representation(self):
         # --- process input ---
 
         if self.image_encoder is None:

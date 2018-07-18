@@ -3,7 +3,7 @@ import tensorflow as tf
 
 from dps import cfg
 from dps.utils import Config
-from dps.utils.tf import MLP, IdentityFunction, FeedforwardCell, ConvNet
+from dps.utils.tf import MLP, IdentityFunction, FeedforwardCell
 
 from auto_yolo.models import (
     core, simple, baseline, ground_truth, yolo_air, air, nem, math, xo
@@ -25,8 +25,8 @@ alg_config = Config(
     threshold=-np.inf,
     load_path=-1,
 
-    max_steps=2e5,
-    patience=0,
+    max_steps=int(2e5),
+    patience=50000,
     render_step=10000,
     eval_step=1000,
     display_step=1000,
