@@ -1,34 +1,30 @@
 from auto_yolo import envs
+from auto_yolo.models import air
 
 readme = "Running DAIR experiment."
 
 distributions = [
     {'n_digits': 1,
-     'rnn_n_units': 128,
      'scale_prior_mean': -2.9444389791664403,
      'scale_prior_std': 0.4,
      'shift_prior_std': 1.0},
 
     {'n_digits': 3,
-     'rnn_n_units': 64,
      'scale_prior_mean': -2.197224577336219,
      'scale_prior_std': 0.2,
      'shift_prior_std': 4.0},
 
     {'n_digits': 5,
-     'rnn_n_units': 128,
      'scale_prior_mean': -2.197224577336219,
      'scale_prior_std': 0.2,
      'shift_prior_std': 4.0},
 
     {'n_digits': 7,
-     'rnn_n_units': 64,
      'scale_prior_mean': -1.3862943611198906,
      'scale_prior_std': 0.8,
      'shift_prior_std': 4.0},
 
     {'n_digits': 9,
-     'rnn_n_units': 128,
      'scale_prior_mean': -1.3862943611198906,
      'scale_prior_std': 1.0,
      'shift_prior_std': 0.5}
@@ -65,6 +61,7 @@ config = dict(
     curriculum=[dict()],
     n_train=64000, run_all_time_steps=True,
     stopping_criteria="AP,max", threshold=0.99, patience=50000,
+    render_hook=air.AIR_ComparisonRenderHook(),
 )
 
 

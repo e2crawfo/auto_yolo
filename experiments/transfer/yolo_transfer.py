@@ -10,15 +10,22 @@ distributions = [
 
 durations = dict(
     long=dict(
-        max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="24hours",
+        max_hosts=1, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="48hours",
         project="rpp-bengioy", cleanup_time="20mins",
-        slack_time="5mins", n_repeats=6, step_time_limit="24hours"),
+        slack_time="5mins", n_repeats=8, step_time_limit="48hours"),
 
     build=dict(
-        max_hosts=1, ppn=1, cpp=2, gpu_set="0", wall_time="2hours",
+        max_hosts=1, ppn=1, cpp=2, gpu_set="0", wall_time="3hours",
         project="rpp-bengioy", cleanup_time="2mins",
-        slack_time="2mins", n_repeats=1, step_time_limit="2hours",
-        config=dict(do_train=False)),
+        slack_time="2mins", n_repeats=1, step_time_limit="3hours", n_param_settings=1,
+        config=dict(
+            do_train=False,
+            curriculum=[
+                dict(min_chars=1, max_chars=5, postprocessing="random"),
+                dict(min_chars=6, max_chars=10, postprocessing="random"),
+                dict(min_chars=11, max_chars=15, postprocessing="random")] + [
+                dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False) for n in range(1, 21)]),
+    ),
 
     short=dict(
         max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="20mins",
