@@ -299,12 +299,18 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
     elif task == "arithmetic":
         config.update(
             build_env=Nips2018Arithmetic,
-            min_digits=1,
-            max_digits=11,
             image_shape=(48, 48),
 
-            n_classes=100,
-            largest_digit=99,
+            min_digits=1,
+
+            max_digits=9,
+            n_classes=82,
+            largest_digit=81,
+
+            # max_digits=6,
+            # n_classes=55,
+            # largest_digit=54,
+
             one_hot=True,
             reductions="sum" if ops == "addition" else "A:sum,N:min,X:max,C:len",
         )

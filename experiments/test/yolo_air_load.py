@@ -1,6 +1,7 @@
 from auto_yolo import envs
+import argparse
 
-readme = "Testing simple variational autoencoder with math."
+readme = "Testing yolo_air variational autoencoder with math."
 
 distributions = None
 
@@ -22,9 +23,27 @@ durations = dict(
         slack_time="1mins", n_repeats=1, n_param_settings=4),
 )
 
-config = dict(n_train=16000)
+parser = argparse.ArgumentParser()
+parser.add_argument("--fixed", action="store_true")
+args, _ = parser.parse_known_args()
+
+if args.fixed:
+    fixed_weights = "encoder decoder object_encoder object_decoder box attr obj backbone edge",
+else:
+    fixed_weights = "decoder object_decoder box attr obj backbone edge",
+
+config = dict(
+    n_train=16000,
+    load_path={
+        "network/representation":
+            "/media/data/dps_data/logs/test-yolo-air-math_env=size=14-in-colour=False-task=arithmetic-ops=addition/"
+            "exp_alg=yolo-air-math_seed=174419635_2018_07_18_16_20_00/weights/best_of_stage_0",
+    },
+    curriculum=[dict()],
+    fixed_weights=fixed_weights
+)
 
 envs.run_experiment(
-    "test_math", config, readme, alg="simple_math",
+    "test_math", config, readme, alg="yolo_air_2stage_math",
     task="arithmetic", durations=durations, distributions=distributions
 )

@@ -562,8 +562,17 @@ class VariationalAutoencoder(ScopedFunction):
 
         super(VariationalAutoencoder, self).__init__(scope=scope, **kwargs)
 
-    def build_math_representation(self, math_code):
-        return math_code
+    def build_math_representation(self):
+        attr_shape = tf.shape(self._tensors['attr'])
+        attr = tf.reshape(self._tensors['attr'], (-1, self.A))
+
+        math_A = self.A if self.math_A is None else self.math_A
+        math_attr = self.math_input_network(attr, math_A, self.is_training)
+
+        new_shape = tf.concat([attr_shape[:-1], [math_A]], axis=0)
+        math_attr = tf.reshape(math_attr, new_shape)
+        self._tensors["math_attr"] = math_attr
+        return math_attr
 
     @property
     def inp(self):
@@ -639,22 +648,12 @@ class VariationalAutoencoder(ScopedFunction):
 
         # --- process representation ---
 
-        attr_shape = tf.shape(self._tensors['attr'])
-        attr = tf.reshape(self._tensors['attr'], (-1, self.A))
-
-        math_A = self.A if self.math_A is None else self.math_A
-        math_attr = self.math_input_network(attr, math_A, self.is_training)
-
-        new_shape = tf.concat([attr_shape[:-1], [math_A]], axis=0)
-        math_attr = tf.reshape(math_attr, new_shape)
-
-        math_rep = self.build_math_representation(math_attr)
+        math_rep = self.build_math_representation()
 
         logits = self.math_network(math_rep, cfg.n_classes, self.is_training)
 
         # --- record values and losses ---
 
-        self._tensors["math_attr"] = math_attr
         self._tensors["prediction"] = tf.nn.softmax(logits)
 
         recorded_tensors = self.recorded_tensors

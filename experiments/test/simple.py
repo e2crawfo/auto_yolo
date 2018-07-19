@@ -23,6 +23,6 @@ durations = dict(
 )
 
 envs.run_experiment(
-    "test_simple", dict(n_train=16000), readme, alg="simple",
+    "test", dict(n_train=16000), readme, alg="simple",
     task="arithmetic", durations=durations, distributions=distributions
 )

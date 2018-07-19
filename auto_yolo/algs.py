@@ -354,7 +354,7 @@ def math_prepare_func():
 
 math_config = Config(
     prepare_func=math_prepare_func,
-    build_math_input=lambda scope: IdentityFunction(scope=scope),
+    build_math_input=lambda scope: MLP([100, 100], scope=scope),
     build_math_output=lambda scope: MLP([100, 100], scope=scope),
     train_math=True,
     stopping_criteria="math_accuracy,max",
