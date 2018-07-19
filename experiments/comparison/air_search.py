@@ -31,9 +31,9 @@ durations = dict(
         config=dict(do_train=False), n_param_settings=1,),
 
     short=dict(
-        max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="12mins",
+        max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="20mins",
         project="rpp-bengioy", cleanup_time="1mins", config=dict(max_steps=100),
-        slack_time="1mins", n_repeats=1, n_param_settings=2),
+        slack_time="1mins", n_repeats=1, n_param_settings=5),
 
     oak=dict(
         max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="12mins",
@@ -51,6 +51,9 @@ config = dict(
     max_time_steps=n_digits, run_all_time_steps=True,
     stopping_criteria="AP,max", threshold=0.99, patience=10000,
     rnn_n_units=256,
+    train_example_range=(0.0, 0.7),
+    val_example_range=(0.7, 0.8),
+    test_example_range=(0.8, 0.9),
 )
 
 alg = "dair" if args.dair else "air"
