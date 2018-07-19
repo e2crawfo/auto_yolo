@@ -1,6 +1,7 @@
 from auto_yolo import envs
+from dps.updater import DummyUpdater
 
-readme = "redoing yolo_air transfer experiment"
+readme = "yolo_air transfer experiment"
 
 distributions = [
     dict(min_chars=1, max_chars=5),
@@ -19,12 +20,15 @@ durations = dict(
         project="rpp-bengioy", cleanup_time="2mins",
         slack_time="2mins", n_repeats=1, step_time_limit="3hours", n_param_settings=1,
         config=dict(
+            get_updater=DummyUpdater,
+            render_hook=None,
+            load_path=None,
             do_train=False,
             curriculum=[
                 dict(min_chars=1, max_chars=5, postprocessing="random"),
                 dict(min_chars=6, max_chars=10, postprocessing="random"),
                 dict(min_chars=11, max_chars=15, postprocessing="random")] + [
-                dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False) for n in range(1, 21)]),
+                dict(min_chars=n, max_chars=n, n_train=32) for n in range(1, 21)])
     ),
 
     short=dict(
@@ -50,8 +54,10 @@ durations = dict(
         step_time_limit="1year"),
 )
 
+config = dict()
+
 envs.run_experiment(
-    "yolo_air_transfer", dict(), readme,
+    "yolo_air_transfer", config, readme,
     alg="yolo_air_transfer", task="scatter", durations=durations,
     distributions=distributions
 )

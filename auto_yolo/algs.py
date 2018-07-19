@@ -100,7 +100,7 @@ baseline_config = alg_config.copy(
 
 baseline_transfer_config = baseline_config.copy(
     curriculum=[
-        dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False)
+        dict(min_chars=n, max_chars=n, n_train=32, do_train=False)
         for n in range(1, 21)],
 )
 
@@ -192,7 +192,7 @@ yolo_air_transfer_config = yolo_air_config.copy(
     load_path=0,
     curriculum=(
         [dict(postprocessing="random")] +
-        [dict(min_chars=n, max_chars=n, n_train=32, n_val=200, do_train=False) for n in range(1, 21)]),
+        [dict(min_chars=n, max_chars=n, n_train=32, do_train=False) for n in range(1, 21)]),
 )
 
 progression_curriculum = [

@@ -227,7 +227,7 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
             max_episode_length=100,
 
             n_train=1000,
-            n_val=100,
+            n_val=1000,
 
             balanced=True,
             classes=[-1, 0, 1],

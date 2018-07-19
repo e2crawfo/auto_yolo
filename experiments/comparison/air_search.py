@@ -48,9 +48,7 @@ n_digits = args.n_digits
 config = dict(
     curriculum=[dict()],
     n_train=64000, min_digits=n_digits, max_digits=n_digits,
-    max_time_steps=n_digits, run_all_time_steps=True,
-    stopping_criteria="AP,max", threshold=0.99, patience=10000,
-    rnn_n_units=256,
+    max_time_steps=n_digits, run_all_time_steps=True, patience=10000,
     train_example_range=(0.0, 0.7),
     val_example_range=(0.7, 0.8),
     test_example_range=(0.8, 0.9),
