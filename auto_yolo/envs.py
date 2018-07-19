@@ -203,7 +203,7 @@ grid_config = env_config.copy(
     preserve_env=False,
 
     n_train=25000,
-    n_val=1e2,
+    n_val=1e3,
 
     eval_step=1000,
     display_step=1000,
