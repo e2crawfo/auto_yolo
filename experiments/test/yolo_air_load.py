@@ -28,9 +28,9 @@ parser.add_argument("--fixed", action="store_true")
 args, _ = parser.parse_known_args()
 
 if args.fixed:
-    fixed_weights = "encoder decoder object_encoder object_decoder box attr obj backbone edge",
+    fixed_weights = "encoder decoder object_encoder object_decoder box attr obj backbone edge"
 else:
-    fixed_weights = "decoder object_decoder box attr obj backbone edge",
+    fixed_weights = "decoder object_decoder box attr obj backbone edge"
 
 config = dict(
     n_train=16000,

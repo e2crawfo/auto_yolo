@@ -217,7 +217,7 @@ yolo_air_progression_config = yolo_air_config.copy(
 air_config = alg_config.copy(
     alg_name="attend_infer_repeat",
     build_network=air.AIR_Network,
-    batch_size=64,
+    batch_size=32,
     verbose_summaries=False,
     render_hook=air.AIR_RenderHook(),
     difference_air=False,
@@ -227,6 +227,9 @@ air_config = alg_config.copy(
     build_output_network=lambda scope: MLP([128], scope=scope),
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope, activation_fn=tf.nn.softplus),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope, activation_fn=tf.nn.softplus),
+
+    stopping_criteria="AP,max",
+    threshold=1.0,
 
     max_time_steps=3,
     object_shape=(14, 14),
