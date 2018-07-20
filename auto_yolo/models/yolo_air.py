@@ -55,7 +55,6 @@ class YoloAir_Network(VariationalAutoencoder):
     training_wheels = Param()
 
     sequential_cfg = Param()
-    incremental_attr = Param()
     attr_context = Param()
 
     backbone = None
@@ -306,8 +305,8 @@ class YoloAir_Network(VariationalAutoencoder):
 
         # --- set-up the edge element ---
 
-        sizes = [4, self.A, 1] if self.incremental_attr else [4, 1]
-        sigmoids = [True, False, True] if self.incremental_attr else [True, True]
+        sizes = [4, self.A, 1]
+        sigmoids = [True, False, True]
         total_sample_size = sum(sizes)
 
         self.edge_weights = tf.get_variable("edge_weights", shape=total_sample_size, dtype=tf.float32)
@@ -358,46 +357,45 @@ class YoloAir_Network(VariationalAutoencoder):
 
                     # --- attr ---
 
-                    if self.incremental_attr:
-                        input_glimpses, attr = self._build_attr_from_image(built['box'], h, w, b, self.is_training)
+                    input_glimpses, attr = self._build_attr_from_image(built['box'], h, w, b, self.is_training)
 
-                        if self.attr_context:
-                            # Get attr by combining context with the output of the object encoder
-                            if self.attr_network is None:
-                                self.attr_network = self.sequential_cfg.build_next_step(scope="attr_sequential_network")
-                                if "attr" in self.fixed_weights:
-                                    self.attr_network.fix_variables()
+                    if self.attr_context:
+                        # Get attr by combining context with the output of the object encoder
+                        if self.attr_network is None:
+                            self.attr_network = self.sequential_cfg.build_next_step(scope="attr_sequential_network")
+                            if "attr" in self.fixed_weights:
+                                self.attr_network.fix_variables()
 
-                            layer_inp = tf.concat([_backbone_output, context, features, partial_program, attr], axis=1)
-                            n_features = self.n_passthrough_features
-                            output_size = 2 * self.A
+                        layer_inp = tf.concat([_backbone_output, context, features, partial_program, attr], axis=1)
+                        n_features = self.n_passthrough_features
+                        output_size = 2 * self.A
 
-                            network_output = self.attr_network(layer_inp, output_size + n_features, self.is_training)
-                            attr, features = tf.split(network_output, (output_size, n_features), axis=1)
+                        network_output = self.attr_network(layer_inp, output_size + n_features, self.is_training)
+                        attr, features = tf.split(network_output, (output_size, n_features), axis=1)
 
-                        attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
-                        attr_std = tf.exp(attr_log_std)
+                    attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
+                    attr_std = tf.exp(attr_log_std)
 
-                        if not self.noisy:
-                            attr_std = tf.zeros_like(attr_std)
+                    if not self.noisy:
+                        attr_std = tf.zeros_like(attr_std)
 
-                        attr, attr_kl = normal_vae(attr_mean, attr_std, self.attr_prior_mean, self.attr_prior_std)
+                    attr, attr_kl = normal_vae(attr_mean, attr_std, self.attr_prior_mean, self.attr_prior_std)
 
-                        if "attr" in self.no_gradient:
-                            attr = tf.stop_gradient(attr)
-                            attr_kl = tf.stop_gradient(attr_kl)
+                    if "attr" in self.no_gradient:
+                        attr = tf.stop_gradient(attr)
+                        attr_kl = tf.stop_gradient(attr_kl)
 
-                        built = dict(
-                            attr_mean=attr_mean,
-                            attr_std=attr_std,
-                            attr=attr,
-                            attr_kl=attr_kl,
-                            input_glimpses=input_glimpses
-                        )
+                    built = dict(
+                        attr_mean=attr_mean,
+                        attr_std=attr_std,
+                        attr=attr,
+                        attr_kl=attr_kl,
+                        input_glimpses=input_glimpses
+                    )
 
-                        for key, value in built.items():
-                            _tensors[key][h, w, b] = value
-                        partial_program = tf.concat([partial_program, built['attr']], axis=1)
+                    for key, value in built.items():
+                        _tensors[key][h, w, b] = value
+                    partial_program = tf.concat([partial_program, built['attr']], axis=1)
 
                     # --- obj ---
 
@@ -461,43 +459,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
         self._tensors["normalized_box"] = tf.concat([yt, xt, ys, xs], axis=-1)
 
-        if self.incremental_attr:
-            attr = self._tensors["attr"]
-        else:
-            # --- Get object attributes using object encoder ---
-            transform_constraints = snt.AffineWarpConstraints.no_shear_2d()
-            warper = snt.AffineGridWarper(
-                (self.image_height, self.image_width), self.object_shape, transform_constraints)
-
-            _boxes = tf.concat([xs, 2*(xt + xs/2) - 1, ys, 2*(yt + ys/2) - 1], axis=-1)
-            _boxes = tf.reshape(_boxes, (self.batch_size * self.HWB, 4))
-            grid_coords = warper(_boxes)
-            grid_coords = tf.reshape(grid_coords, (self.batch_size, self.HWB, *self.object_shape, 2,))
-            input_glimpses = tf.contrib.resampler.resampler(self.inp, grid_coords)
-
-            self._tensors["input_glimpses"] = tf.reshape(
-                input_glimpses,
-                (self.batch_size, self.H, self.W, self.B, *self.object_shape, self.image_depth))
-
-            object_encoder_in = tf.reshape(
-                input_glimpses,
-                (self.batch_size * self.HWB, *self.object_shape, self.image_depth))
-
-            attr = self.object_encoder(object_encoder_in, (1, 1, 2*self.A), self.is_training)
-
-            attr = tf.reshape(attr, (self.batch_size, self.H, self.W, self.B, 2*self.A))
-
-            attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
-            attr_std = tf.exp(attr_log_std)
-
-            attr, attr_kl = normal_vae(attr_mean, attr_std, self.attr_prior_mean, self.attr_prior_std)
-
-            if "attr" in self.no_gradient:
-                attr = tf.stop_gradient(attr)
-                attr_kl = tf.stop_gradient(attr_kl)
-
-            self._tensors.update(attr_mean=attr_mean, attr_std=attr_std, attr=attr, attr_kl=attr_kl)
-
+        attr = self._tensors["attr"]
         object_decoder_in = tf.reshape(attr, (self.batch_size * self.HWB, 1, 1, self.A))
 
         # --- Compute sprites from attr using object decoder ---
