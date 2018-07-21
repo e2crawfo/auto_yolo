@@ -1,6 +1,9 @@
 from auto_yolo import envs
+from auto_yolo.models import yolo_air
 
-readme = "Testing baseline variational autoencoder with math."
+from dps.utils.tf import MLP
+
+readme = "Testing yolo_air variational autoencoder with math."
 
 distributions = None
 
@@ -22,9 +25,21 @@ durations = dict(
         slack_time="1mins", n_repeats=1, n_param_settings=4),
 )
 
-config = dict(object_shape=(28, 28), n_train=16000)
+config = dict(
+    n_train=16000,
+    load_path={
+        "network/representation":
+            "/media/data/dps_data/logs/test-yolo-air-math_env=size=14-in-colour=False-task=arithmetic-ops=addition/"
+            "exp_alg=yolo-air-math_seed=174419635_2018_07_18_16_20_00/weights/best_of_stage_0",
+    },
+    curriculum=[dict()],
+    build_math_input=lambda scope: MLP([512, 256, 100, 100], scope=scope),
+    build_network=yolo_air.YoloAir_AlternateNetwork,
+    fixed_weights="encoder decoder object_encoder object_decoder "
+                  "box attr obj backbone edge",
+)
 
 envs.run_experiment(
-    "test_math", config, readme, alg="baseline_math",
+    "test_math", config, readme, alg="yolo_air_2stage_math",
     task="arithmetic", durations=durations, distributions=distributions
 )

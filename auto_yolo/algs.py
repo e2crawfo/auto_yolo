@@ -360,6 +360,7 @@ math_config = Config(
     stopping_criteria="math_accuracy,max",
     threshold=1.0,
     decoder_kind="recurrent",
+    patience=10000,
 
     train_kl=False,
     train_reconstruction=False,
@@ -395,9 +396,11 @@ yolo_air_2stage_math_config = yolo_air_math_config.copy(
             threshold=1.0,
             math_weight=0.0,
             fixed_weights="math",
+            train_math=False,
             train_reconstruction=True,
             train_kl=True,
             noisy=True,
+            patience=50000,
         ),
         dict(
             fixed_weights="encoder decoder object_encoder object_decoder "

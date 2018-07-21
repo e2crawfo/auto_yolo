@@ -22,9 +22,9 @@ durations = dict(
         slack_time="1mins", n_repeats=1, n_param_settings=4),
 )
 
-config = dict(object_shape=(28, 28), n_train=16000)
+config = dict(n_train=16000)
 
 envs.run_experiment(
     "test_math", config, readme, alg="baseline_math",
-    task="arithmetic", durations=durations, distributions=distributions
+    task="arithmetic2", durations=durations, distributions=distributions
 )

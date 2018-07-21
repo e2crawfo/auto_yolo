@@ -29,22 +29,28 @@ distributions = [
 for d in distributions:
     n_digits = d['n_digits']
     d.update(
-        min_digits=n_digits,
-        max_digits=n_digits
+        min_chars=n_digits,
+        max_chars=n_digits
     )
+
+
+def build_net(scope):
+    from dps.utils.tf import MLP
+    return MLP([10, 10], scope=scope)
 
 
 durations = dict(
     oak=dict(
-        max_hosts=1, ppn=1, cpp=2, gpu_set="0", wall_time="30mins",
+        max_hosts=1, ppn=1, cpp=2, gpu_set="0", wall_time="1year",
         cleanup_time="1mins", slack_time="1mins", n_repeats=1, kind="parallel", host_pool=":"),
 )
 
 config = dict(
     curriculum=[dict()],
     n_train=32, n_val=1000, stopping_criteria="AP,max", threshold=0.99,
-    min_digits=1, max_digits=1, do_train=True,
+    min_digits=1, max_digits=1, do_train=False,
     render_hook=yolo_air.YoloAir_ComparisonRenderHook(show_zero_boxes=False),
+    build_object_encoder=build_net, build_object_decoder=build_net
 )
 
 envs.run_experiment(

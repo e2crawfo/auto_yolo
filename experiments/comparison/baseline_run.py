@@ -1,14 +1,14 @@
 from auto_yolo import envs
 from auto_yolo.models import yolo_air
 
-readme = "Running YOLO AIR experiment."
+readme = "Running baseline for comparison experiment."
 
 distributions = [
-    dict(n_digits=1, cc_threshold=1e-3),
-    dict(n_digits=3, cc_threshold=0.01099),
-    dict(n_digits=5, cc_threshold=0.023),
-    dict(n_digits=7, cc_threshold=0.6229),
-    dict(n_digits=9, cc_threshold=0.5999),
+    dict(n_digits=1, cc_threshold=0.01),
+    dict(n_digits=3, cc_threshold=0.01),
+    dict(n_digits=5, cc_threshold=0.02),
+    dict(n_digits=7, cc_threshold=0.6),
+    dict(n_digits=9, cc_threshold=0.52),
 ]
 
 for d in distributions:
@@ -21,22 +21,18 @@ for d in distributions:
 
 durations = dict(
     oak=dict(
-        max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="30mins",
+        max_hosts=1, ppn=1, cpp=2, gpu_set="0", wall_time="30mins",
         cleanup_time="1mins", slack_time="1mins", n_repeats=1, kind="parallel", host_pool=":"),
 )
 
 config = dict(
     curriculum=[dict()],
-    n_train=64000, run_all_time_steps=True,
-    stopping_criteria="AP,max", threshold=0.99, patience=50000,
-    n_digits=1,
-    min_digits=1,
-    max_digits=1,
-    max_time_steps=1,
+    n_train=32, n_val=1000, stopping_criteria="AP,max", threshold=0.99,
+    min_digits=1, max_digits=1, do_train=False,
     render_hook=yolo_air.YoloAir_ComparisonRenderHook(show_zero_boxes=False),
 )
 
 envs.run_experiment(
-    "baseline_run", config, readme, distributions=distributions,
+    "comparison_baseline", config, readme, distributions=distributions,
     alg="baseline", task="arithmetic", durations=durations,
 )

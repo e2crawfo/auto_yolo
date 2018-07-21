@@ -1,6 +1,6 @@
 from auto_yolo import envs
 
-readme = "Testing baseline variational autoencoder with math."
+readme = "Testing ground_truth variational autoencoder with math."
 
 distributions = None
 
@@ -22,9 +22,7 @@ durations = dict(
         slack_time="1mins", n_repeats=1, n_param_settings=4),
 )
 
-config = dict(object_shape=(28, 28), n_train=16000)
-
 envs.run_experiment(
-    "test_math", config, readme, alg="baseline_math",
-    task="arithmetic", durations=durations, distributions=distributions
+    "test_math", dict(n_train=16000), readme, alg="ground_truth_math",
+    task="arithmetic2", durations=durations, distributions=distributions
 )

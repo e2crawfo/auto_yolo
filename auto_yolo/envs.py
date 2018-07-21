@@ -314,6 +314,24 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
             one_hot=True,
             reductions="sum" if ops == "addition" else "A:sum,N:min,X:max,C:len",
         )
+    elif task == "arithmetic2":
+        config.update(
+            build_env=Nips2018Arithmetic,
+            image_shape=(36, 36),
+
+            min_digits=5,
+
+            max_digits=5,
+            n_classes=46,
+            largest_digit=45,
+
+            # max_digits=6,
+            # n_classes=55,
+            # largest_digit=54,
+
+            one_hot=True,
+            reductions="sum" if ops == "addition" else "A:sum,N:min,X:max,C:len",
+        )
     else:
         raise Exception("Unknown task `{}`".format(task))
     return config
