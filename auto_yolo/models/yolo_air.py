@@ -55,7 +55,6 @@ class YoloAir_Network(VariationalAutoencoder):
     training_wheels = Param()
 
     sequential_cfg = Param()
-    attr_context = Param()
 
     backbone = None
     box_network = None
@@ -358,20 +357,6 @@ class YoloAir_Network(VariationalAutoencoder):
                     # --- attr ---
 
                     input_glimpses, attr = self._build_attr_from_image(built['box'], h, w, b, self.is_training)
-
-                    if self.attr_context:
-                        # Get attr by combining context with the output of the object encoder
-                        if self.attr_network is None:
-                            self.attr_network = self.sequential_cfg.build_next_step(scope="attr_sequential_network")
-                            if "attr" in self.fixed_weights:
-                                self.attr_network.fix_variables()
-
-                        layer_inp = tf.concat([_backbone_output, context, features, partial_program, attr], axis=1)
-                        n_features = self.n_passthrough_features
-                        output_size = 2 * self.A
-
-                        network_output = self.attr_network(layer_inp, output_size + n_features, self.is_training)
-                        attr, features = tf.split(network_output, (output_size, n_features), axis=1)
 
                     attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
                     attr_std = tf.exp(attr_log_std)

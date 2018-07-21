@@ -158,9 +158,6 @@ yolo_air_config = alg_config.copy(
     obj_temp=1.0,
     object_shape=(14, 14),
 
-    incremental_attr=True,
-    attr_context=False,
-
     min_hw=0.0,
     max_hw=1.0,
 
