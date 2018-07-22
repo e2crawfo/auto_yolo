@@ -35,8 +35,7 @@ config = dict(
     curriculum=[dict()],
     build_math_input=lambda scope: MLP([512, 256, 100, 100], scope=scope),
     build_network=yolo_air.YoloAir_AlternateNetwork,
-    fixed_weights="encoder decoder object_encoder object_decoder "
-                  "box attr obj backbone edge",
+    fixed_weights="object_encoder object_decoder box obj backbone",
 )
 
 envs.run_experiment(

@@ -317,7 +317,7 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
     elif task == "arithmetic2":
         config.update(
             build_env=Nips2018Arithmetic,
-            image_shape=(36, 36),
+            image_shape=(48, 48),
 
             min_digits=5,
 

@@ -54,7 +54,7 @@ durations = dict(
         step_time_limit="1year"),
 )
 
-config = dict()
+config = dict(max_steps=int(2e5))
 
 envs.run_experiment(
     "yolo_air_transfer", config, readme,

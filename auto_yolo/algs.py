@@ -3,7 +3,7 @@ import tensorflow as tf
 
 from dps import cfg
 from dps.utils import Config
-from dps.utils.tf import MLP, IdentityFunction, FeedforwardCell
+from dps.utils.tf import MLP, IdentityFunction, FeedforwardCell, ScopedCellWrapper
 
 from auto_yolo.models import (
     core, simple, baseline, ground_truth, yolo_air, air, nem, math, xo
@@ -25,7 +25,7 @@ alg_config = Config(
     threshold=-np.inf,
     load_path=-1,
 
-    max_steps=int(2e5),
+    max_steps=int(3e5),
     patience=50000,
     render_step=10000,
     eval_step=1000,
@@ -219,7 +219,8 @@ air_config = alg_config.copy(
     render_hook=air.AIR_RenderHook(),
     difference_air=False,
     build_image_encoder=IdentityFunction,
-    build_cell=lambda scope: tf.contrib.rnn.LSTMBlockCell(cfg.rnn_n_units),
+    build_cell=lambda scope: ScopedCellWrapper(
+        tf.contrib.rnn.LSTMBlockCell(cfg.rnn_n_units)),
     rnn_n_units=256,
     build_output_network=lambda scope: MLP([128], scope=scope),
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope, activation_fn=tf.nn.softplus),
@@ -383,6 +384,7 @@ ground_truth_math_config = ground_truth_config.copy(
     alg_name="ground_truth_math",
 )
 
+
 yolo_air_math_config = yolo_air_config.copy(
     math_config,
     alg_name="yolo_air_math",
@@ -403,14 +405,37 @@ yolo_air_2stage_math_config = yolo_air_math_config.copy(
             patience=50000,
         ),
         dict(
-            fixed_weights="encoder decoder object_encoder object_decoder "
-                          "box attr obj backbone edge",
+            fixed_weights="object_encoder object_decoder backbone box obj",
             load_path={"network/representation": -1},
         )
     ]
 )
 
 
+air_math_config = air_config.copy(
+    math_config,
+    alg_name="air_math",
+)
+
+air_2stage_math_config = air_math_config.copy(
+    curriculum=[
+        dict(
+            stopping_criteria="AP,max",
+            threshold=1.0,
+            math_weight=0.0,
+            fixed_weights="math",
+            train_math=False,
+            train_reconstruction=True,
+            train_kl=True,
+            noisy=True,
+            patience=50000,
+        ),
+        dict(
+            fixed_weights="object_encoder object_decoder image_encoder cell output",
+            load_path={"network/representation": -1},
+        )
+    ]
+)
 
 
 # def continue_prepare_func():

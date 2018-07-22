@@ -290,6 +290,18 @@ class AIR_Network(VariationalAutoencoder):
 
         self.z_pres_prior_log_odds = build_scheduled_value(self.z_pres_prior_log_odds, "z_pres_prior_log_odds")
 
+    def build_math_representation(self):
+        attr_shape = tf.shape(self._tensors['attr'])
+        attr = tf.reshape(self._tensors['attr'], (-1, self.A))
+
+        math_A = self.A if self.math_A is None else self.math_A
+        math_attr = self.math_input_network(attr, math_A, self.is_training)
+
+        new_shape = tf.concat([attr_shape[:-1], [math_A]], axis=0)
+        math_attr = tf.reshape(math_attr, new_shape)
+        self._tensors["math_attr"] = math_attr
+        return math_attr
+
     def apply_training_wheel(self, signal):
         return (
             self.training_wheels * tf.stop_gradient(signal) +
@@ -307,10 +319,18 @@ class AIR_Network(VariationalAutoencoder):
 
         if self.image_encoder is None:
             self.image_encoder = cfg.build_image_encoder(scope="image_encoder")
+            if "image_encoder" in self.fixed_weights:
+                self.image_encoder.fix_variables()
+
         if self.cell is None:
             self.cell = cfg.build_cell(scope="cell")
+            if "cell" in self.fixed_weights:
+                self.cell.fix_variables()
+
         if self.output_network is None:
             self.output_network = cfg.build_output_network(scope="output_network")
+            if "output" in self.fixed_weights:
+                self.output_network.fix_variables()
 
         if self.object_encoder is None:
             self.object_encoder = cfg.build_object_encoder(scope="object_encoder")
@@ -551,14 +571,19 @@ class AIR_Network(VariationalAutoencoder):
             ]
         )
 
-        def process_tensor_array(tensor_array, name):
+        def process_tensor_array(tensor_array, name, shape=None):
             tensor = tf.transpose(tensor_array.stack(), (1, 0, 2))
 
             time_pad = self.max_time_steps - tf.shape(tensor)[1]
             padding = [[0, 0], [0, time_pad]]
             padding += [[0, 0]] * (len(tensor.shape)-2)
 
-            return tf.pad(tensor, padding, name=name)
+            tensor = tf.pad(tensor, padding, name=name)
+
+            if shape is not None:
+                tensor = tf.reshape(tensor, shape)
+
+            return tensor
 
         self.predicted_n_digits = self.predicted_n_digits[:, 0]
         self._tensors["predicted_n_digits"] = self.predicted_n_digits
@@ -571,7 +596,7 @@ class AIR_Network(VariationalAutoencoder):
         self._tensors['shift_kl'] = process_tensor_array(shift_kl, 'shift_kl')
         self._tensors['shift_std'] = process_tensor_array(shift_std, 'shift_std')
 
-        self._tensors['attr'] = process_tensor_array(attr, 'attr')
+        self._tensors['attr'] = process_tensor_array(attr, 'attr', (self.batch_size, self.max_time_steps, self.A))
         self._tensors['attr_kl'] = process_tensor_array(attr_kl, 'attr_kl')
         self._tensors['attr_std'] = process_tensor_array(attr_std, 'attr_std')
 

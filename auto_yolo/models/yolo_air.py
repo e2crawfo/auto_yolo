@@ -505,12 +505,12 @@ class YoloAir_Network(VariationalAutoencoder):
 
         if self.object_encoder is None:
             self.object_encoder = cfg.build_object_encoder(scope="object_encoder")
-            if "encoder" in self.fixed_weights:
+            if "object_encoder" in self.fixed_weights:
                 self.object_encoder.fix_variables()
 
         if self.object_decoder is None:
             self.object_decoder = cfg.build_object_decoder(scope="object_decoder")
-            if "decoder" in self.fixed_weights:
+            if "object_decoder" in self.fixed_weights:
                 self.object_decoder.fix_variables()
 
         self._build_program_generator_sequential()
@@ -589,12 +589,12 @@ class YoloAir_Network(VariationalAutoencoder):
 
         if self.object_encoder is None:
             self.object_encoder = cfg.build_object_encoder(scope="object_encoder")
-            if "encoder" in self.fixed_weights:
+            if "object_encoder" in self.fixed_weights:
                 self.object_encoder.fix_variables()
 
         if self.object_decoder is None:
             self.object_decoder = cfg.build_object_decoder(scope="object_decoder")
-            if "decoder" in self.fixed_weights:
+            if "object_decoder" in self.fixed_weights:
                 self.object_decoder.fix_variables()
 
         self._build_program_interpreter()

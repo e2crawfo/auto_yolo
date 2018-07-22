@@ -6,28 +6,28 @@ readme = "Running AIR experiment."
 distributions = [
     {'n_digits': 1,
      'scale_prior_mean': -2.9444389791664403,
-     'scale_prior_std': 0.2,
-     'shift_prior_std': 1.0},
+     'scale_prior_std': 0.25,
+     'shift_prior_std': 2.0},
 
     {'n_digits': 3,
-     'scale_prior_mean': -2.197224577336219,
-     'scale_prior_std': 0.2,
-     'shift_prior_std': 1.0},
+     'scale_prior_mean': -1.386,
+     'scale_prior_std': 0.75,
+     'shift_prior_std': 0.5},
 
     {'n_digits': 5,
-     'scale_prior_mean': -2.197224577336219,
-     'scale_prior_std': 0.2,
-     'shift_prior_std': 2.0},
+     'scale_prior_mean': -2.9444,
+     'scale_prior_std': 0.75,
+     'shift_prior_std': 0.5},
 
     {'n_digits': 7,
      'scale_prior_mean': -1.3862943611198906,
-     'scale_prior_std': 0.4,
-     'shift_prior_std': 4.0},
+     'scale_prior_std': 0.5,
+     'shift_prior_std': 2.0},
 
     {'n_digits': 9,
-     'scale_prior_mean': -0.4054651081081643,
-     'scale_prior_std': 0.2,
-     'shift_prior_std': 1.0}
+     'scale_prior_mean': -2.1972,
+     'scale_prior_std': 0.5,
+     'shift_prior_std': 0.5}
 ]
 
 
@@ -41,9 +41,9 @@ for dist in distributions:
 
 durations = dict(
     long=dict(
-        max_hosts=1, ppn=16, cpp=1, gpu_set="0,1,2,3", wall_time="24hours",
+        max_hosts=1, ppn=16, cpp=1, gpu_set="0,1,2,3", wall_time="36hours",
         project="rpp-bengioy", cleanup_time="10mins",
-        slack_time="10mins", n_repeats=6, step_time_limit="24hours"),
+        slack_time="10mins", n_repeats=6, step_time_limit="36hours"),
 
     build=dict(
         max_hosts=1, ppn=1, cpp=2, gpu_set="0", wall_time="20mins",
@@ -60,7 +60,6 @@ durations = dict(
 config = dict(
     curriculum=[dict()],
     n_train=64000, run_all_time_steps=True,
-    stopping_criteria="AP,max", threshold=0.99, patience=50000,
     render_hook=air.AIR_ComparisonRenderHook(),
 )
 
