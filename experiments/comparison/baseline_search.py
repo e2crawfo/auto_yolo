@@ -8,6 +8,7 @@ readme = "Searching for baseline threshold."
 parser = argparse.ArgumentParser()
 parser.add_argument("--n-digits", type=int, default=1)
 parser.add_argument("--transfer", action="store_true")
+parser.add_argument("--sc", choices="AP count_error count_1norm".split())
 args, _ = parser.parse_known_args()
 
 # dist_dict = {
@@ -17,7 +18,7 @@ args, _ = parser.parse_known_args()
 #     9: np.linspace(.599-0.05, .599+0.05, 101),
 # }
 
-distributions = [dict(cc_threshold=t) for t in np.linspace(0.01, 1.0, 100)]
+distributions = [dict(cc_threshold=t) for t in np.linspace(0.01, 3.0, 100)]
 
 durations = dict(
     oak=dict(
@@ -33,13 +34,21 @@ def build_net(scope):
 
 config = dict(
     curriculum=[dict()],
-    stopping_criteria="AP,max", threshold=1.0,
     render_hook=None,
     cc_threshold=0.000001,
     do_train=False,
     build_object_encoder=build_net,
     build_object_decoder=build_net
 )
+
+if args.sc == "AP":
+    config.update(stopping_criteria="AP,max", threshold=1.0)
+elif args.sc == "count_error":
+    config.update(stopping_criteria="count_error,min", threshold=0.0)
+elif args.sc == "count_1norm":
+    config.update(stopping_criteria="count_1norm,min", threshold=0.0)
+else:
+    raise Exception()
 
 if args.transfer:
     config["min_chars"] = args.n_digits
@@ -54,6 +63,6 @@ else:
 
 
 envs.run_experiment(
-    "baseline_search", config, readme, distributions=distributions,
-    alg="baseline", durations=durations, task=task
+    "baseline_search_sc={}_n_digits=".format(args.sc, args.n_digits), config, readme,
+    distributions=distributions, alg="baseline", durations=durations, task=task
 )

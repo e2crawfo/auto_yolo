@@ -26,6 +26,54 @@ distributions = [
     dict(n_digits=20, cc_threshold=0.47),
 ]
 
+# count error
+distributions = [
+    dict(n_digits=1, cc_threshold=0.32),
+    dict(n_digits=2, cc_threshold=0.36),
+    dict(n_digits=3, cc_threshold=0.4),
+    dict(n_digits=4, cc_threshold=0.37),
+    dict(n_digits=5, cc_threshold=0.4299),
+    dict(n_digits=6, cc_threshold=0.37),
+    dict(n_digits=7, cc_threshold=0.63),
+    dict(n_digits=8, cc_threshold=0.5),
+    dict(n_digits=9, cc_threshold=0.71),
+    dict(n_digits=10, cc_threshold=0.8),
+    dict(n_digits=11, cc_threshold=0.88),
+    dict(n_digits=12, cc_threshold=0.92),
+    dict(n_digits=13, cc_threshold=0.87),
+    dict(n_digits=14, cc_threshold=0.96),
+    dict(n_digits=15, cc_threshold=0.85),
+    dict(n_digits=16, cc_threshold=0.98),
+    dict(n_digits=17, cc_threshold=0.98),
+    dict(n_digits=18, cc_threshold=0.96),
+    dict(n_digits=19, cc_threshold=0.47), # Redo
+    dict(n_digits=20, cc_threshold=0.47), # Redo
+]
+
+# count 1norm
+distributions = [
+    dict(n_digits=1, cc_threshold=0.32), # Redo vvv
+    dict(n_digits=2, cc_threshold=0.36),
+    dict(n_digits=3, cc_threshold=0.4),
+    dict(n_digits=4, cc_threshold=0.37),
+    dict(n_digits=5, cc_threshold=0.4299),
+    dict(n_digits=6, cc_threshold=0.37), # Redo ^^^
+    dict(n_digits=7, cc_threshold=0.6),
+    dict(n_digits=8, cc_threshold=0.57),
+    dict(n_digits=9, cc_threshold=0.71),
+    dict(n_digits=10, cc_threshold=0.74),
+    dict(n_digits=11, cc_threshold=0.74),
+    dict(n_digits=12, cc_threshold=0.82),
+    dict(n_digits=13, cc_threshold=0.87),
+    dict(n_digits=14, cc_threshold=0.88),
+    dict(n_digits=15, cc_threshold=0.89),
+    dict(n_digits=16, cc_threshold=0.91),
+    dict(n_digits=17, cc_threshold=0.96),
+    dict(n_digits=18, cc_threshold=0.98),
+    dict(n_digits=19, cc_threshold=1.0),
+    dict(n_digits=20, cc_threshold=1.0),
+]
+
 for d in distributions:
     n_digits = d['n_digits']
     d.update(

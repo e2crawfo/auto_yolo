@@ -12,7 +12,7 @@ from dps.utils import (
 )
 
 
-data_dir = "/media/data/Dropbox/experiment_data/active/nips2018/CEDAR/"
+data_dir = "/media/data/Dropbox/experiment_data/active/nips2018/FINAL/"
 cache_dir = process_path('/home/eric/.cache/dps_plots')
 plot_dir = '/media/data/Dropbox/writeups/spatially_invariant_air/figures/'
 
@@ -100,7 +100,7 @@ def plot_core_sample_complexity():
 
 
 @sha_cache(cache_dir, verbose=verbose_cache)
-def get_transfer_data(path, x_key, y_key, spread_measure, is_baseline, y_func=None):
+def get_transfer_data(path, x_key, y_key, spread_measure, y_func=None):
     y_func = y_func or (lambda y: y)
 
     job = HyperSearch(path)
@@ -112,13 +112,12 @@ def get_transfer_data(path, x_key, y_key, spread_measure, is_baseline, y_func=No
         data = []
 
         for (repeat, seed), (df, sc, md) in value.items():
-            data.append(df[y_key])
+            data.append(df[y_key][1:])  # First stage is the learning stage.
+
         data = np.array(data).T
         data = y_func(data)
 
         x = range(1, 21)
-        if not is_baseline:
-            data = data[1:]
         y = data.mean(axis=1)
         yu, yl = spread_measures[spread_measure](data)
 
@@ -127,11 +126,31 @@ def get_transfer_data(path, x_key, y_key, spread_measure, is_baseline, y_func=No
     return all_data
 
 
-def plot_core_transfer(extension):
+@sha_cache(cache_dir, verbose=verbose_cache)
+def get_transfer_baseline_data(path, x_key, y_key, spread_measure, y_func=None):
+    y_func = y_func or (lambda y: y)
+
+    job = HyperSearch(path)
+    stage_data = job.extract_stage_data()
+
+    x = range(1, 21)
+    y = []
+
+    for i, (key, value) in enumerate(sorted(stage_data.items())):
+        data = []
+        for (repeat, seed), (df, sc, md) in value.items():
+            data.append(df[y_key][0])
+        data = y_func(np.array(data))
+        y.append(data.mean())
+
+    return x, np.array(y)
+
+
+def plot_transfer(extension):
     yolo_path = os.path.join(
-        data_dir, "core/run_search_yolo-air-transfer_env=size=14-in-colour=False-task=scatter_alg=yolo-air-transfer_duration=oak_seed=0_2018_06_11_23_28_04")
+        data_dir, "transfer/run_search_yolo-air-transfer_env=size=14-in-colour=False-task=scatter_alg=yolo-air-transfer_duration=long_seed=0_2018_07_19_14_21_39/")
     baseline_path = os.path.join(
-        data_dir, "core/run_search_yolo-baseline-transfer_env=size=14-in-colour=False-task=scatter_alg=yolo-transfer-baseline_duration=oak_seed=0_2018_06_13_08_43_05")
+        data_dir, "transfer/run_search_transfer-baseline_env=size=14-in-colour=False-task=scatter_alg=baseline_duration=oak_seed=0_2018_07_20_11_27_19/")
 
     # -----
 
@@ -139,30 +158,27 @@ def plot_core_transfer(extension):
     ax = plt.gca()
 
     y_func = lambda y: 100 * y
-    measure = "mAP"
+    measure = "_test_AP"
 
-    yolo_data = get_transfer_data(yolo_path, "n_train", measure, "ci95", is_baseline=False, y_func=y_func)
+    yolo_data = get_transfer_data(yolo_path, "n_train", measure, "ci95", y_func=y_func)
 
     for (x, y, *yerr), key in yolo_data:
         label = "Trained with {}--{} digits / image".format(key.min_chars, key.max_chars)
         ax.errorbar(x, y, yerr=yerr, label=label)
 
-    baseline_data = get_transfer_data(baseline_path, "n_train", measure, "ci95", is_baseline=True, y_func=y_func)
+    x, y = get_transfer_baseline_data(baseline_path, "n_train", measure, "ci95", y_func=y_func)
+    ax.plot(x, y, label="Baseline")
 
-    for (x, y, *yerr), key in baseline_data:
-        label = str(tuple(key))
-        ax.plot(x, y, label="Baseline")
-
-    ax.set_ylabel('AP@0.5', fontsize=12)
+    ax.set_ylabel('AP', fontsize=12)
     ax.set_xlabel('\# Digits / Image', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
     ax.set_ylim((0., 105.))
     ax.set_xticks([0, 5, 10, 15, 20])
 
-    plt.legend()
+    plt.legend(loc="lower left")
 
     plt.subplots_adjust(left=0.12, bottom=0.13, right=0.99, top=0.99)
-    plot_path = os.path.join(plot_dir, 'core/transfer_ap.' + extension)
+    plot_path = os.path.join(plot_dir, 'transfer/ap.' + extension)
     os.makedirs(os.path.dirname(plot_path), exist_ok=True)
     fig.savefig(plot_path)
     plt.show()
@@ -174,28 +190,23 @@ def plot_core_transfer(extension):
 
     measure = "count_1norm"
 
-    yolo_data = get_transfer_data(yolo_path, "n_train", measure, "ci95", is_baseline=False)
+    yolo_data = get_transfer_data(yolo_path, "n_train", measure, "ci95")
 
     for (x, y, *yerr), key in yolo_data:
         label = "Trained with {}--{} digits / image".format(key.min_chars, key.max_chars)
         ax.errorbar(x, y, yerr=yerr, label=label)
 
-    baseline_data = get_transfer_data(baseline_path, "n_train", measure, "ci95", is_baseline=True)
+    x, y = get_transfer_baseline_data(baseline_path, "n_train", measure, "ci95")
+    ax.plot(x, y, label="Baseline")
 
-    for (x, y, *yerr), key in baseline_data:
-        label = "Baseline"
-        ax.errorbar(x, y, yerr=yerr, label=label)
-
-    ax.set_ylabel(r'$\|\text{true-count} - \text{pred-count}\|$', fontsize=12)
+    ax.set_ylabel(r'$|\text{true-count} - \text{pred-count}|$', fontsize=12)
     ax.set_xlabel('\# Digits / Image', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
     ax.set_ylim((0.0, 9.0))
     ax.set_xticks([0, 5, 10, 15, 20])
 
-    plt.legend()
-
     plt.subplots_adjust(left=0.12, bottom=0.13, right=0.99, top=0.99)
-    plot_path = os.path.join(plot_dir, 'core/transfer_count_1norm.' + extension)
+    plot_path = os.path.join(plot_dir, 'transfer/count_1norm.' + extension)
     os.makedirs(os.path.dirname(plot_path), exist_ok=True)
     fig.savefig(plot_path)
     plt.show()
@@ -207,28 +218,23 @@ def plot_core_transfer(extension):
 
     measure = "count_error"
 
-    yolo_data = get_transfer_data(yolo_path, "n_train", measure, "ci95", is_baseline=False)
+    yolo_data = get_transfer_data(yolo_path, "n_train", measure, "ci95")
 
     for (x, y, *yerr), key in yolo_data:
         label = "Trained with {}--{} digits / image".format(key.min_chars, key.max_chars)
         ax.errorbar(x, y, yerr=yerr, label=label)
 
-    baseline_data = get_transfer_data(baseline_path, "n_train", measure, "ci95", is_baseline=True)
+    x, y = get_transfer_baseline_data(baseline_path, "n_train", measure, "ci95")
+    ax.plot(x, y, label="Baseline")
 
-    for (x, y, *yerr), key in baseline_data:
-        label = "Baseline"
-        ax.errorbar(x, y, yerr=yerr, label=label)
-
-    ax.set_ylabel('Count Accuracy', fontsize=12)
+    ax.set_ylabel('Count Error', fontsize=12)
     ax.set_xlabel('\# Digits / Image', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
     ax.set_ylim((0.0, 1.05))
     ax.set_xticks([0, 5, 10, 15, 20])
 
-    plt.legend()
-
     plt.subplots_adjust(left=0.12, bottom=0.13, right=0.99, top=0.99)
-    plot_path = os.path.join(plot_dir, 'core/transfer_count_error.' + extension)
+    plot_path = os.path.join(plot_dir, 'transfer/count_error.' + extension)
     os.makedirs(os.path.dirname(plot_path), exist_ok=True)
     fig.savefig(plot_path)
     plt.show()
@@ -461,10 +467,10 @@ def plot_xo_2stage_decoder_kind(extension):
 
 
 def plot_comparison(extension):
-    yolo_air_path = os.path.join(data_dir, "comparison/run_search_resubmit_seed=0_2018_07_12_11_17_08")
-    air_path = os.path.join(data_dir, "comparison/run_search_air-run_env=size=14-in-colour=False-task=arithmetic-ops=addition_alg=attend-infer-repeat_duration=long_seed=0_2018_07_10_09_08_58")
-    dair_path = os.path.join(data_dir, "comparison/run_search_dair-run_env=size=14-in-colour=False-task=arithmetic-ops=addition_alg=attend-infer-repeat_duration=long_seed=0_2018_07_10_09_22_24")
-    baseline_path = os.path.join(data_dir, "comparison/run_search_baseline-run_env=size=14-in-colour=False-task=arithmetic-ops=addition_alg=baseline_duration=oak_seed=0_2018_07_16_15_52_32")
+    yolo_air_path = os.path.join(data_dir, "comparison/run_search_yolo-air-run_env=size=14-in-colour=False-task=arithmetic-ops=addition_alg=yolo-air_duration=long_seed=0_2018_07_16_13_46_48/")
+    # air_path = os.path.join(data_dir, "comparison/run_search_air-run_env=size=14-in-colour=False-task=arithmetic-ops=addition_alg=attend-infer-repeat_duration=long_seed=0_2018_07_10_09_08_58")
+    # dair_path = os.path.join(data_dir, "comparison/run_search_dair-run_env=size=14-in-colour=False-task=arithmetic-ops=addition_alg=attend-infer-repeat_duration=long_seed=0_2018_07_10_09_22_24")
+    baseline_path = os.path.join(data_dir, "comparison/run_search_comparison-baseline_env=size=14-in-colour=False-task=arithmetic-ops=addition_alg=baseline_duration=oak_seed=0_2018_07_20_11_15_24/")
 
     # -----
 
@@ -473,17 +479,17 @@ def plot_comparison(extension):
 
     y_func = lambda y: 100 * y
 
-    x, y, *yerr = get_arithmetic_data([yolo_air_path], "n_digits", "AP", 0, "ci95", y_func=y_func)
+    x, y, *yerr = get_arithmetic_data([yolo_air_path], "n_digits", "_test_AP", 0, "ci95", y_func=y_func)
     line = ax.errorbar(x, y, yerr=yerr, label="SPAIR", marker="o", ls="-")
     line.lines[0].get_c()
 
-    x, y, *yerr = get_arithmetic_data([air_path], "n_digits", "AP", 0, "ci95", y_func=y_func)
-    line = ax.errorbar(x, y, yerr=yerr, label="AIR", marker="^", ls="-.")
-    line.lines[0].get_c()
+    # x, y, *yerr = get_arithmetic_data([air_path], "n_digits", "AP", 0, "ci95", y_func=y_func)
+    # line = ax.errorbar(x, y, yerr=yerr, label="AIR", marker="^", ls="-.")
+    # line.lines[0].get_c()
 
-    x, y, *yerr = get_arithmetic_data([dair_path], "n_digits", "AP", 0, "ci95", y_func=y_func)
-    line = ax.errorbar(x, y, yerr=yerr, label="DAIR", marker="v", ls="--")
-    line.lines[0].get_c()
+    # x, y, *yerr = get_arithmetic_data([dair_path], "n_digits", "AP", 0, "ci95", y_func=y_func)
+    # line = ax.errorbar(x, y, yerr=yerr, label="DAIR", marker="v", ls="--")
+    # line.lines[0].get_c()
 
     x, y, *yerr = get_arithmetic_data([baseline_path], "n_digits", "_test_AP", 0, "ci95", y_func=y_func)
     ax.plot(x, y, label="Baseline", marker="s", ls=":")

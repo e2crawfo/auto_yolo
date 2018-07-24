@@ -870,9 +870,11 @@ class RelationNetwork(ScopedFunction):
     f_dim = Param(100)
 
     def _call(self, inp, output_size, is_training):
+        # Assumes objects range of all but the first and last dimensions
         batch_size = tf.shape(inp)[0]
-        n_objects = inp.shape[1] * inp.shape[2] * inp.shape[3]
-        obj_dim = inp.shape[4]
+        spatial_shape = inp.shape[1:-1]
+        n_objects = np.prod(spatial_shape)
+        obj_dim = inp.shape[-1]
         inp = tf.reshape(inp, (batch_size, n_objects, obj_dim))
 
         if self.f is None:
