@@ -51,7 +51,7 @@ alg_config = Config(
     reconstruction_weight=1.0,
     kl_weight=1.0,
 
-    math_weight=1.0,
+    math_weight=0.0,
     train_math=False,
     math_A=None,
 
@@ -358,6 +358,7 @@ math_config = Config(
     build_math_input=lambda scope: MLP([100, 100], scope=scope),
     build_math_output=lambda scope: MLP([100, 100], scope=scope),
     train_math=True,
+    math_weight=1.0,
     stopping_criteria="math_accuracy,max",
     threshold=1.0,
     decoder_kind="recurrent",
@@ -396,8 +397,8 @@ yolo_air_2stage_math_config = yolo_air_math_config.copy(
         dict(
             stopping_criteria="AP,max",
             threshold=1.0,
-            math_weight=0.0,
             fixed_weights="math",
+            math_weight=0.0,
             train_math=False,
             train_reconstruction=True,
             train_kl=True,

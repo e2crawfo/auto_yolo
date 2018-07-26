@@ -63,6 +63,6 @@ else:
 
 
 envs.run_experiment(
-    "baseline_search_sc={}_n_digits=".format(args.sc, args.n_digits), config, readme,
+    "baseline_search_sc={}_n_digits={}".format(args.sc, args.n_digits), config, readme,
     distributions=distributions, alg="baseline", durations=durations, task=task
 )
