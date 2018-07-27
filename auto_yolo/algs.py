@@ -21,7 +21,7 @@ alg_config = Config(
     gpu_allow_growth=True,
     max_experiments=None,
     preserve_env=False,
-    stopping_criteria="loss,min",
+    stopping_criteria="loss_reconstruction,min",
     threshold=-np.inf,
     load_path=-1,
 
@@ -61,22 +61,6 @@ alg_config = Config(
 simple_config = alg_config.copy(
     alg_name="simple",
     build_network=simple.SimpleVAE,
-    # build_encoder=lambda scope: ConvNet(
-    #     [dict(filters=32, kernel_size=5, strides=1),
-    #      dict(filters=64, kernel_size=5, strides=2),
-    #      dict(filters=128, kernel_size=5, strides=1),
-    #      dict(filters=128, kernel_size=5, strides=1),
-    #      dict(filters=128, kernel_size=5, strides=1),],
-    #     scope=scope),
-    # build_decoder=lambda scope: ConvNet(
-    #     [dict(filters=128, kernel_size=5, strides=1, transpose=True),
-    #      dict(filters=128, kernel_size=5, strides=2, transpose=True),
-    #      dict(filters=64, kernel_size=5, strides=1, transpose=True),
-    #      dict(filters=32, kernel_size=5, strides=1, transpose=True),
-    #      dict(filters=3, kernel_size=5, strides=1, transpose=True),],
-    #     scope=scope),
-    # build_encoder=lambda scope: MLP([100, 100], scope=scope),
-    # build_decoder=lambda scope: MLP([100, 100], scope=scope),
     render_hook=simple.SimpleVAE_RenderHook(),
 
     build_encoder=core.Backbone,
@@ -92,10 +76,10 @@ baseline_config = alg_config.copy(
     alg_name="baseline",
     build_network=baseline.Baseline_Network,
     render_hook=baseline.Baseline_RenderHook(),
-    A=50,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
-    cc_threshold=1e-3
+    cc_threshold=1e-3,
+    object_shape=(21, 21),
 )
 
 baseline_transfer_config = baseline_config.copy(
@@ -107,6 +91,7 @@ baseline_transfer_config = baseline_config.copy(
 
 ground_truth_config = baseline_config.copy(
     alg_name="ground_truth",
+    object_shape=(14, 14),
     build_network=ground_truth.GroundTruth_Network,
 )
 
@@ -145,7 +130,6 @@ yolo_air_config = alg_config.copy(
     n_channels=128,
     n_final_layers=3,
     n_decoder_channels=128,
-    A=50,
 
     sequential_cfg=dict(
         on=True,
@@ -352,6 +336,10 @@ def math_prepare_func():
     else:
         raise Exception("Unknown value for decoder_kind: '{}'".format(decoder_kind))
 
+    if "load_directory" in cfg:
+        # use my own index and repeat number to get the correct directory to load weights from.
+        cfg.load_path = {"network/representation": ""}
+
 
 math_config = Config(
     prepare_func=math_prepare_func,
@@ -369,7 +357,6 @@ math_config = Config(
     noisy=False,
 )
 
-
 simple_math_config = simple_config.copy(
     math_config,
     alg_name="simple_math",
@@ -385,59 +372,16 @@ ground_truth_math_config = ground_truth_config.copy(
     alg_name="ground_truth_math",
 )
 
-
 yolo_air_math_config = yolo_air_config.copy(
     math_config,
     alg_name="yolo_air_math",
 )
 yolo_air_math_config.prepare_func = [math_config.prepare_func, yolo_air_config.prepare_func]
 
-yolo_air_2stage_math_config = yolo_air_math_config.copy(
-    curriculum=[
-        dict(
-            stopping_criteria="AP,max",
-            threshold=1.0,
-            fixed_weights="math",
-            math_weight=0.0,
-            train_math=False,
-            train_reconstruction=True,
-            train_kl=True,
-            noisy=True,
-            patience=50000,
-        ),
-        dict(
-            fixed_weights="object_encoder object_decoder backbone box obj",
-            load_path={"network/representation": -1},
-        )
-    ]
-)
-
-
 air_math_config = air_config.copy(
     math_config,
     alg_name="air_math",
 )
-
-air_2stage_math_config = air_math_config.copy(
-    curriculum=[
-        dict(
-            stopping_criteria="AP,max",
-            threshold=1.0,
-            math_weight=0.0,
-            fixed_weights="math",
-            train_math=False,
-            train_reconstruction=True,
-            train_kl=True,
-            noisy=True,
-            patience=50000,
-        ),
-        dict(
-            fixed_weights="object_encoder object_decoder image_encoder cell output",
-            load_path={"network/representation": -1},
-        )
-    ]
-)
-
 
 # def continue_prepare_func():
 #     from dps import cfg

@@ -5,7 +5,6 @@ readme = "Running first stage (representation learning) for yolo_air on addition
 
 distributions = [dict(n_train=1000 * 2**i) for i in range(8)]
 
-
 durations = dict(
     long=dict(
         max_hosts=1, ppn=12, cpp=2, gpu_set="0,1,2,3", project="rpp-bengioy",
@@ -32,9 +31,11 @@ durations = dict(
         slack_time="1mins", n_repeats=1, n_param_settings=4),
 )
 
-config = dict(n_train=16000)
+config = dict(max_steps=2e5, patience=50000, n_train=16000)
 
-envs.run_experiment(
-    "addition-stage1", config, readme, alg="yolo_air",
-    task="arithmetic2", durations=durations, distributions=distributions
-)
+
+if __name__ == "__main__":
+    envs.run_experiment(
+        "addition-stage1", config, readme, alg="yolo_air",
+        task="arithmetic2", durations=durations, distributions=distributions
+    )
