@@ -1,13 +1,13 @@
 from auto_yolo import envs
 import argparse
 
-readme = "Testing yolo_air variational autoencoder with math."
+readme = "Second stage of testing yolo_air variational autoencoder with math."
 
 distributions = None
 
 durations = dict(
     long=dict(
-        max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="24hours",
+        max_hosts=1, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="24hours",
         project="rpp-bengioy", cleanup_time="20mins",
         slack_time="5mins", n_repeats=6, step_time_limit="24hours"),
 

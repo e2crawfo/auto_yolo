@@ -8,7 +8,8 @@ from dps.updater import Updater as _Updater
 from dps.utils import Param, prime_factors
 from dps.utils.tf import (
     ConvNet, build_gradient_train_op, tf_mean_sum,
-    ScopedFunction, build_scheduled_value, MLP)
+    ScopedFunction, build_scheduled_value, MLP,
+    apply_mask_and_group_at_front)
 from dps.updater import DataManager
 
 
@@ -654,14 +655,12 @@ class VariationalAutoencoder(ScopedFunction):
     def build_math_representation(self):
         attr_shape = tf.shape(self._tensors['attr'])
         attr = tf.reshape(self._tensors['attr'], (-1, self.A))
-
         math_A = self.A if self.math_A is None else self.math_A
         math_attr = self.math_input_network(attr, math_A, self.is_training)
-
         new_shape = tf.concat([attr_shape[:-1], [math_A]], axis=0)
         math_attr = tf.reshape(math_attr, new_shape)
         self._tensors["math_attr"] = math_attr
-        return math_attr
+        return math_attr, self._tensors['obj']
 
     @property
     def inp(self):
@@ -697,6 +696,7 @@ class VariationalAutoencoder(ScopedFunction):
             background=background,
             batch_size=tf.shape(inp)[0],
         )
+        self._tensors["obj"] = tf.ones((self.batch_size, 1))  # just a default value, subclasses can replace this
 
         self.labels = labels
         self._process_labels(labels)
@@ -787,15 +787,30 @@ class SimpleRecurrentRegressionNetwork(ScopedFunction):
         if self.output_network is None:
             self.output_network = cfg.build_math_output(scope="math_output")
 
-        batch_size = tf.shape(inp)[0]
-        A = inp.shape[-1]
-        _inp = tf.reshape(inp, (batch_size, -1, A))
+        if isinstance(inp, (tuple, list)):
+            attr, mask = inp
+            rnn_input, n_on = apply_mask_and_group_at_front(attr, mask)
 
-        output, final_state = tf.nn.dynamic_rnn(
-            self.cell, _inp, initial_state=self.cell.zero_state(batch_size, tf.float32),
-            parallel_iterations=1, swap_memory=False)
+            batch_size = tf.shape(attr)[0]
+            output, final_state = tf.nn.dynamic_rnn(
+                self.cell, rnn_input, initial_state=self.cell.zero_state(batch_size, tf.float32),
+                parallel_iterations=1, swap_memory=False, time_major=False)
 
-        return self.output_network(output[:, -1, :], output_size, is_training)
+            # Get the output at the end of each sequence.
+            indices = tf.stack([tf.range(batch_size), n_on-1], axis=1)
+            output = tf.gather_nd(output, indices)
+        else:
+            batch_size = tf.shape(inp)[0]
+            n_objects = np.prod(inp.shape[1:-1])
+            A = inp.shape[-1]
+            inp = tf.reshape(inp, (batch_size, n_objects, A))
+
+            output, final_state = tf.nn.dynamic_rnn(
+                self.cell, inp, initial_state=self.cell.zero_state(batch_size, tf.float32),
+                parallel_iterations=1, swap_memory=False, time_major=False)
+            output = output[:, -1, :]
+
+        return self.output_network(output, output_size, is_training)
 
 
 class SoftmaxMLP(MLP):

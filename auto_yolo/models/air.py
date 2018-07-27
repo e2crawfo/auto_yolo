@@ -20,10 +20,9 @@ import matplotlib.patches as patches
 from dps import cfg
 from dps.utils import Param
 from dps.utils.tf import build_scheduled_value, RenderHook
-from dps.env.advanced.yolo import mAP
 
 from auto_yolo.models.core import (
-    VariationalAutoencoder, normal_vae,
+    VariationalAutoencoder, normal_vae, mAP,
     concrete_binary_pre_sigmoid_sample, concrete_binary_sample_kl)
 
 
@@ -300,7 +299,10 @@ class AIR_Network(VariationalAutoencoder):
         new_shape = tf.concat([attr_shape[:-1], [math_A]], axis=0)
         math_attr = tf.reshape(math_attr, new_shape)
         self._tensors["math_attr"] = math_attr
-        return math_attr
+
+        mask = tf.round(self._tensors["z_pres"])
+
+        return math_attr, mask
 
     def apply_training_wheel(self, signal):
         return (
@@ -364,14 +366,14 @@ class AIR_Network(VariationalAutoencoder):
                  scale_ta, scale_kl_ta, scale_std_ta,
                  shift_ta, shift_kl_ta, shift_std_ta,
                  attr_ta, attr_kl_ta, attr_std_ta,
-                 z_pres_probs_ta, z_pres_kl_ta,
+                 z_pres_ta, z_pres_probs_ta, z_pres_kl_ta,
                  vae_input_ta, vae_output_ta,
                  scale, shift, attr, z_pres):
 
             if self.difference_air:
                 inp = (
                     self._tensors["inp"] -
-                    tf.stop_gradient(tf.reshape(running_recon, (self.batch_size, *self.obs_shape)))
+                    tf.reshape(running_recon, (self.batch_size, *self.obs_shape))
                 )
                 encoded_inp = self.image_encoder(inp, 0, self.is_training)
                 encoded_inp = tf.layers.flatten(encoded_inp)
@@ -519,6 +521,7 @@ class AIR_Network(VariationalAutoencoder):
             vae_input_ta = vae_input_ta.write(vae_input_ta.size(), tf.layers.flatten(vae_input))
             vae_output_ta = vae_output_ta.write(vae_output_ta.size(), vae_output)
 
+            z_pres_ta = z_pres_ta.write(z_pres_ta.size(), z_pres)
             z_pres_probs_ta = z_pres_probs_ta.write(z_pres_probs_ta.size(), z_pres_prob)
             z_pres_kl_ta = z_pres_kl_ta.write(z_pres_kl_ta.size(), z_pres_kl)
 
@@ -529,7 +532,7 @@ class AIR_Network(VariationalAutoencoder):
                 scale_ta, scale_kl_ta, scale_std_ta,
                 shift_ta, shift_kl_ta, shift_std_ta,
                 attr_ta, attr_kl_ta, attr_std_ta,
-                z_pres_probs_ta, z_pres_kl_ta,
+                z_pres_ta, z_pres_probs_ta, z_pres_kl_ta,
                 vae_input_ta, vae_output_ta,
 
                 scale, shift, attr, z_pres,
@@ -541,7 +544,7 @@ class AIR_Network(VariationalAutoencoder):
 
         (_, _, _, reconstruction, kl_loss, self.predicted_n_digits,
          scale, scale_kl, scale_std, shift, shift_kl, shift_std,
-         attr, attr_kl, attr_std, z_pres_probs, z_pres_kl,
+         attr, attr_kl, attr_std, z_pres, z_pres_probs, z_pres_kl,
          vae_input, vae_output, _, _, _, _) = tf.while_loop(
             cond, body, [
                 tf.constant(0),                                 # RNN time step, initially zero
@@ -550,6 +553,7 @@ class AIR_Network(VariationalAutoencoder):
                 tf.zeros((self.batch_size, np.product(self.obs_shape))),  # reconstruction canvas, initially empty
                 tf.zeros((self.batch_size, 1)),                    # running value of the loss function
                 tf.zeros((self.batch_size, 1), dtype=tf.int32),    # running inferred number of digits
+                tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
                 tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
                 tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
                 tf.TensorArray(dtype=tf.float32, size=0, dynamic_size=True),
@@ -600,6 +604,7 @@ class AIR_Network(VariationalAutoencoder):
         self._tensors['attr_kl'] = process_tensor_array(attr_kl, 'attr_kl')
         self._tensors['attr_std'] = process_tensor_array(attr_std, 'attr_std')
 
+        self._tensors['z_pres'] = process_tensor_array(z_pres, 'z_pres')
         self._tensors['z_pres_probs'] = process_tensor_array(z_pres_probs, 'z_pres_probs')
         self._tensors['z_pres_kl'] = process_tensor_array(z_pres_kl, 'z_pres_kl')
 

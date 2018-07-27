@@ -1,13 +1,13 @@
 from auto_yolo import envs
 import argparse
 
-readme = "Testing yolo_air variational autoencoder with math."
+readme = "Running first stage (math learning) for yolo_air on addition task."
 
-distributions = None
+distributions = [dict(n_train=1000 * 2**i) for i in range(8)]
 
 durations = dict(
     long=dict(
-        max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="24hours",
+        max_hosts=1, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="24hours",
         project="rpp-bengioy", cleanup_time="20mins",
         slack_time="5mins", n_repeats=6, step_time_limit="24hours"),
 
@@ -39,11 +39,10 @@ config = dict(
             "/media/data/dps_data/logs/test-yolo-air-math_env=size=14-in-colour=False-task=arithmetic-ops=addition/"
             "exp_alg=yolo-air-math_seed=174419635_2018_07_18_16_20_00/weights/best_of_stage_0",
     },
-    curriculum=[dict()],
     fixed_weights=fixed_weights
 )
 
 envs.run_experiment(
-    "test_math", config, readme, alg="yolo_air_2stage_math",
+    "addition-stage2", config, readme, alg="yolo_air_math",
     task="arithmetic2", durations=durations, distributions=distributions
 )

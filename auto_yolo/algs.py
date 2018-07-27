@@ -248,7 +248,7 @@ air_config = alg_config.copy(
 
 dair_config = air_config.copy(
     difference_air=True,
-    build_cell=lambda scope: FeedforwardCell(MLP([512, 256]), cfg.rnn_n_units),
+    build_cell=lambda scope: FeedforwardCell(MLP([256, 256, 256, 256]), cfg.rnn_n_units),
 )
 
 nem_config = alg_config.copy(

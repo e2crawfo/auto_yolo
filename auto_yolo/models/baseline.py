@@ -24,6 +24,8 @@ class BboxCell(RNNCell):
         self.image_width = image_width
 
     def __call__(self, t, state, scope=None):
+        """ t is the index of the obejct in the whole batch, batch_idx is the index of the
+            batch element that the object belongs to, which we have pre-computed """
         batch_idx = self.batch_indices_for_boxes[t[0, 0]-1]
         nonzero_indices = tf.where(tf.equal(self.components[batch_idx, :, :], t[0, 0]))
 
@@ -95,9 +97,15 @@ class Baseline_Network(VariationalAutoencoder):
 
         cell = BboxCell(components, batch_indices_for_objects, self.image_height, self.image_width)
 
+        # For each object, get its bounding box by using `indices` to figure out which element of
+        # `components` the object appears in, and then check that element
         object_bboxes, _ = dynamic_rnn(
             cell, indices[:, None, None], initial_state=cell.zero_state(1, tf.float32),
             parallel_iterations=1, swap_memory=False, time_major=True)
+
+        # Couldn't I have just iterated through all object indices and used tf.where on `components` to simultaneously
+        # get both the bounding box and the batch index? Yes, but I think I thought that would be expensive
+        # (have to look through the entirety of `components` once for each object).
 
         # Get rid of dummy batch dim created for dynamic_rnn
         object_bboxes = object_bboxes[:, 0, :]
@@ -140,6 +148,8 @@ class Baseline_Network(VariationalAutoencoder):
         attr = tf.reshape(attr, (self.batch_size, max_objects, 2*self.A))
         attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
         attr_std = tf.exp(attr_log_std)
+        if not self.noisy:
+            attr_std = tf.zeros_like(attr_std)
 
         attr, attr_kl = yolo_air.normal_vae(attr_mean, attr_std, self.attr_prior_mean, self.attr_prior_std)
 
@@ -147,8 +157,8 @@ class Baseline_Network(VariationalAutoencoder):
             attr = tf.stop_gradient(attr)
             attr_kl = tf.stop_gradient(attr_kl)
 
-        self._tensors["attr"] = attr
-        self._tensors["attr_kl"] = attr_kl
+        self._tensors["attr"] = tf.reshape(attr, (self.batch_size, max_objects, self.A))
+        self._tensors["attr_kl"] = tf.reshape(attr, (self.batch_size, max_objects, self.A))
 
         object_decoder_in = tf.reshape(attr, (self.batch_size * max_objects, 1, 1, self.A))
 
