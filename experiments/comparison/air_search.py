@@ -33,7 +33,7 @@ durations = dict(
     short=dict(
         max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="20mins",
         project="rpp-bengioy", cleanup_time="1mins", config=dict(max_steps=100),
-        slack_time="1mins", n_repeats=1, n_param_settings=5),
+        slack_time="1mins", n_repeats=1, n_param_settings=4),
 
     oak=dict(
         max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="12mins",

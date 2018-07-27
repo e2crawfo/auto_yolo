@@ -1,34 +1,61 @@
 from auto_yolo import envs
 from auto_yolo.models import air
+import argparse
 
 readme = "Running AIR experiment."
+parser = argparse.ArgumentParser()
+parser.add_argument("--dair", action="store_true")
+args, _ = parser.parse_known_args()
 
-distributions = [
-    {'n_digits': 1,
-     'scale_prior_mean': -2.9444389791664403,
-     'scale_prior_std': 0.25,
-     'shift_prior_std': 2.0},
+if args.dair:
+    alg = "dair"
+    distributions = [
+        {'n_digits': 1,
+         'scale_prior_mean': -2.9444389791664403,
+         'scale_prior_std': 0.25,
+         'shift_prior_std': 2.0},
+        {'n_digits': 3,
+         'scale_prior_mean': -2.9444389791664403,
+         'scale_prior_std': 0.5,
+         'shift_prior_std': 1.0},
+        {'n_digits': 5,
+         'scale_prior_mean': -2.197224577336219,
+         'scale_prior_std': 0.25,
+         'shift_prior_std': 1.0},
+        {'n_digits': 7,
+         'scale_prior_mean': -2.9444389791664403,
+         'scale_prior_std': 0.75,
+         'shift_prior_std': 1.0},
+        {'n_digits': 9,
+         'scale_prior_mean': -0.4054651081081643,
+         'scale_prior_std': 0.25,
+         'shift_prior_std': 2.0}
+    ]
 
-    {'n_digits': 3,
-     'scale_prior_mean': -1.386,
-     'scale_prior_std': 0.75,
-     'shift_prior_std': 0.5},
-
-    {'n_digits': 5,
-     'scale_prior_mean': -2.9444,
-     'scale_prior_std': 0.75,
-     'shift_prior_std': 0.5},
-
-    {'n_digits': 7,
-     'scale_prior_mean': -1.3862943611198906,
-     'scale_prior_std': 0.5,
-     'shift_prior_std': 2.0},
-
-    {'n_digits': 9,
-     'scale_prior_mean': -2.1972,
-     'scale_prior_std': 0.5,
-     'shift_prior_std': 0.5}
-]
+else:
+    alg = "air"
+    distributions = [
+        {'n_digits': 1,
+         'scale_prior_mean': -2.9444389791664403,
+         'scale_prior_std': 0.2,
+         'shift_prior_std': 1.0},
+        {'n_digits': 3,
+         'scale_prior_mean': -2.197224577336219,
+         'scale_prior_std': 0.2,
+         'shift_prior_std': 1.0},
+        {'n_digits': 5,
+         'scale_prior_mean': -2.197224577336219,
+         'scale_prior_std': 0.2,
+         'shift_prior_std': 2.0},
+        {'n_digits': 7,
+         'scale_prior_mean': -1.3862943611198906,
+         'scale_prior_std': 0.4,
+         'shift_prior_std': 4.0},
+        {'n_digits': 9,
+         'scale_prior_mean': -0.4054651081081643,
+         'scale_prior_std': 0.2,
+         'shift_prior_std': 1.0}
+    ]
 
 
 for dist in distributions:
@@ -65,6 +92,6 @@ config = dict(
 
 
 envs.run_experiment(
-    "air_run", config, readme, distributions=distributions,
-    alg="air", task="arithmetic", durations=durations,
+    "{}_run".format(alg), config, readme, distributions=distributions,
+    alg=alg, task="arithmetic", durations=durations,
 )
