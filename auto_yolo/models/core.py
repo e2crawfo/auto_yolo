@@ -696,7 +696,6 @@ class VariationalAutoencoder(ScopedFunction):
             background=background,
             batch_size=tf.shape(inp)[0],
         )
-        self._tensors["obj"] = tf.ones((self.batch_size, 1))  # just a default value, subclasses can replace this
 
         self.labels = labels
         self._process_labels(labels)

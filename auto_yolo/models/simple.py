@@ -42,6 +42,9 @@ class SimpleVAE(VariationalAutoencoder):
 
         attr, attr_kl = normal_vae(attr_mean, attr_std, self.attr_prior_mean, self.attr_prior_std)
 
+        obj_shape = tf.concat([tf.shape(attr)[:-1], [1]], axis=0)
+        self._tensors["obj"] = tf.ones(obj_shape)
+
         self._tensors.update(attr_mean=attr_mean, attr_std=attr_std, attr_kl=attr_kl, attr=attr)
 
         # --- decode ---
