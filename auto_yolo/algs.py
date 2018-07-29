@@ -198,7 +198,7 @@ yolo_air_progression_config = yolo_air_config.copy(
 air_config = alg_config.copy(
     alg_name="attend_infer_repeat",
     build_network=air.AIR_Network,
-    batch_size=32,
+    batch_size=64,
     verbose_summaries=False,
     render_hook=air.AIR_RenderHook(),
     difference_air=False,
@@ -336,9 +336,14 @@ def math_prepare_func():
     else:
         raise Exception("Unknown value for decoder_kind: '{}'".format(decoder_kind))
 
-    if "load_directory" in cfg:
-        # use my own index and repeat number to get the correct directory to load weights from.
-        cfg.load_path = {"network/representation": ""}
+    if "stage1_path" in cfg:
+        import os, glob  # noqa
+        pattern = os.path.join(
+            cfg.stage1_path, "experiments",
+            "*idx={}*repeat={}*".format(cfg.idx, cfg.repeat))
+        paths = glob.glob(pattern)
+        assert len(paths) == 1
+        cfg.load_path = {"network/representation": os.path.join(paths[0], "weights", "best_of_stage_0")}
 
 
 math_config = Config(

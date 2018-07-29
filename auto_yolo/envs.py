@@ -244,7 +244,7 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
         )
 
     config = grid_config.copy()
-    config.env_name = "size={}_in-colour={}_task={}".format(size, in_colour, task)
+    config.env_name = "task={}".format(task)
 
     if task == "arithmetic":
         config.env_name += "_ops={}".format(ops)
