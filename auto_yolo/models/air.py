@@ -289,21 +289,6 @@ class AIR_Network(VariationalAutoencoder):
 
         self.z_pres_prior_log_odds = build_scheduled_value(self.z_pres_prior_log_odds, "z_pres_prior_log_odds")
 
-    def build_math_representation(self):
-        attr_shape = tf.shape(self._tensors['attr'])
-        attr = tf.reshape(self._tensors['attr'], (-1, self.A))
-
-        math_A = self.A if self.math_A is None else self.math_A
-        math_attr = self.math_input_network(attr, math_A, self.is_training)
-
-        new_shape = tf.concat([attr_shape[:-1], [math_A]], axis=0)
-        math_attr = tf.reshape(math_attr, new_shape)
-        self._tensors["math_attr"] = math_attr
-
-        mask = tf.round(self._tensors["z_pres"])
-
-        return math_attr, mask
-
     def apply_training_wheel(self, signal):
         return (
             self.training_wheels * tf.stop_gradient(signal) +
@@ -604,7 +589,8 @@ class AIR_Network(VariationalAutoencoder):
         self._tensors['attr_kl'] = process_tensor_array(attr_kl, 'attr_kl')
         self._tensors['attr_std'] = process_tensor_array(attr_std, 'attr_std')
 
-        self._tensors['z_pres'] = process_tensor_array(z_pres, 'z_pres')
+        self._tensors['z_pres'] = process_tensor_array(z_pres, 'z_pres', (self.batch_size, self.max_time_steps, 1))
+        self._tensors['obj'] = tf.round(self._tensors['z_pres'])  # for `build_math_representation`
         self._tensors['z_pres_probs'] = process_tensor_array(z_pres_probs, 'z_pres_probs')
         self._tensors['z_pres_kl'] = process_tensor_array(z_pres_kl, 'z_pres_kl')
 
