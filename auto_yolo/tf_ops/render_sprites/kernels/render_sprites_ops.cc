@@ -120,7 +120,7 @@ struct RenderSprites2DFunctor<CPUDevice, T>{
                                                       img_x * n_channels + chan];
             }
 
-            T alpha_sum = 1.0;
+            T alpha_sum = background_alpha;
 
             for (int sprite_id = 0; sprite_id < n_sprites[batch_id]; ++sprite_id) {
               const T scale_y = scales[batch_id * scales_batch_stride + sprite_id * 2];

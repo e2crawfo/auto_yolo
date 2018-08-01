@@ -22,7 +22,17 @@ durations = dict(
         slack_time="1mins", n_repeats=1, n_param_settings=4),
 )
 
+config = dict(
+    # training_wheels="Exp(1.0, 0.0, decay_rate=0.0, decay_steps=100, staircase=True)",
+    n_train=16000, # obj_temp=100.0,
+    # obj_logit_scale=1.0,
+    # alpha_logit_scale=1.0,
+    # alpha_logit_bias=1.0,
+    # use_concrete_kl=True,
+    # final_count_prior_log_odds=1000.0,
+)
+
 envs.run_experiment(
-    "test", dict(n_train=16000), readme, alg="yolo_air",
-    task="arithmetic", durations=durations, distributions=distributions
+    "test", config, readme, alg="yolo_air",
+    task="small", durations=durations, distributions=distributions,
 )

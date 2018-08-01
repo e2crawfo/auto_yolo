@@ -95,8 +95,8 @@ __global__ void RenderSprites2DKernel(const T* __restrict__ sprites,
     const T img_y_T = static_cast<T>(img_y);
     const T img_x_T = static_cast<T>(img_x);
 
-    T weighted_sum = 1.0 * backgrounds[index];
-    T alpha_sum = 1.0;
+    T weighted_sum = background_alpha * backgrounds[index];
+    T alpha_sum = background_alpha;
 
     for (int sprite_id = 0; sprite_id < n_sprites[batch_id]; ++sprite_id) {
       const T scale_y = scales[batch_id * scales_batch_stride + sprite_id * 2];
@@ -330,10 +330,11 @@ __global__ void RenderSpritesGrad2DKernel(const T* __restrict__ sprites,
     const T img_y_T = static_cast<T>(img_y);
     const T img_x_T = static_cast<T>(img_x);
 
-    T weighted_sum = 1.0 * backgrounds[batch_id * img_batch_stride +
+    const T background_alpha = 1.0;
+    T weighted_sum = background_alpha * backgrounds[batch_id * img_batch_stride +
                                        img_y * img_row_stride +
                                        img_x * n_channels + chan];
-    T alpha_sum = 1.0;
+    T alpha_sum = background_alpha;
 
     for (int sprite_id = 0; sprite_id < n_sprites[batch_id]; ++sprite_id) {
       const T scale_y = scales[batch_id * scales_batch_stride + sprite_id * 2];
@@ -569,6 +570,7 @@ struct RenderSpritesGrad2DFunctor<GPUDevice, T>{
                    const int img_width,
 
                    const int n_channels){
+
     const int grad_sprites_size = batch_size * max_sprites * sprite_height * sprite_width * (n_channels + 1);
     const int grad_n_sprites_size = batch_size;
     const int grad_scales_size = batch_size * max_sprites * 2;

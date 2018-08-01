@@ -43,6 +43,8 @@ alg_config = Config(
     xent_loss=True,
     attr_prior_mean=0.0,
     attr_prior_std=1.0,
+    z_prior_mean=0.0,
+    z_prior_std=1.0,
     A=50,
 
     train_reconstruction=True,

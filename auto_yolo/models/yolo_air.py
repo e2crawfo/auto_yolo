@@ -48,6 +48,9 @@ class YoloAir_Network(VariationalAutoencoder):
     hw_prior_mean = Param()
     hw_prior_std = Param()
 
+    z_prior_mean = Param()
+    z_prior_std = Param()
+
     obj_logit_scale = Param()
     alpha_logit_scale = Param()
     alpha_logit_bias = Param()
@@ -109,8 +112,8 @@ class YoloAir_Network(VariationalAutoencoder):
         if not self.noisy:
             std = tf.zeros_like(std)
 
-        cy_mean, cx_mean, h_mean, w_mean = tf.split(mean, 4, axis=-1)
-        cy_std, cx_std, h_std, w_std = tf.split(std, 4, axis=-1)
+        cy_mean, cx_mean, h_mean, w_mean, z_mean = tf.split(mean, 5, axis=-1)
+        cy_std, cx_std, h_std, w_std, z_std = tf.split(std, 5, axis=-1)
 
         cy_logits, cy_kl = normal_vae(cy_mean, cy_std, self.yx_prior_mean, self.yx_prior_std)
         cx_logits, cx_kl = normal_vae(cx_mean, cx_std, self.yx_prior_mean, self.yx_prior_std)
@@ -118,10 +121,15 @@ class YoloAir_Network(VariationalAutoencoder):
         h_logits, h_kl = normal_vae(h_mean, h_std, self.hw_prior_mean, self.hw_prior_std)
         w_logits, w_kl = normal_vae(w_mean, w_std, self.hw_prior_mean, self.hw_prior_std)
 
-        cell_y = tf.nn.sigmoid(tf.clip_by_value(cy_logits, -10, 10.))
-        cell_x = tf.nn.sigmoid(tf.clip_by_value(cx_logits, -10, 10.))
-        h = tf.nn.sigmoid(tf.clip_by_value(h_logits, -10, 10.))
-        w = tf.nn.sigmoid(tf.clip_by_value(w_logits, -10, 10.))
+        z_mean = self.training_wheels * tf.stop_gradient(z_mean) + (1-self.training_wheels) * z_mean
+        z_std = self.training_wheels * tf.stop_gradient(z_std) + (1-self.training_wheels) * z_std
+        z_logits, z_kl = normal_vae(z_mean, z_std, self.z_prior_mean, self.z_prior_std)
+
+        cell_y = tf.nn.sigmoid(tf.clip_by_value(cy_logits, -10, 10))
+        cell_x = tf.nn.sigmoid(tf.clip_by_value(cx_logits, -10, 10))
+        h = tf.nn.sigmoid(tf.clip_by_value(h_logits, -10, 10))
+        w = tf.nn.sigmoid(tf.clip_by_value(w_logits, -10, 10))
+        z = tf.exp(tf.clip_by_value(z_logits, -5, 5))
 
         assert self.max_yx > self.min_yx
 
@@ -149,29 +157,41 @@ class YoloAir_Network(VariationalAutoencoder):
             w = tf.stop_gradient(w)
             w_kl = tf.stop_gradient(w_kl)
 
-        box = tf.concat([cell_y, cell_x, h, w], axis=-1)
-        box_kl = tf.concat([cy_kl, cx_kl, h_kl, w_kl], axis=-1)
+        if "z" in self.no_gradient:
+            z = tf.stop_gradient(z)
+            z_kl = tf.stop_gradient(z_kl)
+
+        if "z" in self.fixed_values:
+            z = self.fixed_values['z'] * tf.ones_like(z)
+            z_kl = tf.zeros_like(z_kl)
+
+        box = tf.concat([cell_y, cell_x, h, w, z], axis=-1)
+        box_kl = tf.concat([cy_kl, cx_kl, h_kl, w_kl, z_kl], axis=-1)
 
         return dict(
             cell_y_mean=cy_mean,
             cell_x_mean=cx_mean,
             h_mean=h_mean,
             w_mean=w_mean,
+            z_mean=z_mean,
 
             cell_y_std=cy_std,
             cell_x_std=cx_std,
             h_std=h_std,
             w_std=w_std,
+            z_std=z_std,
 
             cell_y=cell_y,
             cell_x=cell_x,
             h=h,
             w=w,
+            z=z,
 
             cell_y_kl=cy_kl,
             cell_x_kl=cx_kl,
             h_kl=h_kl,
             w_kl=w_kl,
+            z_kl=z_kl,
 
             box_kl=box_kl,
             box=box,
@@ -181,7 +201,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
         # --- Compute sprite locations from box parameters ---
 
-        cell_y, cell_x, height, width = tf.split(boxes, 4, axis=-1)
+        cell_y, cell_x, height, width, _ = tf.split(boxes, 5, axis=-1)
 
         # box height and width normalized to image height and width
         ys = height * self.anchor_boxes[b, 0] / self.image_height
@@ -271,7 +291,7 @@ class YoloAir_Network(VariationalAutoencoder):
     def _make_empty(self):
         return np.array([{} for i in range(self.H * self.W * self.B)]).reshape(self.H, self.W, self.B)
 
-    def _build_program_generator_sequential(self):
+    def _build_program_generator(self):
         H, W, B = self.H, self.W, self.B
 
         if self.backbone is None:
@@ -287,8 +307,8 @@ class YoloAir_Network(VariationalAutoencoder):
 
         # --- set-up the edge element ---
 
-        sizes = [4, self.A, 1]
-        sigmoids = [True, False, True]
+        sizes = [4, 1, self.A, 1]
+        sigmoids = [True, False, False, True]
         total_sample_size = sum(sizes)
 
         self.edge_weights = tf.get_variable("edge_weights", shape=total_sample_size, dtype=tf.float32)
@@ -326,7 +346,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
                     layer_inp = tf.concat([_backbone_output, context], axis=1)
                     n_features = self.n_passthrough_features
-                    output_size = 8
+                    output_size = 10
 
                     network_output = self.box_network(layer_inp, output_size + n_features, self.is_training)
                     rep_input, features = tf.split(network_output, (output_size, n_features), axis=1)
@@ -401,8 +421,7 @@ class YoloAir_Network(VariationalAutoencoder):
         # --- Compute sprite locations from box parameters ---
 
         # All in cell-local co-ordinates, should be invariant to image size.
-        boxes = self._tensors['box']
-        cell_y, cell_x, h, w = tf.split(boxes, 4, axis=-1)
+        cell_y, cell_x, h, w, z = tf.split(self._tensors['box'], 5, axis=-1)
 
         anchor_box_h = self.anchor_boxes[:, 0].reshape(1, 1, 1, self.B, 1)
         anchor_box_w = self.anchor_boxes[:, 1].reshape(1, 1, 1, self.B, 1)
@@ -455,6 +474,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
         obj_alpha *= tf.reshape(self._tensors['obj'], (self.batch_size, self.HWB, 1, 1, 1))
         obj_alpha = tf.exp(obj_alpha * 5 + (1-obj_alpha) * -5)
+        obj_alpha *= tf.reshape(z, (self.batch_size, self.HWB, 1, 1, 1))
 
         objects = tf.concat([obj_img, obj_alpha], axis=-1)
 
@@ -476,7 +496,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
         # --- Store values ---
 
-        self._tensors['latent_hw'] = boxes[..., 2:]
+        self._tensors['latent_hw'] = self._tensors['box'][..., 2:]
         self._tensors['latent_area'] = h * w
         self._tensors['area'] = (ys * float(self.image_height)) * (xs * float(self.image_width))
 
@@ -496,7 +516,7 @@ class YoloAir_Network(VariationalAutoencoder):
             if "object_decoder" in self.fixed_weights:
                 self.object_decoder.fix_variables()
 
-        self._build_program_generator_sequential()
+        self._build_program_generator()
 
         # --- compute obj_kl ---
 
@@ -593,12 +613,14 @@ class YoloAir_Network(VariationalAutoencoder):
         recorded_tensors['cell_x'] = tf.reduce_mean(self._tensors["cell_x"])
         recorded_tensors['h'] = tf.reduce_mean(self._tensors["h"])
         recorded_tensors['w'] = tf.reduce_mean(self._tensors["w"])
+        recorded_tensors['z'] = tf.reduce_mean(self._tensors["z"])
         recorded_tensors['area'] = tf.reduce_mean(self._tensors["area"])
 
         recorded_tensors['cell_y_std'] = tf.reduce_mean(self._tensors["cell_y_std"])
         recorded_tensors['cell_x_std'] = tf.reduce_mean(self._tensors["cell_x_std"])
         recorded_tensors['h_std'] = tf.reduce_mean(self._tensors["h_std"])
         recorded_tensors['w_std'] = tf.reduce_mean(self._tensors["w_std"])
+        recorded_tensors['z_std'] = tf.reduce_mean(self._tensors["z_std"])
 
         obj = self._tensors["obj"]
         pred_n_objects = self._tensors["pred_n_objects"]
@@ -612,6 +634,8 @@ class YoloAir_Network(VariationalAutoencoder):
             tf.reduce_sum(self._tensors["h"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects)
         recorded_tensors['on_w_avg'] = tf.reduce_mean(
             tf.reduce_sum(self._tensors["w"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects)
+        recorded_tensors['on_z_avg'] = tf.reduce_mean(
+            tf.reduce_sum(self._tensors["z"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects)
         recorded_tensors['on_area_avg'] = tf.reduce_mean(
             tf.reduce_sum(self._tensors["area"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects)
         recorded_tensors['obj'] = tf.reduce_mean(obj)
@@ -643,6 +667,7 @@ class YoloAir_Network(VariationalAutoencoder):
             self.losses['cell_x_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["cell_x_kl"])
             self.losses['h_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["h_kl"])
             self.losses['w_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["w_kl"])
+            self.losses['z_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["z_kl"])
             self.losses['attr_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["attr_kl"])
 
         # --- other evaluation metrics ---
@@ -670,8 +695,11 @@ class YoloAir_RenderHook(RenderHook):
 
         fetched = self._fetch(updater)
 
-        self._plot_reconstruction(updater, fetched)
-        self._plot_patches(updater, fetched, 4)
+        try:
+            self._plot_reconstruction(updater, fetched)
+            self._plot_patches(updater, fetched, 4)
+        except Exception:
+            pass
 
     def _plot_reconstruction(self, updater, fetched):
         inp = fetched['inp']

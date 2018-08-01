@@ -20,6 +20,8 @@
 #define __restrict__ __restrict
 #endif
 
+static const float background_alpha = 1.0;
+
 namespace tensorflow {
 class OpKernelContext;
 }

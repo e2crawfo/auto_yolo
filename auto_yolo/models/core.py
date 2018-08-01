@@ -531,17 +531,16 @@ class Updater(_Updater):
                     cluster_data = cluster_data / 255.
                     result = k_means(cluster_data, cfg.n_clusters)
                     centroids = result[0]
-
-                centroids = np.maximum(centroids, 1e-6)
-                centroids = np.minimum(centroids, 1-1e-6)
+                centroids = np.clip(centroids, 0.0, 1.0)
                 centroids = centroids.reshape(cfg.n_clusters, *image_shape)
+
         elif cfg.background_cfg.mode == "mode":
             self.background = self.inp_mode[:, None, None, :] * tf.ones_like(inp)
         else:
             self.background = tf.zeros_like(inp)
 
         network_outputs = self.network(
-            (inp, labels, self.background), 0, self.data_manager.is_training)
+            (inp, labels, self.background), self.data_manager.is_training)
 
         network_tensors = network_outputs["tensors"]
         network_recorded_tensors = network_outputs["recorded_tensors"]
@@ -685,7 +684,7 @@ class VariationalAutoencoder(ScopedFunction):
             targets=labels[2],
         )
 
-    def _call(self, inp, _, is_training):
+    def _call(self, inp, is_training):
         self.original_inp = inp
         inp, labels, background = inp
 
