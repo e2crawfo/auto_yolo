@@ -35,13 +35,19 @@ namespace {
   sprites[batch_id * sprites_batch_stride +         \
           sprite_id * sprites_sprite_stride +       \
           y * sprites_row_stride +                  \
-          x * (n_channels + 1) + chan]
+          x * (n_channels + 2) + chan]
 
 #define GET_ALPHA_POINT(x, y)                    \
   sprites[batch_id * sprites_batch_stride +         \
           sprite_id * sprites_sprite_stride +       \
           y * sprites_row_stride +                  \
-          x * (n_channels + 1) + n_channels]
+          x * (n_channels + 2) + n_channels]
+
+#define GET_IMPORTANCE_POINT(x, y)                    \
+  sprites[batch_id * sprites_batch_stride +         \
+          sprite_id * sprites_sprite_stride +       \
+          y * sprites_row_stride +                  \
+          x * (n_channels + 2) + n_channels + 1]
 
 
 template <typename T>
@@ -65,9 +71,9 @@ __global__ void RenderSprites2DKernel(const T* __restrict__ sprites,
                                       const int n_channels){
 
   const int output_size = batch_size * img_height * img_width * n_channels;
-  const int sprites_batch_stride = max_sprites * sprite_height * sprite_width * (n_channels + 1);
-  const int sprites_sprite_stride = sprite_height * sprite_width * (n_channels + 1);
-  const int sprites_row_stride = sprite_width * (n_channels + 1);
+  const int sprites_batch_stride = max_sprites * sprite_height * sprite_width * (n_channels + 2);
+  const int sprites_sprite_stride = sprite_height * sprite_width * (n_channels + 2);
+  const int sprites_row_stride = sprite_width * (n_channels + 2);
 
   const int scales_batch_stride = 2 * max_sprites;
   const int offsets_batch_stride = 2 * max_sprites;
@@ -95,10 +101,14 @@ __global__ void RenderSprites2DKernel(const T* __restrict__ sprites,
     const T img_y_T = static_cast<T>(img_y);
     const T img_x_T = static_cast<T>(img_x);
 
-    T weighted_sum = background_alpha * backgrounds[index];
-    T alpha_sum = background_alpha;
+    T weighted_sum = 0.0;
+    T importance_sum = 0.0;
+    int n_writes = 0;
 
-    for (int sprite_id = 0; sprite_id < n_sprites[batch_id]; ++sprite_id) {
+    T bg = backgrounds[index];
+    T last_value = 0.0;
+
+    for(int sprite_id = 0; sprite_id < n_sprites[batch_id]; ++sprite_id) {
       const T scale_y = scales[batch_id * scales_batch_stride + sprite_id * 2];
       const T scale_x = scales[batch_id * scales_batch_stride + sprite_id * 2 + 1];
 
@@ -113,7 +123,8 @@ __global__ void RenderSprites2DKernel(const T* __restrict__ sprites,
                                  y > static_cast<T>(-1.0) &&
                                  x < sprite_width_T &&
                                  y < sprite_height_T;
-      if (within_bounds){
+      if(within_bounds){
+        n_writes++;
         const int fx = std::floor(static_cast<float>(x));
         const int fy = std::floor(static_cast<float>(y));
 
@@ -140,29 +151,53 @@ __global__ void RenderSprites2DKernel(const T* __restrict__ sprites,
                         dx * (one - dy) * alpha_fxcy +
                         (one - dx) * dy * alpha_cxfy;
 
+        const T importance_fxfy = (fx >= 0 && fy >= 0)
+                           ? GET_IMPORTANCE_POINT(fx, fy)
+                           : zero;
+        const T importance_cxcy = (cx <= sprite_width - 1 && cy <= sprite_height - 1)
+                           ? GET_IMPORTANCE_POINT(cx, cy)
+                           : zero;
+        const T importance_fxcy = (fx >= 0 && cy <= sprite_height - 1)
+                           ? GET_IMPORTANCE_POINT(fx, cy)
+                           : zero;
+        const T importance_cxfy = (cx <= sprite_width - 1 && fy >= 0)
+                           ? GET_IMPORTANCE_POINT(cx, fy)
+                           : zero;
+        const T importance = dx * dy * importance_fxfy +
+                             (one - dx) * (one - dy) * importance_cxcy +
+                             dx * (one - dy) * importance_fxcy +
+                             (one - dx) * dy * importance_cxfy;
+
         const T img_fxfy = (fx >= 0 && fy >= 0)
                            ? GET_SPRITE_POINT(fx, fy)
-                           : zero;
+                           : bg;
         const T img_cxcy = (cx <= sprite_width - 1 && cy <= sprite_height - 1)
                            ? GET_SPRITE_POINT(cx, cy)
-                           : zero;
+                           : bg;
         const T img_fxcy = (fx >= 0 && cy <= sprite_height - 1)
                            ? GET_SPRITE_POINT(fx, cy)
-                           : zero;
+                           : bg;
         const T img_cxfy = (cx <= sprite_width - 1 && fy >= 0)
                            ? GET_SPRITE_POINT(cx, fy)
-                           : zero;
+                           : bg;
         const T interp = dx * dy * img_fxfy +
                          (one - dx) * (one - dy) * img_cxcy +
                          dx * (one - dy) * img_fxcy +
                          (one - dx) * dy * img_cxfy;
 
-        weighted_sum += alpha * interp;
-        alpha_sum += alpha;
+        last_value = alpha * interp + (1-alpha) * bg;
+        weighted_sum += importance * last_value;
+        importance_sum += importance;
       }
     } // sprite_id
 
-    output[index] = weighted_sum / alpha_sum;
+    if(n_writes == 0){
+      output[index] = bg;
+    }else if(n_writes == 1){
+      output[index] = last_value;
+    }else{
+      output[index] = weighted_sum / importance_sum;
+    }
   }
 }
 
@@ -237,7 +272,7 @@ namespace {
             batch_id * sprites_batch_stride + \
             sprite_id * sprites_sprite_stride + \
             y * sprites_row_stride + \
-            x * (n_channels + 1) + \
+            x * (n_channels + 2) + \
             chan, \
             v)
 
@@ -246,8 +281,17 @@ namespace {
             batch_id * sprites_batch_stride + \
             sprite_id * sprites_sprite_stride + \
             y * sprites_row_stride + \
-            x * (n_channels + 1) + \
+            x * (n_channels + 2) + \
             n_channels, \
+            v)
+
+#define UPDATE_GRAD_IMPORTANCES(x, y, v) \
+  atomicAdd(grad_sprites + \
+            batch_id * sprites_batch_stride + \
+            sprite_id * sprites_sprite_stride + \
+            y * sprites_row_stride + \
+            x * (n_channels + 2) + \
+            n_channels + 1, \
             v)
 
 #define UPDATE_GRAD_SCALES_Y(v) \
@@ -300,9 +344,9 @@ __global__ void RenderSpritesGrad2DKernel(const T* __restrict__ sprites,
                                           const int n_channels){
 
   const int output_size = batch_size * img_height * img_width * n_channels;
-  const int sprites_batch_stride = max_sprites * sprite_height * sprite_width * (n_channels + 1);
-  const int sprites_sprite_stride = sprite_height * sprite_width * (n_channels + 1);
-  const int sprites_row_stride = sprite_width * (n_channels + 1);
+  const int sprites_batch_stride = max_sprites * sprite_height * sprite_width * (n_channels + 2);
+  const int sprites_sprite_stride = sprite_height * sprite_width * (n_channels + 2);
+  const int sprites_row_stride = sprite_width * (n_channels + 2);
 
   const int scales_batch_stride = 2 * max_sprites;
   const int offsets_batch_stride = 2 * max_sprites;
@@ -330,11 +374,12 @@ __global__ void RenderSpritesGrad2DKernel(const T* __restrict__ sprites,
     const T img_y_T = static_cast<T>(img_y);
     const T img_x_T = static_cast<T>(img_x);
 
-    const T background_alpha = 1.0;
-    T weighted_sum = background_alpha * backgrounds[batch_id * img_batch_stride +
-                                       img_y * img_row_stride +
-                                       img_x * n_channels + chan];
-    T alpha_sum = background_alpha;
+    T weighted_sum = 0.0;
+    T importance_sum = 0.0;
+    int n_writes = 0;
+    T bg = backgrounds[index];
+    T bg_sum = 0.0;
+    T alpha = 0.0;
 
     for (int sprite_id = 0; sprite_id < n_sprites[batch_id]; ++sprite_id) {
       const T scale_y = scales[batch_id * scales_batch_stride + sprite_id * 2];
@@ -352,6 +397,7 @@ __global__ void RenderSpritesGrad2DKernel(const T* __restrict__ sprites,
                                  x < sprite_width_T &&
                                  y < sprite_height_T;
       if (within_bounds){
+        n_writes++;
         const int fx = std::floor(static_cast<float>(x));
         const int fy = std::floor(static_cast<float>(y));
 
@@ -378,31 +424,57 @@ __global__ void RenderSpritesGrad2DKernel(const T* __restrict__ sprites,
                         dx * (one - dy) * alpha_fxcy +
                         (one - dx) * dy * alpha_cxfy;
 
+        const T importance_fxfy = (fx >= 0 && fy >= 0)
+                           ? GET_IMPORTANCE_POINT(fx, fy)
+                           : zero;
+        const T importance_cxcy = (cx <= sprite_width - 1 && cy <= sprite_height - 1)
+                           ? GET_IMPORTANCE_POINT(cx, cy)
+                           : zero;
+        const T importance_fxcy = (fx >= 0 && cy <= sprite_height - 1)
+                           ? GET_IMPORTANCE_POINT(fx, cy)
+                           : zero;
+        const T importance_cxfy = (cx <= sprite_width - 1 && fy >= 0)
+                           ? GET_IMPORTANCE_POINT(cx, fy)
+                           : zero;
+        const T importance = dx * dy * importance_fxfy +
+                             (one - dx) * (one - dy) * importance_cxcy +
+                             dx * (one - dy) * importance_fxcy +
+                             (one - dx) * dy * importance_cxfy;
+
+        bg_sum += importance * (1-alpha);
+
         const T img_fxfy = (fx >= 0 && fy >= 0)
                            ? GET_SPRITE_POINT(fx, fy)
-                           : zero;
+                           : bg;
         const T img_cxcy = (cx <= sprite_width - 1 && cy <= sprite_height - 1)
                            ? GET_SPRITE_POINT(cx, cy)
-                           : zero;
+                           : bg;
         const T img_fxcy = (fx >= 0 && cy <= sprite_height - 1)
                            ? GET_SPRITE_POINT(fx, cy)
-                           : zero;
+                           : bg;
         const T img_cxfy = (cx <= sprite_width - 1 && fy >= 0)
                            ? GET_SPRITE_POINT(cx, fy)
-                           : zero;
+                           : bg;
         const T interp = dx * dy * img_fxfy +
                          (one - dx) * (one - dy) * img_cxcy +
                          dx * (one - dy) * img_fxcy +
                          (one - dx) * dy * img_cxfy;
 
-        weighted_sum += alpha * interp;
-        alpha_sum += alpha;
+        const T value = alpha * interp + (1-alpha) * bg;
+        weighted_sum += importance * value;
+        importance_sum += importance;
       }
     } // sprite_id - forward pass
 
-    T go = grad_output[batch_id * img_batch_stride +
-                       img_y * img_row_stride +
-                       img_x * n_channels + chan];
+    T go = grad_output[index];
+
+    if(n_writes == 0){
+        grad_backgrounds[index] = go;
+    }else if(n_writes == 1){
+        grad_backgrounds[index] = go * (1-alpha);
+    }else{
+        grad_backgrounds[index] = go * bg_sum / importance_sum;
+    }
 
     // second forward pass
     for (int sprite_id = 0; sprite_id < n_sprites[batch_id]; ++sprite_id) {
@@ -447,22 +519,41 @@ __global__ void RenderSpritesGrad2DKernel(const T* __restrict__ sprites,
                         dx * (one - dy) * alpha_fxcy +
                         (one - dx) * dy * alpha_cxfy;
 
+        const T importance_fxfy = (fx >= 0 && fy >= 0)
+                           ? GET_IMPORTANCE_POINT(fx, fy)
+                           : zero;
+        const T importance_cxcy = (cx <= sprite_width - 1 && cy <= sprite_height - 1)
+                           ? GET_IMPORTANCE_POINT(cx, cy)
+                           : zero;
+        const T importance_fxcy = (fx >= 0 && cy <= sprite_height - 1)
+                           ? GET_IMPORTANCE_POINT(fx, cy)
+                           : zero;
+        const T importance_cxfy = (cx <= sprite_width - 1 && fy >= 0)
+                           ? GET_IMPORTANCE_POINT(cx, fy)
+                           : zero;
+        const T importance = dx * dy * importance_fxfy +
+                             (one - dx) * (one - dy) * importance_cxcy +
+                             dx * (one - dy) * importance_fxcy +
+                             (one - dx) * dy * importance_cxfy;
+
         const T img_fxfy = (fx >= 0 && fy >= 0)
                            ? GET_SPRITE_POINT(fx, fy)
-                           : zero;
+                           : bg;
         const T img_cxcy = (cx <= sprite_width - 1 && cy <= sprite_height - 1)
                            ? GET_SPRITE_POINT(cx, cy)
-                           : zero;
+                           : bg;
         const T img_fxcy = (fx >= 0 && cy <= sprite_height - 1)
                            ? GET_SPRITE_POINT(fx, cy)
-                           : zero;
+                           : bg;
         const T img_cxfy = (cx <= sprite_width - 1 && fy >= 0)
                            ? GET_SPRITE_POINT(cx, fy)
-                           : zero;
+                           : bg;
         const T interp = dx * dy * img_fxfy +
                          (one - dx) * (one - dy) * img_cxcy +
                          dx * (one - dy) * img_fxcy +
                          (one - dx) * dy * img_cxfy;
+
+        const T value = alpha * interp + (1-alpha) * bg;
 
         const T grad_y_wrt_scale_y = -sprite_height_T * ((img_y_T + 0.5) / img_height_T - offset_y) / (scale_y * scale_y);
         const T grad_x_wrt_scale_x = -sprite_width_T * ((img_x_T + 0.5) / img_width_T - offset_x) / (scale_x * scale_x);
@@ -475,7 +566,10 @@ __global__ void RenderSpritesGrad2DKernel(const T* __restrict__ sprites,
         const T alpha_y_factor = dx * (alpha_fxcy - alpha_fxfy) + (1 - dx) * (alpha_cxcy - alpha_cxfy);
         const T alpha_x_factor = dy * (alpha_cxfy - alpha_fxfy) + (1 - dy) * (alpha_cxcy - alpha_fxcy);
 
-        const T alpha_premult = go * (interp / alpha_sum - weighted_sum / (alpha_sum * alpha_sum));
+        T alpha_premult = go * (interp - bg);
+        if(n_writes > 1){
+            alpha_premult *= importance / importance_sum;
+        }
 
         UPDATE_GRAD_SCALES_Y(alpha_premult * alpha_y_factor * grad_y_wrt_scale_y);
         UPDATE_GRAD_SCALES_X(alpha_premult * alpha_x_factor * grad_x_wrt_scale_x);
@@ -495,9 +589,40 @@ __global__ void RenderSpritesGrad2DKernel(const T* __restrict__ sprites,
           UPDATE_GRAD_ALPHAS(cx, fy, alpha_premult * (1-dx) * dy);
         }
 
+        // ------ update gradient through importance ------
+
+        const T importance_y_factor = dx * (importance_fxcy - importance_fxfy) + (1 - dx) * (importance_cxcy - importance_cxfy);
+        const T importance_x_factor = dy * (importance_cxfy - importance_fxfy) + (1 - dy) * (importance_cxcy - importance_fxcy);
+
+        T importance_premult = 0.0;
+        if(n_writes > 1){
+            importance_premult = go * (value / importance_sum - weighted_sum / (importance_sum * importance_sum));
+        }
+
+        UPDATE_GRAD_SCALES_Y(importance_premult * importance_y_factor * grad_y_wrt_scale_y);
+        UPDATE_GRAD_SCALES_X(importance_premult * importance_x_factor * grad_x_wrt_scale_x);
+        UPDATE_GRAD_OFFSETS_Y(importance_premult * importance_y_factor * grad_y_wrt_offset_y);
+        UPDATE_GRAD_OFFSETS_X(importance_premult * importance_x_factor * grad_x_wrt_offset_x);
+
+        if (fx >= 0 && fy >= 0) {
+          UPDATE_GRAD_IMPORTANCES(fx, fy, importance_premult * dx * dy);
+        }
+        if (cx <= sprite_width - 1 && cy <= sprite_height - 1) {
+          UPDATE_GRAD_IMPORTANCES(cx, cy, importance_premult * (1-dx) * (1-dy));
+        }
+        if (fx >= 0 && cy <= sprite_height - 1) {
+          UPDATE_GRAD_IMPORTANCES(fx, cy, importance_premult * dx * (1-dy));
+        }
+        if (cx <= sprite_width - 1 && fy >= 0) {
+          UPDATE_GRAD_IMPORTANCES(cx, fy, importance_premult * (1-dx) * dy);
+        }
+
         // ------ update gradient through sprites ------
 
-        const T sprite_premult = go * alpha / alpha_sum;
+        T sprite_premult = go * alpha;
+        if(n_writes > 1){
+            sprite_premult *= importance / importance_sum;
+        }
 
         const T sprite_y_factor = dx * (img_fxcy - img_fxfy) + (1 - dx) * (img_cxcy - img_cxfy);
         const T sprite_x_factor = dy * (img_cxfy - img_fxfy) + (1 - dy) * (img_cxcy - img_fxcy);
@@ -520,11 +645,7 @@ __global__ void RenderSpritesGrad2DKernel(const T* __restrict__ sprites,
           UPDATE_GRAD_SPRITES(cx, fy, sprite_premult * (1-dx) * dy);
         }
       }
-    } // sprite_id - backward pass
-
-    grad_backgrounds[batch_id * img_batch_stride +
-                     img_y * img_row_stride +
-                     img_x * n_channels + chan] = go * 1.0 / alpha_sum;
+    } // sprite_id - second forward pass
   }
 }
 
@@ -571,7 +692,7 @@ struct RenderSpritesGrad2DFunctor<GPUDevice, T>{
 
                    const int n_channels){
 
-    const int grad_sprites_size = batch_size * max_sprites * sprite_height * sprite_width * (n_channels + 1);
+    const int grad_sprites_size = batch_size * max_sprites * sprite_height * sprite_width * (n_channels + 2);
     const int grad_n_sprites_size = batch_size;
     const int grad_scales_size = batch_size * max_sprites * 2;
     const int grad_offsets_size = batch_size * max_sprites * 2;

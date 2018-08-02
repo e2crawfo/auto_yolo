@@ -473,10 +473,9 @@ class YoloAir_Network(VariationalAutoencoder):
             obj_alpha = float(self.fixed_values["alpha"]) * tf.ones_like(obj_alpha)
 
         obj_alpha *= tf.reshape(self._tensors['obj'], (self.batch_size, self.HWB, 1, 1, 1))
-        obj_alpha = tf.exp(obj_alpha * 5 + (1-obj_alpha) * -5)
-        obj_alpha *= tf.reshape(z, (self.batch_size, self.HWB, 1, 1, 1))
+        obj_importance = tf.maximum(obj_alpha * tf.reshape(z, (self.batch_size, self.HWB, 1, 1, 1)), 0.01)
 
-        objects = tf.concat([obj_img, obj_alpha], axis=-1)
+        objects = tf.concat([obj_img, obj_alpha, obj_importance], axis=-1)
 
         # --- Compose images ---
 

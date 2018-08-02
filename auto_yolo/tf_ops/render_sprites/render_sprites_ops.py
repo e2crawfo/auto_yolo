@@ -58,7 +58,7 @@ def render_sprites(sprites, n_sprites, scales, offsets, backgrounds, name="rende
 
   Args:
     sprites: Tensor of shape `[batch_size, n_sprites, sprite_height, sprite_width, n_channels+1]`
-      The final channel is an alpha channel and must be between 0 and 1.
+      The final channel is priority channel and must be > 0.
     n_sprites: Tensor of shape `[batch_size,]`
       i-th entry gives number of active sprites for the i-th image (the first i sprites are used)
     scales: Tensor of shape `[batch_size, n_sprites, 2]`

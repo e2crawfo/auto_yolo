@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 from sklearn.cluster import k_means
 import collections
+from matplotlib.colors import to_rgb
 
 from dps import cfg
 from dps.updater import Updater as _Updater
@@ -536,6 +537,9 @@ class Updater(_Updater):
 
         elif cfg.background_cfg.mode == "mode":
             self.background = self.inp_mode[:, None, None, :] * tf.ones_like(inp)
+        elif cfg.background_cfg.mode == "colour":
+            rgb = np.array(to_rgb(cfg.background_cfg.colour))[None, None, None, :]
+            self.background = rgb * tf.ones_like(inp)
         else:
             self.background = tf.zeros_like(inp)
 

@@ -30,6 +30,9 @@ config = dict(
     # alpha_logit_bias=1.0,
     # use_concrete_kl=True,
     # final_count_prior_log_odds=1000.0,
+    colours="black",
+    background_colours="white",
+    background_cfg=dict(mode="colour", colour="white"),
 )
 
 envs.run_experiment(

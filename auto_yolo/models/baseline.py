@@ -174,8 +174,9 @@ class Baseline_Network(VariationalAutoencoder):
             objects, (self.batch_size, max_objects, *self.object_shape, self.image_depth,))
 
         objects = tf.reshape(objects, (self.batch_size, max_objects, *self.object_shape, self.image_depth,))
-        alpha = 10 * self._tensors["obj"][:, :, :, None, None] * tf.ones_like(objects[:, :, :, :, :1])
-        objects = tf.concat([objects, alpha], axis=-1)
+        alpha = self._tensors["obj"][:, :, :, None, None] * tf.ones_like(objects[:, :, :, :, :1])
+        importance = tf.ones_like(objects[:, :, :, :, :1])
+        objects = tf.concat([objects, alpha, importance], axis=-1)
 
         # -- Reconstruct image ---
 
