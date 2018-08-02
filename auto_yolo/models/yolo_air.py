@@ -62,6 +62,7 @@ class YoloAir_Network(VariationalAutoencoder):
     backbone = None
     box_network = None
     attr_network = None
+    z_network = None
     obj_network = None
     object_encoder = None
     object_decoder = None
@@ -112,8 +113,8 @@ class YoloAir_Network(VariationalAutoencoder):
         if not self.noisy:
             std = tf.zeros_like(std)
 
-        cy_mean, cx_mean, h_mean, w_mean, z_mean = tf.split(mean, 5, axis=-1)
-        cy_std, cx_std, h_std, w_std, z_std = tf.split(std, 5, axis=-1)
+        cy_mean, cx_mean, h_mean, w_mean = tf.split(mean, 4, axis=-1)
+        cy_std, cx_std, h_std, w_std = tf.split(std, 4, axis=-1)
 
         cy_logits, cy_kl = normal_vae(cy_mean, cy_std, self.yx_prior_mean, self.yx_prior_std)
         cx_logits, cx_kl = normal_vae(cx_mean, cx_std, self.yx_prior_mean, self.yx_prior_std)
@@ -121,15 +122,10 @@ class YoloAir_Network(VariationalAutoencoder):
         h_logits, h_kl = normal_vae(h_mean, h_std, self.hw_prior_mean, self.hw_prior_std)
         w_logits, w_kl = normal_vae(w_mean, w_std, self.hw_prior_mean, self.hw_prior_std)
 
-        z_mean = self.training_wheels * tf.stop_gradient(z_mean) + (1-self.training_wheels) * z_mean
-        z_std = self.training_wheels * tf.stop_gradient(z_std) + (1-self.training_wheels) * z_std
-        z_logits, z_kl = normal_vae(z_mean, z_std, self.z_prior_mean, self.z_prior_std)
-
         cell_y = tf.nn.sigmoid(tf.clip_by_value(cy_logits, -10, 10))
         cell_x = tf.nn.sigmoid(tf.clip_by_value(cx_logits, -10, 10))
         h = tf.nn.sigmoid(tf.clip_by_value(h_logits, -10, 10))
         w = tf.nn.sigmoid(tf.clip_by_value(w_logits, -10, 10))
-        z = tf.exp(tf.clip_by_value(z_logits, -5, 5))
 
         assert self.max_yx > self.min_yx
 
@@ -157,41 +153,29 @@ class YoloAir_Network(VariationalAutoencoder):
             w = tf.stop_gradient(w)
             w_kl = tf.stop_gradient(w_kl)
 
-        if "z" in self.no_gradient:
-            z = tf.stop_gradient(z)
-            z_kl = tf.stop_gradient(z_kl)
-
-        if "z" in self.fixed_values:
-            z = self.fixed_values['z'] * tf.ones_like(z)
-            z_kl = tf.zeros_like(z_kl)
-
-        box = tf.concat([cell_y, cell_x, h, w, z], axis=-1)
-        box_kl = tf.concat([cy_kl, cx_kl, h_kl, w_kl, z_kl], axis=-1)
+        box = tf.concat([cell_y, cell_x, h, w], axis=-1)
+        box_kl = tf.concat([cy_kl, cx_kl, h_kl, w_kl], axis=-1)
 
         return dict(
             cell_y_mean=cy_mean,
             cell_x_mean=cx_mean,
             h_mean=h_mean,
             w_mean=w_mean,
-            z_mean=z_mean,
 
             cell_y_std=cy_std,
             cell_x_std=cx_std,
             h_std=h_std,
             w_std=w_std,
-            z_std=z_std,
 
             cell_y=cell_y,
             cell_x=cell_x,
             h=h,
             w=w,
-            z=z,
 
             cell_y_kl=cy_kl,
             cell_x_kl=cx_kl,
             h_kl=h_kl,
             w_kl=w_kl,
-            z_kl=z_kl,
 
             box_kl=box_kl,
             box=box,
@@ -201,7 +185,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
         # --- Compute sprite locations from box parameters ---
 
-        cell_y, cell_x, height, width, _ = tf.split(boxes, 5, axis=-1)
+        cell_y, cell_x, height, width = tf.split(boxes, 4, axis=-1)
 
         # box height and width normalized to image height and width
         ys = height * self.anchor_boxes[b, 0] / self.image_height
@@ -307,7 +291,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
         # --- set-up the edge element ---
 
-        sizes = [4, 1, self.A, 1]
+        sizes = [4, self.A, 1, 1]
         sigmoids = [True, False, False, True]
         total_sample_size = sum(sizes)
 
@@ -346,7 +330,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
                     layer_inp = tf.concat([_backbone_output, context], axis=1)
                     n_features = self.n_passthrough_features
-                    output_size = 10
+                    output_size = 8
 
                     network_output = self.box_network(layer_inp, output_size + n_features, self.is_training)
                     rep_input, features = tf.split(network_output, (output_size, n_features), axis=1)
@@ -385,6 +369,45 @@ class YoloAir_Network(VariationalAutoencoder):
                         _tensors[key][h, w, b] = value
                     partial_program = tf.concat([partial_program, built['attr']], axis=1)
 
+                    # --- z ---
+
+                    if self.z_network is None:
+                        self.z_network = self.sequential_cfg.build_next_step(scope="z_sequential_network")
+                        if "z" in self.fixed_weights:
+                            self.z_network.fix_variables()
+
+                    layer_inp = tf.concat([_backbone_output, context, features, partial_program], axis=1)
+                    n_features = self.n_passthrough_features
+
+                    network_output = self.z_network(layer_inp, 2 + n_features, self.is_training)
+                    z_mean, z_std, features = tf.split(network_output, (1, 1, n_features), axis=1)
+                    if not self.noisy:
+                        z_std = tf.zeros_like(z_std)
+
+                    z_mean = self.training_wheels * tf.stop_gradient(z_mean) + (1-self.training_wheels) * z_mean
+                    z_std = self.training_wheels * tf.stop_gradient(z_std) + (1-self.training_wheels) * z_std
+                    z_logits, z_kl = normal_vae(z_mean, z_std, self.z_prior_mean, self.z_prior_std)
+                    z = tf.exp(tf.clip_by_value(z_logits, -10, 10))
+
+                    if "z" in self.no_gradient:
+                        z = tf.stop_gradient(z)
+                        z_kl = tf.stop_gradient(z_kl)
+
+                    if "z" in self.fixed_values:
+                        z = self.fixed_values['z'] * tf.ones_like(z)
+                        z_kl = tf.zeros_like(z_kl)
+
+                    built = dict(
+                        z_mean=z_mean,
+                        z_std=z_std,
+                        z=z,
+                        z_kl=z_kl,
+                    )
+
+                    for key, value in built.items():
+                        _tensors[key][h, w, b] = value
+                    partial_program = tf.concat([partial_program, built['z']], axis=1)
+
                     # --- obj ---
 
                     if self.obj_network is None:
@@ -400,6 +423,8 @@ class YoloAir_Network(VariationalAutoencoder):
                     for key, value in built.items():
                         _tensors[key][h, w, b] = value
                     partial_program = tf.concat([partial_program, built['obj']], axis=1)
+
+                    # --- final ---
 
                     program[h, w, b] = partial_program
                     assert program[h, w, b].shape[1] == total_sample_size
@@ -421,7 +446,7 @@ class YoloAir_Network(VariationalAutoencoder):
         # --- Compute sprite locations from box parameters ---
 
         # All in cell-local co-ordinates, should be invariant to image size.
-        cell_y, cell_x, h, w, z = tf.split(self._tensors['box'], 5, axis=-1)
+        cell_y, cell_x, h, w = tf.split(self._tensors['box'], 4, axis=-1)
 
         anchor_box_h = self.anchor_boxes[:, 0].reshape(1, 1, 1, self.B, 1)
         anchor_box_w = self.anchor_boxes[:, 1].reshape(1, 1, 1, self.B, 1)
@@ -473,6 +498,8 @@ class YoloAir_Network(VariationalAutoencoder):
             obj_alpha = float(self.fixed_values["alpha"]) * tf.ones_like(obj_alpha)
 
         obj_alpha *= tf.reshape(self._tensors['obj'], (self.batch_size, self.HWB, 1, 1, 1))
+
+        z = self._tensors['z']
         obj_importance = tf.maximum(obj_alpha * tf.reshape(z, (self.batch_size, self.HWB, 1, 1, 1)), 0.01)
 
         objects = tf.concat([obj_img, obj_alpha, obj_importance], axis=-1)
@@ -680,7 +707,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
 class YoloAir_RenderHook(RenderHook):
     def __call__(self, updater):
-        self.fetches = "obj inp output objects n_objects normalized_box input_glimpses"
+        self.fetches = "obj z inp output objects n_objects normalized_box input_glimpses"
 
         network = updater.network
         if "n_annotations" in network._tensors:
@@ -803,6 +830,7 @@ class YoloAir_RenderHook(RenderHook):
         input_glimpses = fetched.get('input_glimpses', None)
         objects = fetched['objects']
         obj = fetched['obj']
+        z = fetched['z']
 
         on_colour = np.array(to_rgb("xkcd:azure"))
         off_colour = np.array(to_rgb("xkcd:red"))
@@ -815,6 +843,7 @@ class YoloAir_RenderHook(RenderHook):
                 for w in range(W):
                     for b in range(B):
                         _obj = obj[idx, h, w, b, 0]
+                        _z = z[idx, h, w, b, 0]
 
                         ax = axes[3*h, w * B + b]
                         self.imshow(ax, objects[idx, h, w, b, :, :, :3])
@@ -832,7 +861,7 @@ class YoloAir_RenderHook(RenderHook):
                         ax = axes[3*h+1, w * B + b]
                         self.imshow(ax, objects[idx, h, w, b, :, :, 3], cmap="gray")
 
-                        ax.set_title("obj={}, b={}".format(_obj, b))
+                        ax.set_title("obj={}, z={}, b={}".format(_obj, _z, b))
 
                         ax = axes[3*h+2, w * B + b]
                         ax.set_title("input glimpse")
