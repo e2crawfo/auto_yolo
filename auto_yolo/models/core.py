@@ -10,7 +10,7 @@ from dps.utils import Param, prime_factors
 from dps.utils.tf import (
     ConvNet, build_gradient_train_op, tf_mean_sum,
     ScopedFunction, build_scheduled_value, MLP,
-    apply_mask_and_group_at_front)
+    apply_mask_and_group_at_front, FIXED_COLLECTION)
 from dps.updater import DataManager
 
 
@@ -433,7 +433,7 @@ class Updater(_Updater):
     def __init__(self, env, scope=None, **kwargs):
         self.obs_shape = env.datasets['train'].obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
-        self.network = cfg.build_network(env, scope="network")
+        self.network = cfg.build_network(env, self, scope="network")
 
         super(Updater, self).__init__(env, scope=scope, **kwargs)
 
@@ -463,7 +463,7 @@ class Updater(_Updater):
 
         return dict(train=(record, summary))
 
-    def _evaluate(self, batch_size, mode):
+    def _evaluate(self, _batch_size, mode):
         if mode == "val":
             feed_dict = self.data_manager.do_val()
         elif mode == "test":
@@ -487,6 +487,8 @@ class Updater(_Updater):
             eval_record = self.evaluator.eval(eval_fetched)
             _record.update(eval_record)
 
+            batch_size = _record['batch_size']
+
             for k, v in _record.items():
                 record[k] += batch_size * v
 
@@ -502,6 +504,65 @@ class Updater(_Updater):
 
         return record, summary
 
+    def compute_validation_pixelwise_mean(self):
+        sess = tf.get_default_session()
+
+        mean = np.array([0, 0, 0])
+        mean = None
+        n_points = 0
+        feed_dict = self.data_manager.do_val()
+
+        while True:
+            try:
+                inp = sess.run(self.network.inp, feed_dict=feed_dict)
+            except tf.errors.OutOfRangeError:
+                break
+
+            n_new = inp.shape[0]
+            if mean is None:
+                mean = np.mean(inp, axis=0)
+            else:
+                mean = mean * (n_points / (n_points + n_new)) + np.sum(inp, axis=0) / (n_points + n_new)
+            n_points += n_new
+        return mean
+
+    def compute_validation_mean(self):
+        sess = tf.get_default_session()
+
+        mean = np.array([0, 0, 0])
+        n_points = 0
+        feed_dict = self.data_manager.do_val()
+
+        while True:
+            try:
+                inp = sess.run(self.network.inp, feed_dict=feed_dict)
+            except tf.errors.OutOfRangeError:
+                break
+
+            n_new = np.product(inp.shape[:3])
+            mean = mean * (n_points / (n_points + n_new)) + np.sum(inp, axis=(0, 1, 2)) / (n_points + n_new)
+            n_points += n_new
+        return mean
+
+    def compute_validation_mode(self):
+        sess = tf.get_default_session()
+
+        feed_dict = self.data_manager.do_val()
+        counter = collections.Counter()
+
+        while True:
+            try:
+                inp = sess.run(self.network.inp, feed_dict=feed_dict)
+            except tf.errors.OutOfRangeError:
+                break
+
+            transformed = (255. * inp).astype('i')
+            counter.update(tuple(t) for t in transformed.reshape(-1, 3))
+
+        most_common = counter.most_common(1)[0][0]
+
+        return np.array(most_common) / 255.
+
     def _build_graph(self):
         self.data_manager = DataManager(self.env.datasets['train'],
                                         self.env.datasets['val'],
@@ -510,41 +571,8 @@ class Updater(_Updater):
         self.data_manager.build_graph()
 
         inp, *labels = self.data_manager.iterator.get_next()
-
-        if cfg.background_cfg.mode == "static":
-            with cfg.background_cfg.static_cfg:
-                from kmodes.kmodes import KModes
-                print("Clustering...")
-                print(cfg.background_cfg.static_cfg)
-
-                cluster_data = self.env.datasets["train"].X
-                image_shape = cluster_data.shape[1:]
-                indices = np.random.choice(
-                    cluster_data.shape[0], replace=False, size=cfg.n_clustering_examples)
-                cluster_data = cluster_data[indices, ...]
-                cluster_data = cluster_data.reshape(cluster_data.shape[0], -1)
-
-                if cfg.use_k_modes:
-                    km = KModes(n_clusters=cfg.n_clusters, init='Huang', n_init=1, verbose=1)
-                    km.fit(cluster_data)
-                    centroids = km.cluster_centroids_ / 255.
-                else:
-                    cluster_data = cluster_data / 255.
-                    result = k_means(cluster_data, cfg.n_clusters)
-                    centroids = result[0]
-                centroids = np.clip(centroids, 0.0, 1.0)
-                centroids = centroids.reshape(cfg.n_clusters, *image_shape)
-
-        elif cfg.background_cfg.mode == "mode":
-            self.background = self.inp_mode[:, None, None, :] * tf.ones_like(inp)
-        elif cfg.background_cfg.mode == "colour":
-            rgb = np.array(to_rgb(cfg.background_cfg.colour))[None, None, None, :]
-            self.background = rgb * tf.ones_like(inp)
-        else:
-            self.background = tf.zeros_like(inp)
-
-        network_outputs = self.network(
-            (inp, labels, self.background), self.data_manager.is_training)
+        self.inp = inp
+        network_outputs = self.network((inp, labels), self.data_manager.is_training)
 
         network_tensors = network_outputs["tensors"]
         network_recorded_tensors = network_outputs["recorded_tensors"]
@@ -623,13 +651,17 @@ class VariationalAutoencoder(ScopedFunction):
 
     noisy = Param()
 
+    needs_background = True
+
     representation_network = None
     math_input_network = None
     math_network = None
 
     eval_funcs = dict()
 
-    def __init__(self, env, scope=None, **kwargs):
+    def __init__(self, env, updater, scope=None, **kwargs):
+        self.updater = updater
+
         self.obs_shape = env.datasets['train'].obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
 
@@ -690,13 +722,12 @@ class VariationalAutoencoder(ScopedFunction):
 
     def _call(self, inp, is_training):
         self.original_inp = inp
-        inp, labels, background = inp
+        inp, labels = inp
 
         self._tensors = dict(
             inp=inp,
             is_training=is_training,
             float_is_training=tf.to_float(is_training),
-            background=background,
             batch_size=tf.shape(inp)[0],
         )
 
@@ -711,6 +742,8 @@ class VariationalAutoencoder(ScopedFunction):
         self.losses = dict()
 
         with tf.variable_scope("representation", reuse=self.initialized):
+            if self.needs_background:
+                self.build_background()
             self.build_representation()
 
         if self.train_math:
@@ -722,6 +755,62 @@ class VariationalAutoencoder(ScopedFunction):
             recorded_tensors=self.recorded_tensors,
             losses=self.losses,
         )
+
+    def build_background(self):
+        if self.needs_background:
+            if cfg.background_cfg.mode == "static":
+                raise Exception("NotImplemented")
+
+                with cfg.background_cfg.static_cfg:
+                    from kmodes.kmodes import KModes
+                    print("Clustering...")
+                    print(cfg.background_cfg.static_cfg)
+
+                    cluster_data = self.env.datasets["train"].X
+                    image_shape = cluster_data.shape[1:]
+                    indices = np.random.choice(
+                        cluster_data.shape[0], replace=False, size=cfg.n_clustering_examples)
+                    cluster_data = cluster_data[indices, ...]
+                    cluster_data = cluster_data.reshape(cluster_data.shape[0], -1)
+
+                    if cfg.use_k_modes:
+                        km = KModes(n_clusters=cfg.n_clusters, init='Huang', n_init=1, verbose=1)
+                        km.fit(cluster_data)
+                        centroids = km.cluster_centroids_ / 255.
+                    else:
+                        cluster_data = cluster_data / 255.
+                        result = k_means(cluster_data, cfg.n_clusters)
+                        centroids = result[0]
+                    centroids = np.clip(centroids, 0.0, 1.0)
+                    centroids = centroids.reshape(cfg.n_clusters, *image_shape)
+
+            elif cfg.background_cfg.mode == "pixelwise_mean":
+                mean = self.updater.compute_validation_pixelwise_mean()
+                background = mean[None, :, :, :] * tf.ones_like(self.inp)
+
+            elif cfg.background_cfg.mode == "mean":
+                mean = self.updater.compute_validation_mean()
+                background = mean[None, None, None, :] * tf.ones_like(self.inp)
+
+            elif cfg.background_cfg.mode == "mode":
+                mode = self.updater.compute_validation_mode()
+                background = mode[None, None, None, :] * tf.ones_like(self.inp)
+
+            elif cfg.background_cfg.mode == "colour":
+                rgb = np.array(to_rgb(cfg.background_cfg.colour))[None, None, None, :]
+                background = rgb * tf.ones_like(self.inp)
+
+            elif cfg.background_cfg.mode == "learn_solid":
+                # Learn a solid colour for the background
+                self.solid_background_logits = tf.get_variable("solid_background", initializer=[0.0, 0.0, 0.0])
+                if "background" in self.fixed_weights:
+                    tf.add_to_collection(FIXED_COLLECTION, self.solid_background_logits)
+                solid_background = tf.nn.sigmoid(10 * self.solid_background_logits)
+                background = solid_background[None, None, None, :] * tf.ones_like(self.inp)
+            else:
+                background = tf.zeros_like(self.inp)
+
+            self._tensors["background"] = background
 
     def build_math(self):
         # --- init modules ---

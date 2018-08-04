@@ -67,8 +67,8 @@ class YoloAir_Network(VariationalAutoencoder):
     object_encoder = None
     object_decoder = None
 
-    def __init__(self, env, scope=None, **kwargs):
-        super(YoloAir_Network, self).__init__(env, scope=scope, **kwargs)
+    def __init__(self, env, updater, scope=None, **kwargs):
+        super(YoloAir_Network, self).__init__(env, updater, scope=scope, **kwargs)
 
         self.H = int(np.ceil(self.image_height / self.pixels_per_cell[0]))
         self.W = int(np.ceil(self.image_width / self.pixels_per_cell[1]))
@@ -239,6 +239,9 @@ class YoloAir_Network(VariationalAutoencoder):
         if "obj" in self.no_gradient:
             obj = tf.stop_gradient(obj)
 
+        if "obj" in self.fixed_values:
+            obj = self.fixed_values['obj'] * tf.ones_like(obj)
+
         return dict(
             obj=obj,
             raw_obj=raw_obj,
@@ -381,13 +384,14 @@ class YoloAir_Network(VariationalAutoencoder):
 
                     network_output = self.z_network(layer_inp, 2 + n_features, self.is_training)
                     z_mean, z_std, features = tf.split(network_output, (1, 1, n_features), axis=1)
+                    z_std = tf.exp(z_std)
                     if not self.noisy:
                         z_std = tf.zeros_like(z_std)
 
                     z_mean = self.training_wheels * tf.stop_gradient(z_mean) + (1-self.training_wheels) * z_mean
                     z_std = self.training_wheels * tf.stop_gradient(z_std) + (1-self.training_wheels) * z_std
                     z_logits, z_kl = normal_vae(z_mean, z_std, self.z_prior_mean, self.z_prior_std)
-                    z = tf.exp(tf.clip_by_value(z_logits, -10, 10))
+                    z = 4 * tf.nn.sigmoid(tf.clip_by_value(z_logits, -10, 10))
 
                     if "z" in self.no_gradient:
                         z = tf.stop_gradient(z)
@@ -615,16 +619,6 @@ class YoloAir_Network(VariationalAutoencoder):
         self._tensors["pred_n_objects"] = tf.reduce_sum(self._tensors['obj'], axis=(1, 2, 3, 4))
         self._tensors["pred_n_objects_hard"] = tf.reduce_sum(
             tf.round(self._tensors['obj']), axis=(1, 2, 3, 4))
-
-        if self.object_encoder is None:
-            self.object_encoder = cfg.build_object_encoder(scope="object_encoder")
-            if "object_encoder" in self.fixed_weights:
-                self.object_encoder.fix_variables()
-
-        if self.object_decoder is None:
-            self.object_decoder = cfg.build_object_decoder(scope="object_decoder")
-            if "object_decoder" in self.fixed_weights:
-                self.object_decoder.fix_variables()
 
         self._build_program_interpreter()
 

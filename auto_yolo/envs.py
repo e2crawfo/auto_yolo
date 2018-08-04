@@ -6,6 +6,7 @@ from dps.datasets import (
     VisualArithmeticDataset)
 from dps.datasets.xo import XO_RewardClassificationDataset
 from dps.datasets.shapes import ShapesDataset
+from dps.datasets.clevr import ClevrDataset
 from dps.utils import Config, pdb_postmortem
 from dps.train import training_loop
 from dps.hyper import build_and_submit
@@ -176,6 +177,19 @@ class Nips2018Shapes(object):
     def close(self):
         pass
 
+
+class Nips2018Clevr(object):
+    def __init__(self):
+        train_seed, val_seed, test_seed = 0, 1, 2
+
+        train = ClevrDataset(clevr_kind="train", n_examples=cfg.n_train, seed=train_seed)
+        val = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=val_seed)
+        test = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=test_seed)
+
+        self.datasets = dict(train=train, val=val, test=test)
+
+    def close(self):
+        pass
 
 
 env_config = Config(
@@ -371,6 +385,10 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
             image_shape=(48, 48),
             shapes="green,circle blue,circle orange,circle teal,circle red,circle black,circle",
             background_colours="white",
+        )
+    elif task == "clevr":
+        config.update(
+            build_env=Nips2018Clevr, image_shape=(80, 120), postprocessing="random", tile_shape=(36, 36),
         )
     else:
         raise Exception("Unknown task `{}`".format(task))

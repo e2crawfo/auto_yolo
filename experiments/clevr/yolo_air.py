@@ -30,19 +30,19 @@ durations = dict(
 )
 
 config = dict(
-    n_train=16000,
-    background_cfg=dict(mode="mode"),
+    n_train=100,
+    background_cfg=dict(mode="pixelwise_mean"),
     # background_cfg=dict(mode="colour", colour="white"),
-    shapes="black,circle blue,circle green,square",
-    image_shape=(36, 36),
     obj_logit_scale=1.0,
     alpha_logit_scale=1.0,
     alpha_logit_bias=1.0,
     obj_temp=1.0,
     training_wheels=0.0,
+    postprocessing="random",
+    tile_shape=(36, 36),
 )
 
 envs.run_experiment(
-    "test", config, readme, alg="yolo_air",
-    task="shapes", durations=durations, distributions=distributions,
+    "test_clevr", config, readme, alg="yolo_air",
+    task="clevr", durations=durations, distributions=distributions,
 )

@@ -722,7 +722,7 @@ struct RenderSpritesGrad2DFunctor<GPUDevice, T>{
       return;
     }
 
-    // shared memoy calculations
+    // shared memory calculations
     // const int max_bytes_per_block = 49152;  // 48 KB * 1024. (48KB is maximum logical shared memory/block)
     // const int required_bytes_per_thread = 4 * (max_sprites + 1);
     // const int max_threads_per_block = max_bytes_per_block / required_bytes_per_thread;

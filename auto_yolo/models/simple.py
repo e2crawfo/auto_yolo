@@ -11,6 +11,7 @@ from auto_yolo.models.core import loss_builders, normal_vae, VariationalAutoenco
 class SimpleVAE(VariationalAutoencoder):
     encoder = None
     decoder = None
+    needs_background = False
 
     def build_representation(self):
         # --- init modules ---
