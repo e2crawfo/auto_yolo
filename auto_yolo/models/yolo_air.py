@@ -10,7 +10,7 @@ from dps import cfg
 from dps.utils import Param
 from dps.utils.tf import tf_mean_sum, build_scheduled_value, FIXED_COLLECTION, RenderHook
 
-from auto_yolo.tf_ops import render_sprites
+from auto_yolo.tf_ops import render_sprites, resampler_edge
 from auto_yolo.models.core import (
     AP, loss_builders, normal_vae, concrete_binary_pre_sigmoid_sample,
     concrete_binary_sample_kl, VariationalAutoencoder)
@@ -109,7 +109,8 @@ class YoloAir_Network(VariationalAutoencoder):
 
     def _build_box(self, box_params, is_training):
         mean, log_std = tf.split(box_params, 2, axis=-1)
-        std = tf.exp(log_std)
+        std = 2 * tf.nn.sigmoid(tf.clip_by_value(log_std, -10, 10))
+        # std = tf.exp(log_std)
         if not self.noisy:
             std = tf.zeros_like(std)
 
@@ -209,7 +210,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
         grid_coords = warper(_boxes)
         grid_coords = tf.reshape(grid_coords, (self.batch_size, 1, *self.object_shape, 2,))
-        input_glimpses = tf.contrib.resampler.resampler(self.inp, grid_coords)
+        input_glimpses = resampler_edge.resampler_edge(self.inp, grid_coords)
         input_glimpses = tf.reshape(input_glimpses, (-1, *self.object_shape, self.image_depth))
 
         attr = self.object_encoder(input_glimpses, (1, 1, 2*self.A), self.is_training)
@@ -349,7 +350,8 @@ class YoloAir_Network(VariationalAutoencoder):
                     input_glimpses, attr = self._build_attr_from_image(built['box'], h, w, b, self.is_training)
 
                     attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
-                    attr_std = tf.exp(attr_log_std)
+                    # attr_std = tf.exp(attr_log_std)
+                    attr_std = 2 * tf.nn.sigmoid(tf.clip_by_value(attr_log_std, -10, 10))
 
                     if not self.noisy:
                         attr_std = tf.zeros_like(attr_std)
@@ -383,8 +385,9 @@ class YoloAir_Network(VariationalAutoencoder):
                     n_features = self.n_passthrough_features
 
                     network_output = self.z_network(layer_inp, 2 + n_features, self.is_training)
-                    z_mean, z_std, features = tf.split(network_output, (1, 1, n_features), axis=1)
-                    z_std = tf.exp(z_std)
+                    z_mean, z_log_std, features = tf.split(network_output, (1, 1, n_features), axis=1)
+                    # z_std = tf.exp(z_log_std)
+                    z_std = 2 * tf.nn.sigmoid(tf.clip_by_value(z_log_std, -10, 10))
                     if not self.noisy:
                         z_std = tf.zeros_like(z_std)
 

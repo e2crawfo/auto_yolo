@@ -31,33 +31,35 @@ durations = dict(
         config=dict(max_steps=4000)),
 )
 
+load_path = "/media/data/dps_data/logs/test-clevr_env=task=clevr/exp_alg=yolo-air_seed=181029782_2018_08_05_22_37_57/weights/final_for_stage_0"
+
 config = dict(
-    background_cfg=dict(mode="learn", A=1),
-    build_background_encoder=lambda scope: MLP([10, 10], scope=scope),
-    build_background_decoder=lambda scope: MLP([10, 10], scope=scope),
+    clevr_background_mode="mean",
+    background_cfg=dict(mode="data"),
     # background_cfg=dict(mode="colour", colour="white"),
     obj_logit_scale=1.0,
     alpha_logit_scale=1.0,
     alpha_logit_bias=1.0,
     obj_temp=1.0,
     # training_wheels=0.0,
-    hw_prior_mean=np.log(.33 / .67),
-    hw_prior_std=1.0,
-    max_steps=10000000,
+    tile_shape=(36, 36),
+    hw_prior_mean=np.log(.25 / .75),
     patience=10000000,
-    final_count_prior_log_odds=0.1,
-    postprocessing="random",
 
-    n_train=70000,
-    clevr_background_mode="mean",
-    tile_shape=(48, 48),
-    image_shape=(80, 120),
-    pixels_per_cell=(12, 12),
-    # clevr_background_mode=None,
-    # tile_shape=(96, 96),
-    # image_shape=(160, 240),
-    # pixels_per_cell=(24, 24),
-    object_shape=(28, 28),
+    load_path={
+        "network/representation/z_sequential_network": load_path,
+        "network/representation/box_sequential_network": load_path,
+        "network/representation/obj_sequential_network": load_path,
+        "network/representation/backbone": load_path,
+        "network/representation/object_encoder": load_path,
+        "network/representation/object_decoder": load_path,
+    },
+
+    postprocessing="",
+    max_steps=1,
+    do_train=False,
+    n_train=32,
+    n_val=32,
 )
 
 envs.run_experiment(

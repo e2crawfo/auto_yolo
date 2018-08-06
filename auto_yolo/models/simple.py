@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 
 from dps import cfg
 from dps.utils.tf import tf_mean_sum, RenderHook
+from dps.utils import Param
 
 from auto_yolo.models.core import loss_builders, normal_vae, VariationalAutoencoder
 
@@ -51,6 +52,8 @@ class SimpleVAE(VariationalAutoencoder):
         # --- decode ---
 
         reconstruction = self.decoder(attr, self.inp.shape[1:], self.is_training)
+        reconstruction = reconstruction[:, :self.inp.shape[1], :self.inp.shape[2], :]
+
         reconstruction = tf.nn.sigmoid(tf.clip_by_value(reconstruction, -10, 10))
         self._tensors["output"] = reconstruction
 
@@ -83,13 +86,15 @@ class SimpleVAE_RenderHook(RenderHook):
 
         sqrt_N = int(np.ceil(np.sqrt(self.N)))
 
-        fig, axes = plt.subplots(sqrt_N, 2*sqrt_N, figsize=(20, 20))
-        axes = np.array(axes).reshape(sqrt_N, 2*sqrt_N)
+        fig_height = 20
+        fig_width = 4.5 * fig_height
+        fig, axes = plt.subplots(sqrt_N, 3*sqrt_N, figsize=(fig_width, fig_height))
         for n, (pred, gt) in enumerate(zip(output, inp)):
             i = int(n / sqrt_N)
             j = int(n % sqrt_N)
 
-            ax = axes[i, 2*j]
+            ax = axes[i, 3*j]
+            ax.set_axis_off()
             self.imshow(ax, gt)
 
             if targets is not None:
@@ -100,8 +105,14 @@ class SimpleVAE_RenderHook(RenderHook):
                     np.argmax(_target), np.argmax(_prediction))
                 ax.set_title(title)
 
-            ax = axes[i, 2*j+1]
+            ax = axes[i, 3*j+1]
+            ax.set_axis_off()
             self.imshow(ax, pred)
+
+            ax = axes[i, 3*j+2]
+            ax.set_axis_off()
+            diff = np.abs(gt - pred).sum(2) / 3
+            self.imshow(ax, diff)
 
         plt.subplots_adjust(left=0, right=1, top=.9, bottom=0, wspace=0.1, hspace=0.2)
         self.savefig("sampled_reconstruction", fig, updater)

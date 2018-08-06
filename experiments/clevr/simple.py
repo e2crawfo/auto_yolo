@@ -1,8 +1,7 @@
-import numpy as np
 from dps.utils.tf import MLP
 from auto_yolo import envs
 
-readme = "Testing yolo_air."
+readme = "Running simple on CLEVR task."
 
 distributions = None
 
@@ -32,35 +31,17 @@ durations = dict(
 )
 
 config = dict(
-    background_cfg=dict(mode="learn", A=1),
-    build_background_encoder=lambda scope: MLP([10, 10], scope=scope),
-    build_background_decoder=lambda scope: MLP([10, 10], scope=scope),
-    # background_cfg=dict(mode="colour", colour="white"),
-    obj_logit_scale=1.0,
-    alpha_logit_scale=1.0,
-    alpha_logit_bias=1.0,
-    obj_temp=1.0,
-    # training_wheels=0.0,
-    hw_prior_mean=np.log(.33 / .67),
-    hw_prior_std=1.0,
-    max_steps=10000000,
-    patience=10000000,
-    final_count_prior_log_odds=0.1,
+    n_train=1000,
+    clevr_background_mode=None,
     postprocessing="random",
-
-    n_train=70000,
-    clevr_background_mode="mean",
     tile_shape=(48, 48),
-    image_shape=(80, 120),
-    pixels_per_cell=(12, 12),
-    # clevr_background_mode=None,
-    # tile_shape=(96, 96),
-    # image_shape=(160, 240),
-    # pixels_per_cell=(24, 24),
-    object_shape=(28, 28),
+    A=1,
+    attr_prior_std=10.0,
+    build_encoder=lambda scope: MLP([100, 100], scope=scope),
+    build_decoder=lambda scope: MLP([100, 100], scope=scope),
 )
 
 envs.run_experiment(
-    "test_clevr", config, readme, alg="yolo_air",
-    task="clevr", durations=durations, distributions=distributions,
+    "clevr", config, readme, alg="simple",
+    task="clevr", durations=durations, distributions=distributions
 )

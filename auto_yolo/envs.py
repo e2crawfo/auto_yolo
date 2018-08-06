@@ -182,9 +182,9 @@ class Nips2018Clevr(object):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
 
-        train = ClevrDataset(clevr_kind="train", n_examples=cfg.n_train, seed=train_seed)
-        val = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=val_seed)
-        test = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=test_seed)
+        train = ClevrDataset(clevr_kind="train", n_examples=cfg.n_train, seed=train_seed, example_range=None)
+        val = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=val_seed, example_range=(0, 5000))
+        test = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=test_seed, example_range=(5000, 10000))
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -388,7 +388,7 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
         )
     elif task == "clevr":
         config.update(
-            build_env=Nips2018Clevr, image_shape=(80, 120), postprocessing="random", tile_shape=(36, 36),
+            build_env=Nips2018Clevr, image_shape=(80, 120),
         )
     else:
         raise Exception("Unknown task `{}`".format(task))

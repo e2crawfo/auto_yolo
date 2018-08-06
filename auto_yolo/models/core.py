@@ -659,6 +659,9 @@ class VariationalAutoencoder(ScopedFunction):
 
     eval_funcs = dict()
 
+    background_encoder = None
+    background_decoder = None
+
     def __init__(self, env, updater, scope=None, **kwargs):
         self.updater = updater
 
@@ -719,6 +722,11 @@ class VariationalAutoencoder(ScopedFunction):
             n_annotations=labels[1],
             targets=labels[2],
         )
+
+        if len(labels) > 3:
+            self._tensors.update(
+                background=labels[3]
+            )
 
     def _call(self, inp, is_training):
         self.original_inp = inp
@@ -807,6 +815,40 @@ class VariationalAutoencoder(ScopedFunction):
                     tf.add_to_collection(FIXED_COLLECTION, self.solid_background_logits)
                 solid_background = tf.nn.sigmoid(10 * self.solid_background_logits)
                 background = solid_background[None, None, None, :] * tf.ones_like(self.inp)
+
+            elif cfg.background_cfg.mode == "learn":
+                if self.background_encoder is None:
+                    self.background_encoder = cfg.build_background_encoder(scope="background_encoder")
+                    if "background_encoder" in self.fixed_weights:
+                        self.background_encoder.fix_variables()
+
+                if self.background_decoder is None:
+                    self.background_decoder = cfg.build_background_decoder(scope="background_decoder")
+                    if "background_decoder" in self.fixed_weights:
+                        self.background_decoder.fix_variables()
+
+                bg_attr = self.background_encoder(self.inp, 2 * cfg.background_cfg.A, self.is_training)
+                bg_attr_mean, bg_attr_log_std = tf.split(bg_attr, 2, axis=-1)
+                bg_attr_std = tf.exp(bg_attr_log_std)
+                if not self.noisy:
+                    bg_attr_std = tf.zeros_like(bg_attr_std)
+
+                bg_attr, bg_attr_kl = normal_vae(bg_attr_mean, bg_attr_std, self.attr_prior_mean, self.attr_prior_std)
+
+                self._tensors.update(
+                    bg_attr_mean=bg_attr_mean,
+                    bg_attr_std=bg_attr_std,
+                    bg_attr_kl=bg_attr_kl,
+                    bg_attr=bg_attr)
+
+                # --- decode ---
+
+                background = self.background_decoder(bg_attr, self.inp.shape[1:], self.is_training)
+                background = background[:, :self.inp.shape[1], :self.inp.shape[2], :]
+                background = tf.nn.sigmoid(tf.clip_by_value(background, -10, 10))
+
+            elif cfg.background_cfg.mode == "data":
+                background = self._tensors["background"]
             else:
                 background = tf.zeros_like(self.inp)
 
