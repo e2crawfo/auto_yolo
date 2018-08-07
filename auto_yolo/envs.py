@@ -183,8 +183,8 @@ class Nips2018Clevr(object):
         train_seed, val_seed, test_seed = 0, 1, 2
 
         train = ClevrDataset(clevr_kind="train", n_examples=cfg.n_train, seed=train_seed, example_range=None)
-        val = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=val_seed, example_range=(0, 5000))
-        test = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=test_seed, example_range=(5000, 10000))
+        val = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=val_seed, example_range=cfg.val_example_range)
+        test = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=test_seed, example_range=cfg.test_example_range)
 
         self.datasets = dict(train=train, val=val, test=test)
 

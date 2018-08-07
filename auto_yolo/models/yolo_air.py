@@ -704,7 +704,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
 class YoloAir_RenderHook(RenderHook):
     def __call__(self, updater):
-        self.fetches = "obj z inp output objects n_objects normalized_box input_glimpses"
+        self.fetches = "obj raw_obj z inp output objects n_objects normalized_box input_glimpses"
 
         network = updater.network
         if "n_annotations" in network._tensors:
@@ -827,6 +827,7 @@ class YoloAir_RenderHook(RenderHook):
         input_glimpses = fetched.get('input_glimpses', None)
         objects = fetched['objects']
         obj = fetched['obj']
+        raw_obj = fetched['raw_obj']
         z = fetched['z']
 
         on_colour = np.array(to_rgb("xkcd:azure"))
@@ -840,6 +841,7 @@ class YoloAir_RenderHook(RenderHook):
                 for w in range(W):
                     for b in range(B):
                         _obj = obj[idx, h, w, b, 0]
+                        _raw_obj = raw_obj[idx, h, w, b, 0]
                         _z = z[idx, h, w, b, 0]
 
                         ax = axes[3*h, w * B + b]
@@ -858,7 +860,7 @@ class YoloAir_RenderHook(RenderHook):
                         ax = axes[3*h+1, w * B + b]
                         self.imshow(ax, objects[idx, h, w, b, :, :, 3], cmap="gray")
 
-                        ax.set_title("obj={}, z={}, b={}".format(_obj, _z, b))
+                        ax.set_title("obj={}, raw_obj={}, z={}, b={}".format(_obj, _raw_obj, _z, b))
 
                         ax = axes[3*h+2, w * B + b]
                         ax.set_title("input glimpse")
