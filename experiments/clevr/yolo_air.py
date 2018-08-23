@@ -1,8 +1,7 @@
 import numpy as np
-from dps.utils.tf import MLP
 from auto_yolo import envs
 
-readme = "Testing yolo_air."
+readme = "Parameter search for yolo_air on clevr."
 
 count_prior_probs = np.array([0.25, 0.167, 0.111, 0.074])
 hw_prior_probs = np.array([0.4, 0.3, 0.2, 0.1])
@@ -42,9 +41,6 @@ durations = dict(
 
 config = dict(
     background_cfg=dict(mode="learn", A=1),
-    build_background_encoder=lambda scope: MLP([10, 10], scope=scope),
-    build_background_decoder=lambda scope: MLP([10, 10], scope=scope),
-    # background_cfg=dict(mode="colour", colour="white"),
     obj_logit_scale=1.0,
     alpha_logit_scale=1.0,
     alpha_logit_bias=1.0,
