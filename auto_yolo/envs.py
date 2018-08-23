@@ -3,8 +3,8 @@ import argparse
 from dps import cfg
 from dps.datasets import (
     GridEmnistObjectDetectionDataset, EmnistObjectDetectionDataset,
-    VisualArithmeticDataset)
-from dps.datasets.xo import XO_RewardClassificationDataset
+    VisualArithmeticDataset, GameDataset)
+from dps.env.basic import collect
 from dps.datasets.shapes import ShapesDataset
 from dps.datasets.clevr import ClevrDataset
 from dps.utils import Config, pdb_postmortem
@@ -41,9 +41,12 @@ def run_experiment(
     env_config = get_env_config(**env_kwargs)
     _config.update(env_config)
 
-    alg_config = getattr(alg_module, "{}_config".format(alg))
-    _config.update(alg_config)
-    alg_name = sanitize(alg_config.alg_name)
+    if alg:
+        alg_config = getattr(alg_module, "{}_config".format(alg))
+        _config.update(alg_config)
+        alg_name = sanitize(alg_config.alg_name)
+    else:
+        alg_name = ""
 
     _config.update(config)
     _config.update_from_command_line()
@@ -150,20 +153,6 @@ class Nips2018Arithmetic(object):
         pass
 
 
-class Nips2018XO(object):
-    def __init__(self):
-        train_seed, val_seed, test_seed = 0, 1, 2
-
-        train = XO_RewardClassificationDataset(n_examples=cfg.n_train, seed=train_seed)
-        val = XO_RewardClassificationDataset(n_examples=cfg.n_val, seed=val_seed)
-        test = XO_RewardClassificationDataset(n_examples=cfg.n_val, seed=test_seed)
-
-        self.datasets = dict(train=train, val=val, test=test)
-
-    def close(self):
-        pass
-
-
 class Nips2018Shapes(object):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
@@ -185,6 +174,21 @@ class Nips2018Clevr(object):
         train = ClevrDataset(clevr_kind="train", n_examples=cfg.n_train, seed=train_seed, example_range=None)
         val = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=val_seed, example_range=cfg.val_example_range)
         test = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=test_seed, example_range=cfg.test_example_range)
+
+        self.datasets = dict(train=train, val=val, test=test)
+
+    def close(self):
+        pass
+
+
+class Nips2018Collect(object):
+    def __init__(self):
+        train_seed, val_seed, test_seed = 0, 1, 2
+
+        env = collect.build_env().gym_env
+        train = GameDataset(env=env, n_examples=cfg.n_train, seed=train_seed)
+        val = GameDataset(env=env, n_examples=cfg.n_val, seed=val_seed)
+        test = GameDataset(env=env, n_examples=cfg.n_val, seed=test_seed)
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -246,7 +250,7 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
     if task == "xo":
         return env_config.copy(
             env_name="xo",
-            build_env=Nips2018XO,
+            # build_env=Nips2018XO,
             one_hot=True,
 
             image_shape=(72, 72),
@@ -271,6 +275,20 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
             display_step=1000,
             render_step=5000,
         )
+    elif task == "collect":
+        config = env_config.copy(collect.config)
+        config.render_hook = None
+        config.hooks = []
+        config.exploration_schedule = None
+        config.update(
+            env_name="collect", build_env=Nips2018Collect,
+            n_train=25000, n_val=1000, keep_prob=0.25,
+            background_cfg=dict(mode="colour", colour="white"))
+        return config
+
+    elif task == "collect_rl":
+        config = env_config.copy(collect.config)
+        return config
 
     config = grid_config.copy()
     config.env_name = "task={}".format(task)

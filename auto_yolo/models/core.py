@@ -444,24 +444,15 @@ class Updater(_Updater):
     def trainable_variables(self, for_opt):
         return self.network.trainable_variables(for_opt)
 
-    def _update(self, batch_size, collect_summaries):
+    def _update(self, batch_size):
         feed_dict = self.data_manager.do_train()
 
         sess = tf.get_default_session()
-        if collect_summaries:
-            _, record, train_record = sess.run(
-                [self.train_op, self.recorded_tensors, self.train_records], feed_dict=feed_dict)
+        _, record, train_record = sess.run(
+            [self.train_op, self.recorded_tensors, self.train_records], feed_dict=feed_dict)
+        record.update(train_record)
 
-            summary_feed_dict = {ph: record[k] for k, ph in self.recorded_tensors_ph.items()}
-            summary_feed_dict.update({ph: train_record[k] for k, ph in self.train_records_ph.items()})
-
-            summary = sess.run(self.train_summary_op, feed_dict=summary_feed_dict)
-        else:
-            record = {}
-            summary = b''
-            sess.run([self.train_op], feed_dict=feed_dict)
-
-        return dict(train=(record, summary))
+        return dict(train=record)
 
     def _evaluate(self, _batch_size, mode):
         if mode == "val":
@@ -472,7 +463,6 @@ class Updater(_Updater):
             raise Exception("Unknown evaluation mode: {}".format(mode))
 
         record = collections.defaultdict(float)
-        summary = b''
         n_points = 0
 
         sess = tf.get_default_session()
@@ -494,15 +484,7 @@ class Updater(_Updater):
 
             n_points += batch_size
 
-        for k, v in record.items():
-            record[k] /= n_points
-
-        summary_feed_dict = {ph: record[k] for k, ph in self.recorded_tensors_ph.items()}
-        summary_feed_dict.update({ph: record[k] for k, ph in self.eval_funcs_ph.items()})
-
-        summary = sess.run(self.val_summary_op, feed_dict=summary_feed_dict)
-
-        return record, summary
+        return {k: v / n_points for k, v in record.items()}
 
     def compute_validation_pixelwise_mean(self):
         sess = tf.get_default_session()
@@ -594,9 +576,9 @@ class Updater(_Updater):
 
         self.train_op, self.train_records = build_gradient_train_op(
             self.loss, tvars, self.optimizer_spec, self.lr_schedule,
-            self.max_grad_norm, self.noise_schedule, return_summaries=False)
+            self.max_grad_norm, self.noise_schedule)
 
-        # --- summaries ---
+        # --- recorded values ---
 
         output = network_tensors["output"]
         recorded_tensors.update({
@@ -613,18 +595,6 @@ class Updater(_Updater):
 
         # For running functions, during evaluation, that are not implemented in tensorflow
         self.evaluator = Evaluator(self.network.eval_funcs, network_tensors, self)
-
-        self.train_records_ph = {k: tf.placeholder(tf.float32, name=k + "_summary") for k in self.train_records}
-        train_summaries = [tf.summary.scalar(k, t) for k, t in self.train_records_ph.items()]
-
-        self.recorded_tensors_ph = {k: tf.placeholder(tf.float32, name=k + "_summary") for k in self.recorded_tensors}
-        recorded_tensors_summaries = [tf.summary.scalar(k, t) for k, t in self.recorded_tensors_ph.items()]
-
-        self.eval_funcs_ph = {k: tf.placeholder(tf.float32, name=k + "_summary") for k in self.network.eval_funcs}
-        eval_funcs_summaries = [tf.summary.scalar(k, t) for k, t in self.eval_funcs_ph.items()]
-
-        self.train_summary_op = tf.summary.merge(recorded_tensors_summaries + train_summaries)
-        self.val_summary_op = tf.summary.merge(recorded_tensors_summaries + eval_funcs_summaries)
 
 
 class VariationalAutoencoder(ScopedFunction):
@@ -922,7 +892,7 @@ class SimpleRecurrentRegressionNetwork(ScopedFunction):
 
         if isinstance(inp, (tuple, list)):
             attr, mask = inp
-            rnn_input, n_on = apply_mask_and_group_at_front(attr, mask)
+            rnn_input, n_on, _ = apply_mask_and_group_at_front(attr, mask)
 
             batch_size = tf.shape(attr)[0]
             output, final_state = tf.nn.dynamic_rnn(

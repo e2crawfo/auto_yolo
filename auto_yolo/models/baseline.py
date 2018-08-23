@@ -214,7 +214,7 @@ class Baseline_Network(VariationalAutoencoder):
 
         self._build_program_interpreter()
 
-        # --- specify values to record/summarize ---
+        # --- specify values to record ---
 
         self.recorded_tensors.update(
             n_objects=tf.reduce_mean(self._tensors["n_objects"]),

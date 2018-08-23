@@ -258,7 +258,6 @@ class AIR_Network(VariationalAutoencoder):
     z_pres_temperature = Param()
     stopping_threshold = Param()
 
-    verbose_summaries = Param()
     training_wheels = Param()
     kl_weight = Param()
 

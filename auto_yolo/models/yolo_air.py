@@ -625,7 +625,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
         self._build_program_interpreter()
 
-        # --- specify values to record/summarize ---
+        # --- specify values to record ---
 
         recorded_tensors = self.recorded_tensors
 

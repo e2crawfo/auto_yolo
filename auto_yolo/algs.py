@@ -201,7 +201,6 @@ air_config = alg_config.copy(
     alg_name="attend_infer_repeat",
     build_network=air.AIR_Network,
     batch_size=64,
-    verbose_summaries=False,
     render_hook=air.AIR_RenderHook(),
     difference_air=False,
     build_image_encoder=IdentityFunction,
