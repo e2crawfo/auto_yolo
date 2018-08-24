@@ -5,9 +5,7 @@ from dps import cfg
 from dps.utils import Config
 from dps.utils.tf import MLP, IdentityFunction, FeedforwardCell, ScopedCellWrapper
 
-from auto_yolo.models import (
-    core, simple, baseline, ground_truth, yolo_air, air, nem, math, xo
-)
+from auto_yolo.models import core, simple, baseline, ground_truth, yolo_air, air, nem
 
 
 alg_config = Config(

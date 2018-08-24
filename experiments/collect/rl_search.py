@@ -1,9 +1,12 @@
 from auto_yolo import envs
 from dps.rl.algorithms import a2c
+from dps.env.basic import collect
 
-readme = ""
+readme = "Searching for good RL setup."
 
-config = a2c.config.copy(opt_steps_per_update=5, epsilon=0.2)
+config = a2c.config.copy()
+config.update(collect.config)
+config.update(opt_steps_per_update=5, epsilon=0.2)
 
 distributions = dict(
     controller_type="arn obj".split(),
@@ -12,7 +15,7 @@ distributions = dict(
 
 
 envs.run_experiment(
-    "collect_search", config, readme, task="collect", distributions=distributions,
+    "collect_search", config, readme, task="collect_rl", distributions=distributions,
     durations=dict(
         long=dict(
             max_hosts=2, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="12hours",
@@ -23,8 +26,8 @@ envs.run_experiment(
             project="rpp-bengioy", cleanup_time="2mins",
             slack_time="2mins", n_repeats=3),
         short=dict(
-            max_hosts=1, ppn=3, cpp=2, gpu_set="0", wall_time="10mins",
+            max_hosts=1, ppn=3, cpp=2, gpu_set="0", wall_time="20mins",
             project="rpp-bengioy", cleanup_time="2mins",
-            slack_time="2mins", n_repeats=3)
+            slack_time="2mins", n_repeats=1, n_param_settings=3)
     )
 )

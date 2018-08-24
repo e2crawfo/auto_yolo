@@ -287,8 +287,7 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
         return config
 
     elif task == "collect_rl":
-        config = env_config.copy(collect.config)
-        return config
+        return Config(env_name="collect_rl")
 
     config = grid_config.copy()
     config.env_name = "task={}".format(task)
