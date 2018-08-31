@@ -40,13 +40,6 @@ config = dict(
     alpha_logit_bias=1.0,
     obj_temp=1.0,
     training_wheels=0.0,
-
-    # ablation test
-    # sequential_cfg=dict(
-    #     on=True,
-    #     n_lookback=0,
-    #     build_next_step=lambda scope: MLP([100, 100], scope=scope),
-    # ),
 )
 
 envs.run_experiment(

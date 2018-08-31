@@ -7,8 +7,8 @@ readme = "Running YOLO AIR experiment."
 
 distributions = dict(
     kernel_size=[1, 2, 3],  # 3 doesn't work well
-    final_count_prior_log_odds=[0.1, 0.05, 0.025, 0.0125],
     hw_prior_std=[0.5, 1.0, 2.0],  # Anything outside of these bounds doesn't work very well.
+    final_count_prior_log_odds=[0.1, 0.05, 0.025, 0.0125],
     count_prior_decay_steps=[1000, 2000, 3000, 4000],
 )
 
@@ -50,6 +50,6 @@ if args.no_lookback:
     config["sequential_cfg:n_lookback"] = 0
 
 envs.run_experiment(
-    "yolo_air_search_n_digits=9", config, readme, distributions=distributions,
-    alg="yolo_air", task="arithmetic", durations=durations,
+    "yolo_air_search_n_digits=9_lookback={}".format(not args.no_lookback), config, readme,
+    distributions=distributions, alg="yolo_air", task="arithmetic", durations=durations,
 )
