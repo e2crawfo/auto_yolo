@@ -3,15 +3,17 @@ import numpy as np
 from sklearn.cluster import k_means
 import collections
 from matplotlib.colors import to_rgb
+import matplotlib.pyplot as plt
+from matplotlib import animation
 
 from dps import cfg
 from dps.updater import Updater as _Updater
-from dps.utils import Param, prime_factors
+from dps.utils import Param, prime_factors, square_subplots
 from dps.utils.tf import (
     ConvNet, build_gradient_train_op, tf_mean_sum,
-    ScopedFunction, build_scheduled_value, MLP,
-    apply_mask_and_group_at_front, FIXED_COLLECTION)
+    ScopedFunction, build_scheduled_value, FIXED_COLLECTION)
 from dps.updater import DataManager
+from dps.train import Hook
 
 
 def normal_kl(mean, std, prior_mean, prior_std):
@@ -597,6 +599,118 @@ class Updater(_Updater):
         self.evaluator = Evaluator(self.network.eval_funcs, network_tensors, self)
 
 
+class EvalHook(Hook):
+    def __init__(self, dataset_class, plot_step=None, dataset_kwargs=None, **kwargs):
+        self.dataset_class = dataset_class
+        self.dataset_kwargs = dataset_kwargs or {}
+        self.dataset_kwargs['n_examples'] = cfg.n_val
+        kwarg_string = "_".join("{}={}".format(k, v) for k, v in self.dataset_kwargs.items())
+        name = dataset_class.__name__ + ("_" + kwarg_string if kwarg_string else "")
+        self.name = name.replace(" ", "_")
+        self.plot_step = plot_step
+        super(EvalHook, self).__init__(final=True, **kwargs)
+
+    def start_stage(self, training_loop, updater, stage_idx):
+        # similar to `build_graph`
+
+        self.network = updater.network
+
+        dataset = self.dataset_class(**self.dataset_kwargs)
+        self.data_manager = DataManager(val_dataset=dataset, batch_size=cfg.batch_size)
+        self.data_manager.build_graph()
+
+        inp, *labels = self.data_manager.iterator.get_next()
+        self.inp = inp
+        network_outputs = self.network((inp, labels), self.data_manager.is_training)
+
+        network_tensors = network_outputs["tensors"]
+        network_recorded_tensors = network_outputs["recorded_tensors"]
+        network_losses = network_outputs["losses"]
+
+        self.recorded_tensors = recorded_tensors = dict(global_step=tf.train.get_or_create_global_step())
+
+        # --- loss ---
+
+        recorded_tensors['loss'] = 0
+        for name, tensor in network_losses.items():
+            recorded_tensors['loss'] += tensor
+            recorded_tensors['loss_' + name] = tensor
+        self.loss = recorded_tensors['loss']
+
+        # --- recorded values ---
+
+        output = network_tensors["output"]
+        recorded_tensors.update({
+            "loss_" + name: tf_mean_sum(builder(output, inp))
+            for name, builder in loss_builders.items()
+        })
+
+        intersection = recorded_tensors.keys() & network_recorded_tensors.keys()
+        assert not intersection, "Key sets have non-zero intersection: {}".format(intersection)
+        recorded_tensors.update(network_recorded_tensors)
+
+        intersection = recorded_tensors.keys() & self.network.eval_funcs.keys()
+        assert not intersection, "Key sets have non-zero intersection: {}".format(intersection)
+
+        # For running functions, during evaluation, that are not implemented in tensorflow
+        self.evaluator = Evaluator(self.network.eval_funcs, network_tensors, self)
+
+    def step(self, training_loop, updater, step_idx=None):
+        feed_dict = self.data_manager.do_val()
+        record = collections.defaultdict(float)
+        n_points = 0
+
+        sess = tf.get_default_session()
+
+        while True:
+            try:
+                _record, eval_fetched = sess.run(
+                    [self.recorded_tensors, self.evaluator.fetches], feed_dict=feed_dict)
+            except tf.errors.OutOfRangeError:
+                break
+
+            eval_record = self.evaluator.eval(eval_fetched)
+            _record.update(eval_record)
+
+            batch_size = _record['batch_size']
+
+            for k, v in _record.items():
+                record[k] += batch_size * v
+
+            n_points += batch_size
+
+        return {self.name: {k: v / n_points for k, v in record.items()}}
+
+    def _plot(self, updater, rollouts):
+        plt.ion()
+
+        if updater.dataset.gym_dataset.image_obs:
+            obs = rollouts.obs
+        else:
+            obs = rollouts.image
+
+        fig, axes = square_subplots(rollouts.batch_size, figsize=(5, 5))
+        plt.subplots_adjust(top=0.95, bottom=0, left=0, right=1, wspace=0.1, hspace=0.1)
+
+        images = []
+        for i, ax in enumerate(axes.flatten()):
+            ax.set_aspect("equal")
+            ax.set_axis_off()
+            image = ax.imshow(np.zeros(obs.shape[2:]))
+            images.append(image)
+
+        def animate(t):
+            for i in range(rollouts.batch_size):
+                images[i].set_array(obs[t, i, :, :, :])
+
+        anim = animation.FuncAnimation(fig, animate, frames=len(rollouts), interval=500)
+
+        path = updater.exp_dir.path_for('plots', '{}_animation.gif'.format(self.name))
+        anim.save(path, writer='imagemagick')
+
+        plt.close(fig)
+
+
 class VariationalAutoencoder(ScopedFunction):
     fixed_weights = Param()
     fixed_values = Param()
@@ -840,7 +954,10 @@ class VariationalAutoencoder(ScopedFunction):
 
         # --- process representation ---
 
-        math_rep = self.build_math_representation()
+        math_rep, mask = self.build_math_representation()
+        mask_shape = tf.concat([tf.shape(math_rep)[:-1], [1]], axis=0)
+        mask = tf.reshape(mask, mask_shape)
+        math_rep = tf.concat([mask, math_rep], axis=-1)
 
         logits = self.math_network(math_rep, cfg.n_classes, self.is_training)
 
@@ -878,292 +995,3 @@ class VariationalAutoencoder(ScopedFunction):
         recorded_tensors["math_correct_prob"] = tf.reduce_mean(
             tf.reduce_sum(tf.nn.softmax(logits) * self._tensors['targets'], axis=1)
         )
-
-
-class SimpleRecurrentRegressionNetwork(ScopedFunction):
-    cell = None
-    output_network = None
-
-    def _call(self, inp, output_size, is_training):
-        if self.cell is None:
-            self.cell = cfg.build_math_cell(scope="regression_cell")
-        if self.output_network is None:
-            self.output_network = cfg.build_math_output(scope="math_output")
-
-        if isinstance(inp, (tuple, list)):
-            attr, mask = inp
-            rnn_input, n_on, _ = apply_mask_and_group_at_front(attr, mask)
-
-            batch_size = tf.shape(attr)[0]
-            output, final_state = tf.nn.dynamic_rnn(
-                self.cell, rnn_input, initial_state=self.cell.zero_state(batch_size, tf.float32),
-                parallel_iterations=1, swap_memory=False, time_major=False)
-
-            # Get the output at the end of each sequence.
-            indices = tf.stack([tf.range(batch_size), n_on-1], axis=1)
-            output = tf.gather_nd(output, indices)
-        else:
-            batch_size = tf.shape(inp)[0]
-            n_objects = np.prod(inp.shape[1:-1])
-            A = inp.shape[-1]
-            inp = tf.reshape(inp, (batch_size, n_objects, A))
-
-            output, final_state = tf.nn.dynamic_rnn(
-                self.cell, inp, initial_state=self.cell.zero_state(batch_size, tf.float32),
-                parallel_iterations=1, swap_memory=False, time_major=False)
-            output = output[:, -1, :]
-
-        return self.output_network(output, output_size, is_training)
-
-
-class SoftmaxMLP(MLP):
-    def __init__(self, n_outputs, temp, n_units=None, scope=None, **fc_kwargs):
-        self.n_outputs = n_outputs
-        self.temp = temp
-
-        super(SoftmaxMLP, self).__init__(scope=scope, n_units=n_units, **fc_kwargs)
-
-    def _call(self, inp, output_size, is_training):
-        output = super(SoftmaxMLP, self)._call(inp, output_size, is_training)
-        return tf.nn.softmax(output / self.temp)
-
-
-class SequentialRegressionNetwork(ScopedFunction):
-    h_cell = None
-    w_cell = None
-    b_cell = None
-
-    output_network = None
-
-    def _call(self, _inp, output_size, is_training):
-        if self.h_cell is None:
-            self.h_cell = cfg.build_math_cell(scope="regression_h_cell")
-            self.w_cell = cfg.build_math_cell(scope="regression_w_cell")
-            self.b_cell = cfg.build_math_cell(scope="regression_b_cell")
-
-        edge_state = self.h_cell.zero_state(tf.shape(_inp)[0], tf.float32)
-
-        H, W, B = tuple(int(i) for i in _inp.shape[1:4])
-        h_states = np.empty((H, W, B), dtype=np.object)
-        w_states = np.empty((H, W, B), dtype=np.object)
-        b_states = np.empty((H, W, B), dtype=np.object)
-
-        for h in range(H):
-            for w in range(W):
-                for b in range(B):
-                    h_state = h_states[h-1, w, b] if h > 0 else edge_state
-                    w_state = w_states[h, w-1, b] if w > 0 else edge_state
-                    b_state = b_states[h, w, b-1] if b > 0 else edge_state
-
-                    inp = _inp[:, h, w, b, :]
-
-                    h_inp = tf.concat([inp, w_state.h, b_state.h], axis=1)
-                    _, h_states[h, w, b] = self.h_cell(h_inp, h_state)
-
-                    w_inp = tf.concat([inp, h_state.h, b_state.h], axis=1)
-                    _, w_states[h, w, b] = self.w_cell(w_inp, w_state)
-
-                    b_inp = tf.concat([inp, h_state.h, w_state.h], axis=1)
-                    _, b_states[h, w, b] = self.b_cell(b_inp, b_state)
-
-        if self.output_network is None:
-            self.output_network = cfg.build_math_output(scope="math_output")
-
-        final_layer_input = tf.concat(
-            [h_states[-1, -1, -1].h,
-             w_states[-1, -1, -1].h,
-             b_states[-1, -1, -1].h],
-            axis=1)
-
-        return self.output_network(final_layer_input, output_size, is_training)
-
-
-class ObjectBasedRegressionNetwork(ScopedFunction):
-    n_objects = Param(5)
-
-    embedding = None
-    output_network = None
-
-    def _call(self, _inp, output_size, is_training):
-        batch_size = tf.shape(_inp)[0]
-        H, W, B, A = tuple(int(i) for i in _inp.shape[1:])
-
-        if self.embedding is None:
-            self.embedding = tf.get_variable(
-                "embedding", shape=(int(A/2), self.n_objects), dtype=tf.float32)
-
-        inp = tf.reshape(_inp, (batch_size, H * W * B, A))
-        key, value = tf.split(inp, 2, axis=2)
-        raw_attention = tf.tensordot(key, self.embedding, [[2], [0]])
-        attention = tf.nn.softmax(raw_attention, axis=1)
-
-        attention_t = tf.transpose(attention, (0, 2, 1))
-        weighted_value = tf.matmul(attention_t, value)
-
-        flat_weighted_value = tf.reshape(
-            weighted_value, (batch_size, self.n_objects * int(A/2)))
-
-        if self.output_network is None:
-            self.output_network = cfg.build_math_output(scope="math_output")
-
-        return self.output_network(flat_weighted_value, output_size, is_training)
-
-
-class ConvolutionalRegressionNetwork(ScopedFunction):
-    network = None
-
-    def _call(self, inp, output_size, is_training):
-        if self.network is None:
-            self.network = cfg.build_convolutional_network(scope="regression_network")
-
-        return self.network(inp['attr'], output_size, is_training)
-
-
-class AttentionRegressionNetwork(ConvNet):
-    ar_n_filters = Param(128)
-
-    def __init__(self, **kwargs):
-        layout = [
-            dict(filters=self.ar_n_filters, kernel_size=3, padding="SAME", strides=1),
-            dict(filters=self.ar_n_filters, kernel_size=3, padding="SAME", strides=1),
-            dict(filters=4, kernel_size=1, padding="SAME", strides=1),
-        ]
-        super(AttentionRegressionNetwork, self).__init__(
-            layout, check_output_shape=False, **kwargs)
-
-    def _call(self, inp, output_size, is_training):
-        self.layout[-1]['filters'] = output_size + 1
-
-        batch_size = tf.shape(inp)[0]
-        inp = tf.reshape(
-            inp, (batch_size, *inp.shape[1:3], inp.shape[3] * inp.shape[4]))
-        output = super(AttentionRegressionNetwork, self)._call(inp, output_size, is_training)
-        output = tf.reshape(
-            output, (batch_size, output.shape[1] * output.shape[2], output.shape[3]))
-
-        logits, attention = tf.split(output, [output_size, 1], axis=2)
-
-        attention = tf.nn.softmax(attention, axis=1)
-        weighted_output = logits * attention
-
-        return tf.reduce_sum(weighted_output, axis=1)
-
-
-class AverageRegressionNetwork(ConvNet):
-    """ Run a conv-net and then global mean pooling. """
-    ar_n_filters = Param(128)
-
-    def __init__(self, **kwargs):
-        layout = [
-            dict(filters=self.ar_n_filters, kernel_size=3, padding="SAME", strides=1),
-            dict(filters=self.ar_n_filters, kernel_size=3, padding="SAME", strides=1),
-            dict(filters=4, kernel_size=1, padding="SAME", strides=1),
-        ]
-        super(AttentionRegressionNetwork, self).__init__(layout, check_output_shape=False, **kwargs)
-
-    def _call(self, inp, output_size, is_training):
-        self.layout[-1]['filters'] = output_size
-
-        batch_size = tf.shape(inp)[0]
-        inp = tf.reshape(inp, (batch_size, *inp.shape[1:3], inp.shape[3] * inp.shape[4]))
-        output = super(AttentionRegressionNetwork, self)._call(inp, output_size, is_training)
-        return tf.reduce_mean(output, axis=(1, 2))
-
-
-class RelationNetwork(ScopedFunction):
-    f = None
-    g = None
-
-    f_dim = Param(100)
-
-    def _call(self, inp, output_size, is_training):
-        # Assumes objects range of all but the first and last dimensions
-        batch_size = tf.shape(inp)[0]
-        spatial_shape = inp.shape[1:-1]
-        n_objects = np.prod(spatial_shape)
-        obj_dim = inp.shape[-1]
-        inp = tf.reshape(inp, (batch_size, n_objects, obj_dim))
-
-        if self.f is None:
-            self.f = cfg.build_relation_network_f(scope="relation_network_f")
-
-        if self.g is None:
-            self.g = cfg.build_relation_network_g(scope="relation_network_g")
-
-        f_inputs = []
-        for i in range(n_objects):
-            for j in range(n_objects):
-                f_inputs.append(tf.concat([inp[:, i, :], inp[:, j, :]], axis=1))
-        f_inputs = tf.concat(f_inputs, axis=0)
-
-        f_output = self.f(f_inputs, self.f_dim, is_training)
-        f_output = tf.split(f_output, n_objects**2, axis=0)
-
-        g_input = tf.concat(f_output, axis=1)
-        return self.g(g_input, output_size, is_training)
-
-
-def addition(left, right):
-    m = left.shape[1]
-    n = right.shape[1]
-
-    mat = tf.to_float(
-        tf.equal(
-            tf.reshape(tf.range(m)[:, None] + tf.range(n)[None, :], (-1, 1)),
-            tf.range(m + n - 1)[None, :]))
-
-    outer_product = tf.matmul(left[:, :, None], right[:, None, :])
-    outer_product = tf.reshape(outer_product, (-1, m * n))
-
-    return tf.tensordot(outer_product, mat)
-
-
-def addition_compact(left, right):
-    # Runtime is O((m+n) * n), so smaller value should be put second.
-    batch_size = tf.shape(left)[0]
-    m = left.shape[1]
-    n = right.shape[1]
-
-    running_sum = tf.zeros((batch_size, m+n-1))
-    to_add = tf.concat([left, tf.zeros((batch_size, n-1))], axis=1)
-
-    for i in range(n):
-        running_sum += to_add * right[:, i:i+1]
-        to_add = tf.manip.roll(to_add, shift=1, axis=1)
-    return running_sum
-
-
-def addition_compact_logspace(left, right):
-    # Runtime is O((m+n) * n), so smaller value should be put second.
-    batch_size = tf.shape(left)[0]
-    n = right.shape[1]
-
-    tensors = []
-    to_add = tf.concat([left, -100 * tf.ones((batch_size, n-1))], axis=1)
-
-    for i in range(n):
-        tensors.append(to_add + right[:, i:i+1])
-        to_add = tf.manip.roll(to_add, shift=1, axis=1)
-    return tf.reduce_logsumexp(tf.stack(tensors, axis=2), axis=2)
-
-
-class AdditionNetwork(ScopedFunction):
-    def _call(self, inp, output_size, is_training):
-        H, W, B, _ = tuple(int(i) for i in inp.shape[1:])
-
-        # inp = tf.log(tf.nn.softmax(tf.clip_by_value(inp, -10., 10.), axis=4))
-        inp = inp - tf.reduce_logsumexp(inp, axis=4, keepdims=True)
-
-        running_sum = inp[:, 0, 0, 0, :]
-
-        for h in range(H):
-            for w in range(W):
-                for b in range(B):
-                    if h == 0 and w == 0 and b == 0:
-                        pass
-                    else:
-                        right = inp[:, h, w, b, :]
-                        running_sum = addition_compact_logspace(running_sum, right)
-
-        assert running_sum.shape[1] == output_size
-        return running_sum

@@ -251,30 +251,35 @@ class YoloAir_Network(VariationalAutoencoder):
             obj_prob=tf.nn.sigmoid(obj_log_odds),
         )
 
-    def _get_sequential_input(self, program, h, w, b, edge_element):
-        inp = []
+    def _get_sequential_context(self, program, h, w, b, edge_element):
+        context = []
         grid_size = 2 * self.sequential_cfg.n_lookback + 1
         n_grid_locs = int((grid_size**2) / 2)
 
+        # Surrounding locations
         for idx in range(n_grid_locs):
             _i = int(idx / grid_size) + h - self.sequential_cfg.n_lookback
             _j = int(idx % grid_size) + w - self.sequential_cfg.n_lookback
 
             for k in range(self.B):
                 if _i < 0 or _j < 0 or _i >= program.shape[0] or _j >= program.shape[1]:
-                    inp.append(edge_element)
+                    context.append(edge_element)
                 else:
-                    inp.append(program[_i, _j, k])
+                    context.append(program[_i, _j, k])
 
+        # Current location, but previous anchor boxes
         offset = -(self.B - 1) + b
         for k in range(self.B-1):
             _k = k + offset
             if _k < 0:
-                inp.append(edge_element)
+                context.append(edge_element)
             else:
-                inp.append(program[h, w, _k])
+                context.append(program[h, w, _k])
 
-        return tf.concat(inp, axis=1)
+        if context:
+            return tf.concat(context, axis=1)
+        else:
+            return tf.zeros_like(edge_element[:, 0:0])
 
     def _make_empty(self):
         return np.array([{} for i in range(self.H * self.W * self.B)]).reshape(self.H, self.W, self.B)
@@ -323,7 +328,7 @@ class YoloAir_Network(VariationalAutoencoder):
                 for b in range(self.B):
                     partial_program, features = None, None
                     _backbone_output = backbone_output[:, h, w, b, :]
-                    context = self._get_sequential_input(program, h, w, b, edge_element)
+                    context = self._get_sequential_context(program, h, w, b, edge_element)
 
                     # --- box ---
 
@@ -703,9 +708,9 @@ class YoloAir_Network(VariationalAutoencoder):
 
 
 class YoloAir_RenderHook(RenderHook):
-    def __call__(self, updater):
-        self.fetches = "obj raw_obj z inp output objects n_objects normalized_box input_glimpses"
+    fetches = "obj raw_obj z inp output objects n_objects normalized_box input_glimpses"
 
+    def __call__(self, updater):
         network = updater.network
         if "n_annotations" in network._tensors:
             self.fetches += " annotations n_annotations"

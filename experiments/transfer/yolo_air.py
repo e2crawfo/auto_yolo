@@ -1,5 +1,8 @@
+import argparse
+
 from auto_yolo import envs
 from dps.updater import DummyUpdater
+from dps.utils.tf import MLP
 
 readme = "yolo_air transfer experiment"
 
@@ -55,6 +58,13 @@ durations = dict(
 )
 
 config = dict(max_steps=int(2e5))
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--no-lookback", action="store_true")
+args, _ = parser.parse_known_args()
+
+if args.no_lookback:
+    config["sequential_cfg:n_lookback"] = 0
 
 envs.run_experiment(
     "yolo_air_transfer", config, readme,

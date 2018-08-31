@@ -1,8 +1,6 @@
 from auto_yolo import envs
 import argparse
 
-readme = "Running second stage (math learning) for yolo_air on addition task."
-
 distributions = [dict(n_train=1000 * 2**i) for i in range(8)]
 
 durations = dict(
@@ -23,22 +21,30 @@ durations = dict(
         slack_time="1mins", n_repeats=1, n_param_settings=4),
 )
 
+stage1_paths = dict(
+    yolo_air="/media/data/dps_data/logs/shapes-qa_env=task=shapes-qa/exp_alg=yolo-air_seed=1121983585_2018_08_28_13_14_11",
+)
 
-def get_config(stage1_path):
+
+def run():
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-kind", choices="raw fixed unfixed".split())
+    parser.add_argument("--alg", choices="yolo_air air simple ground_truth baseline".split())
     args, _ = parser.parse_known_args()
+    alg = args.alg + "_math"
 
-    config = dict(max_steps=2e5, patience=10000, n_train=16000)
+    config = dict(max_steps=2e5, patience=10000, n_train=4000, idx=0, repeat=0)
 
     if args.run_kind == "raw":
         pass
     elif args.run_kind == "fixed":
+        stage1_path = stage1_paths[args.alg]
         config.update(
             fixed_weights="encoder decoder object_encoder object_decoder box z obj backbone image_encoder cell output",
             stage1_path=stage1_path,
         )
     elif args.run_kind == "unfixed":
+        stage1_path = stage1_paths[args.alg]
         config.update(
             fixed_weights="decoder object_decoder box z obj backbone image_encoder cell output",
             stage1_path=stage1_path,
@@ -47,14 +53,11 @@ def get_config(stage1_path):
         raise Exception("Unknown kind: {}".format(args.kind))
     config['run_kind'] = args.run_kind
 
-    return config
-
-
-if __name__ == "__main__":
-    stage1_path = "/project/6006941/e2crawfo/NIPS_2018/FINAL/addition/run_search_resubmit_seed=0_2018_07_25_11_28_18"
-    config = get_config(stage1_path)
+    readme = "Running second stage for {} on shapes qa task.".format(alg)
     envs.run_experiment(
-        "addition-stage2", config, readme, alg="yolo_air_math",
-        task="arithmetic2", durations=durations, distributions=distributions,
-        name_variables="run_kind",
+        "shapes_qa-stage2", config, readme, alg=alg, task="shapes_qa",
+        durations=durations, distributions=distributions, name_variables="run_kind",
     )
+
+
+run()

@@ -248,6 +248,8 @@ class Baseline_Network(VariationalAutoencoder):
 
 
 class Baseline_RenderHook(yolo_air.YoloAir_RenderHook):
+    fetches = "obj inp output objects n_objects normalized_box input_glimpses"
+
     def _plot_patches(self, updater, fetched, N):
         # Create a plot showing what each object is generating
         import matplotlib.pyplot as plt

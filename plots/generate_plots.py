@@ -203,7 +203,7 @@ def plot_transfer(extension):
     x, y = get_transfer_baseline_data(baseline_path_count_1norm, "n_train", measure, "ci95")
     ax.plot(x, y, label="Baseline")
 
-    ax.set_ylabel(r'$|\text{true-count} - \text{pred-count}|$', fontsize=12)
+    ax.set_ylabel(r'Count Absolute Error', fontsize=12)
     ax.set_xlabel('\# Digits in Image', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
     ax.set_ylim((0.0, 2.99))
@@ -231,7 +231,7 @@ def plot_transfer(extension):
     x, y = get_transfer_baseline_data(baseline_path_count_error, "n_train", measure, "ci95")
     ax.plot(x, y, label="Baseline")
 
-    ax.set_ylabel('Count Error', fontsize=12)
+    ax.set_ylabel('Count 0-1 Error', fontsize=12)
     ax.set_xlabel('\# Digits in Image', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
     ax.set_ylim((0.0, 1.05))

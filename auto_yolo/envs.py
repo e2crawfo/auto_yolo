@@ -1,11 +1,12 @@
 import argparse
+import itertools
 
 from dps import cfg
 from dps.datasets import (
     GridEmnistObjectDetectionDataset, EmnistObjectDetectionDataset,
     VisualArithmeticDataset, GameDataset)
 from dps.env.basic import collect
-from dps.datasets.shapes import ShapesDataset
+from dps.datasets.shapes import ShapesDataset, BlueXAboveRedCircle, SetThreeAttr
 from dps.datasets.clevr import ClevrDataset
 from dps.utils import Config, pdb_postmortem
 from dps.train import training_loop
@@ -13,6 +14,7 @@ from dps.hyper import build_and_submit
 from dps.config import DEFAULT_CONFIG
 
 import auto_yolo.algs as alg_module
+from auto_yolo.models.core import EvalHook
 
 
 def sanitize(s):
@@ -160,6 +162,34 @@ class Nips2018Shapes(object):
         train = ShapesDataset(n_examples=cfg.n_train, seed=train_seed)
         val = ShapesDataset(n_examples=cfg.n_val, seed=val_seed)
         test = ShapesDataset(n_examples=cfg.n_val, seed=test_seed)
+
+        self.datasets = dict(train=train, val=val, test=test)
+
+    def close(self):
+        pass
+
+
+class Nips2018ShapesQA(object):
+    def __init__(self):
+        train_seed, val_seed, test_seed = 0, 1, 2
+
+        train = BlueXAboveRedCircle(n_examples=cfg.n_train, seed=train_seed)
+        val = BlueXAboveRedCircle(n_examples=cfg.n_val, seed=val_seed)
+        test = BlueXAboveRedCircle(n_examples=cfg.n_val, seed=test_seed)
+
+        self.datasets = dict(train=train, val=val, test=test)
+
+    def close(self):
+        pass
+
+
+class Nips2018Set(object):
+    def __init__(self):
+        train_seed, val_seed, test_seed = 0, 1, 2
+
+        train = SetThreeAttr(n_examples=cfg.n_train, seed=train_seed)
+        val = SetThreeAttr(n_examples=cfg.n_val, seed=val_seed)
+        test = SetThreeAttr(n_examples=cfg.n_val, seed=test_seed)
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -402,6 +432,37 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
             image_shape=(48, 48),
             shapes="green,circle blue,circle orange,circle teal,circle red,circle black,circle",
             background_colours="white",
+        )
+    elif task == "shapes_qa":
+        colours = "red blue green".split()
+        shapes = "circle triangle x".split()
+        distractor_shapes = ["{},{}".format(c, s) for c, s in itertools.product(colours, shapes)]
+
+        hook_kwargs = dict(plot_step=100, n=100, initial=True)
+
+        config.update(
+            build_env=Nips2018ShapesQA,
+            n_classes=2,
+            distractor_shapes=distractor_shapes,
+            n_distractor_shapes=None,
+            image_shape=(48, 48),
+            background_colours="white",
+            hooks=[EvalHook(BlueXAboveRedCircle, dataset_kwargs=dict(seed=3, n_distractor_shapes=0), **hook_kwargs)]
+        )
+    elif task == "set":
+        config.update(
+            build_env=Nips2018Set,
+            n_classes=2,
+            max_overlap=int(14*14)/4,
+            n_distractor_shapes=None,
+            image_shape=(48, 48),
+            background_colours="white",
+            colours="red green blue",
+            shapes="circle square diamond",
+            digits="simple1 simple2 simple3",
+            digit_colour="black",
+            n_cards=7,
+            set_size=3,
         )
     elif task == "clevr":
         config.update(

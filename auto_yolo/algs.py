@@ -3,9 +3,10 @@ import tensorflow as tf
 
 from dps import cfg
 from dps.utils import Config
-from dps.utils.tf import MLP, IdentityFunction, FeedforwardCell, ScopedCellWrapper
+from dps.utils.tf import (
+    MLP, IdentityFunction, FeedforwardCell, ScopedCellWrapper, AttentionalRelationNetwork, ObjectNetwork)
 
-from auto_yolo.models import core, simple, baseline, ground_truth, yolo_air, air, nem
+from auto_yolo.models import core, simple, baseline, ground_truth, yolo_air, air, nem, networks
 
 
 alg_config = Config(
@@ -319,16 +320,22 @@ def math_prepare_func():
     if decoder_kind == "mlp":
         cfg.build_math_network = lambda scope: MLP([256, 256, 256, 128], scope=scope)
     elif decoder_kind == "recurrent":
-        cfg.build_math_network = core.SimpleRecurrentRegressionNetwork
-        cfg.build_math_cell = lambda scope: tf.contrib.rnn.LSTMBlockCell(128)
+        cfg.build_math_network = networks.SimpleRecurrentRegressionNetwork
+        cfg.build_math_cell = lambda scope: tf.contrib.rnn.LSTMBlockCell(cfg.n_recurrent_units)
     elif decoder_kind == "seq":
-        cfg.build_math_network = core.SequentialRegressionNetwork
-        cfg.build_math_cell = lambda scope: tf.contrib.rnn.LSTMBlockCell(128)
+        cfg.build_math_network = networks.SequentialRegressionNetwork
+        cfg.build_math_cell = lambda scope: tf.contrib.rnn.LSTMBlockCell(cfg.n_recurrent_units)
     elif decoder_kind == "attn":
-        cfg.build_math_network = core.AttentionRegressionNetwork
+        cfg.build_math_network = networks.AttentionRegressionNetwork
         cfg.ar_n_filters = 256
+    elif decoder_kind == "obj":
+        cfg.build_math_network = ObjectNetwork
+        cfg.n_repeats = 1
+    elif decoder_kind == "arn":
+        cfg.build_math_network = AttentionalRelationNetwork
+        cfg.n_repeats = 2
     elif decoder_kind == "add":
-        cfg.build_math_network = core.AdditionNetwork
+        cfg.build_math_network = networks.AdditionNetwork
         cfg.math_A = 10
         n_cells = (
             int(np.ceil(cfg.image_shape[0] / cfg.pixels_per_cell[0])) *
@@ -361,6 +368,27 @@ math_config = Config(
     train_kl=False,
     train_reconstruction=False,
     noisy=False,
+
+    n_recurrent_units=128,
+
+    # for obj and arn
+    d=128,
+    layer_norm=True,
+    symmetric_op="max",
+    use_mask=True,
+
+    # For obj
+    # build_on_input_network=lambda scope: MLP([128, 128], scope=scope),
+    # build_on_object_network=lambda scope: MLP([128, 128], scope=scope),
+    # build_on_output_network=lambda scope: MLP([128, 128, 128], scope=scope),
+    build_on_input_network=lambda scope: MLP([128], scope=scope),
+    build_on_object_network=lambda scope: MLP([128], scope=scope),
+    build_on_output_network=lambda scope: MLP([128, 128], scope=scope),
+
+    # For arn
+    build_arn_network=lambda scope: MLP([128, 128], scope=scope),
+    build_arn_object_network=lambda scope: MLP([128, 128], scope=scope),
+    n_heads=1,
 )
 
 simple_math_config = simple_config.copy(
@@ -392,39 +420,39 @@ air_math_config = air_config.copy(
 # def continue_prepare_func():
 #     from dps import cfg
 #     import os
-# 
+#
 #     math_prepare_func()
-# 
+#
 #     repeat = int(cfg.get('repeat', 0))
-# 
+#
 #     candidates = sorted(os.listdir(cfg.init_path))
 #     load_path = os.path.join(cfg.init_path, candidates[repeat], "weights/best_of_stage_0")
-# 
+#
 #     cfg.load_path = {
 #         "network/reconstruction": load_path
 #     }
-# 
-# 
+#
+#
 # def math_1stage_prepare_func():
 #     from dps import cfg
 #     import numpy as np
 #     math_prepare_func()
 #     cfg.math_weight = "Exp(0.0, 50., 10000, 0.9)"
 #     # cfg.math_weight = "Exp(0.0, {}, 10000, 0.9)".format(np.product(cfg.image_shape))
-# 
-# 
+#
+#
 # math_1stage_config = math_config.copy(
 #     prepare_func=math_1stage_prepare_func
 # )
-# 
+#
 # math_4stage_config = math_config.copy(
 #     alg_name="math_4stage",
-# 
+#
 #     stopping_criteria="count_error,min",
 #     threshold=0.0,
 #     math_weight=0.0,
 #     fixed_weights="math",
-# 
+#
 #     training_wheels=0,
 #     load_path={"network/reconstruction": -1},
 #     curriculum=progression_curriculum + [copy.deepcopy(curriculum_2stage[1])],
@@ -432,9 +460,9 @@ air_math_config = air_config.copy(
 # math_4stage_config['curriculum'][-1].update(
 #     stopping_criteria="math_accuracy,max",
 # )
-# 
+#
 # # --- SIMPLE_MATH ---
-# 
+#
 # simple_math_config = math_config.copy(
 #     alg_name="simple_math",
 #     build_network=core.SimpleMathNetwork,
@@ -445,29 +473,29 @@ air_math_config = air_config.copy(
 #     train_kl=False,
 #     noisy=False,
 # )
-# 
+#
 # simple_math_2stage_config = simple_math_config.copy(
 #     alg_name="simple_math_2stage",
 #     curriculum=curriculum_2stage,
 # )
-# 
+#
 # # --- XO ---
-# 
+#
 # yolo_xo_config = math_config.copy(
 #     alg_name="yolo_xo",
 #     build_network=yolo_xo.YoloAIR_XONetwork,
 #     build_math_network=core.AttentionRegressionNetwork,
 #     balanced=True,
 # )
-# 
+#
 # curriculum_xo_2stage = copy.deepcopy(curriculum_2stage)
 # curriculum_xo_2stage[0]['postprocessing'] = "random"
-# 
+#
 # yolo_xo_2stage_config = yolo_xo_config.copy(
 #     alg_name="yolo_xo_2stage",
 #     curriculum=curriculum_xo_2stage,
 # )
-# 
+#
 # yolo_xo_init_config = yolo_xo_config.copy()
 # yolo_xo_init_config.update(curriculum_xo_2stage[0])
 # yolo_xo_init_config.update(
@@ -476,7 +504,7 @@ air_math_config = air_config.copy(
 #     balanced=False,
 #     n_train=60000,
 # )
-# 
+#
 # yolo_xo_continue_config = yolo_xo_config.copy()
 # yolo_xo_continue_config.update(curriculum_xo_2stage[1])
 # yolo_xo_continue_config.update(
@@ -485,20 +513,20 @@ air_math_config = air_config.copy(
 #     init_path="/scratch/e2crawfo/dps_data/run_experiments/GOOD_NIPS_2018/"
 #               "run_search_yolo-xo-init_env=xo_alg=yolo-xo-init_duration=long_seed=0_2018_06_05_09_23_55/experiments"
 # )
-# 
+#
 # # --- SIMPLE_XO ---
-# 
+#
 # simple_xo_config = simple_math_config.copy(
 #     alg_name="simple_xo",
 #     build_network=yolo_xo.SimpleXONetwork,
 #     build_math_network=core.AttentionRegressionNetwork,
 # )
-# 
+#
 # simple_xo_2stage_config = simple_xo_config.copy(
 #     alg_name="simple_xo_2stage",
 #     curriculum=curriculum_2stage
 # )
-# 
+#
 # simple_xo_init_config = simple_xo_config.copy()
 # simple_xo_init_config.update(curriculum_2stage[0])
 # simple_xo_init_config.update(
@@ -507,7 +535,7 @@ air_math_config = air_config.copy(
 #     balanced=False,
 #     n_train=60000,
 # )
-# 
+#
 # simple_xo_continue_config = simple_xo_config.copy()
 # simple_xo_continue_config.update(curriculum_2stage[1])
 # simple_xo_continue_config.update(
