@@ -2,7 +2,6 @@ import argparse
 
 from auto_yolo import envs
 from dps.updater import DummyUpdater
-from dps.utils.tf import MLP
 
 readme = "yolo_air transfer experiment"
 
@@ -57,7 +56,8 @@ durations = dict(
         step_time_limit="1year"),
 )
 
-config = dict(max_steps=int(2e5))
+config = dict(max_steps=int(2e5), min_chars=11, max_chars=15)
+config["background_cfg:mode"] = "learn_solid"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--no-lookback", action="store_true")

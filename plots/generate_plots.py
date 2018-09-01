@@ -158,8 +158,8 @@ def plot_transfer(extension):
 
     # -----
 
-    fig = plt.figure(figsize=(5, 3.5))
-    ax = plt.gca()
+    fig, axes = plt.subplots(1, 3, figsize=(7, 3))
+    ax = axes[0]
 
     y_func = lambda y: 100 * y
     measure = "_test_AP"
@@ -167,78 +167,67 @@ def plot_transfer(extension):
     yolo_data = get_transfer_data(yolo_path, "n_train", measure, "ci95", y_func=y_func)
 
     for (x, y, *yerr), key in yolo_data:
-        label = "Trained with {}--{} digits".format(key.min_chars, key.max_chars)
+        label = "Trained on {}--{} digits".format(key.min_chars, key.max_chars)
         ax.errorbar(x, y, yerr=yerr, label=label)
 
     x, y = get_transfer_baseline_data(baseline_path_ap, "n_train", measure, "ci95", y_func=y_func)
-    ax.plot(x, y, label="Baseline")
+    ax.plot(x, y, label="ConnComp")
 
-    ax.set_ylabel('AP', fontsize=12)
-    ax.set_xlabel('\# Digits in Image', fontsize=12)
-    ax.tick_params(axis='both', labelsize=14)
+    fontsize = None
+    labelsize = None
+
+    ax.set_ylabel('Average Precision', fontsize=fontsize)
+    ax.tick_params(axis='both', labelsize=labelsize)
     ax.set_ylim((0., 105.))
+    ax.set_xlabel('\# Digits in Test Image', fontsize=fontsize)
     ax.set_xticks([0, 5, 10, 15, 20])
-
-    plt.legend(loc="lower left")
-
-    plt.subplots_adjust(left=0.12, bottom=0.13, right=0.99, top=0.99)
-    plot_path = os.path.join(plot_dir, 'transfer/ap.' + extension)
-    os.makedirs(os.path.dirname(plot_path), exist_ok=True)
-    fig.savefig(plot_path)
-    plt.show()
 
     # -----
 
-    fig = plt.figure(figsize=(5, 3.5))
-    ax = plt.gca()
+    ax = axes[1]
 
     measure = "_test_count_1norm"
 
     yolo_data = get_transfer_data(yolo_path, "n_train", measure, "ci95")
 
     for (x, y, *yerr), key in yolo_data:
-        label = "Trained with {}--{} digits".format(key.min_chars, key.max_chars)
+        label = "Trained on {}--{} digits".format(key.min_chars, key.max_chars)
         ax.errorbar(x, y, yerr=yerr, label=label)
 
     x, y = get_transfer_baseline_data(baseline_path_count_1norm, "n_train", measure, "ci95")
-    ax.plot(x, y, label="Baseline")
+    ax.plot(x, y, label="ConnComp")
 
-    ax.set_ylabel(r'Count Absolute Error', fontsize=12)
-    ax.set_xlabel('\# Digits in Image', fontsize=12)
-    ax.tick_params(axis='both', labelsize=14)
-    ax.set_ylim((0.0, 2.99))
+    ax.set_ylabel(r'Count Absolute Error', fontsize=fontsize)
+    ax.set_xlabel('\# Digits in Test Image', fontsize=fontsize)
+    ax.tick_params(axis='both', labelsize=labelsize)
+    ax.set_ylim((0.0, 3.1))
     ax.set_xticks([0, 5, 10, 15, 20])
-
-    plt.subplots_adjust(left=0.12, bottom=0.13, right=0.99, top=0.99)
-    plot_path = os.path.join(plot_dir, 'transfer/count_1norm.' + extension)
-    os.makedirs(os.path.dirname(plot_path), exist_ok=True)
-    fig.savefig(plot_path)
-    plt.show()
+    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.05), ncol=2)
 
     # -----
 
-    fig = plt.figure(figsize=(5, 3.5))
-    ax = plt.gca()
+    ax = axes[2]
 
     measure = "_test_count_error"
 
     yolo_data = get_transfer_data(yolo_path, "n_train", measure, "ci95")
 
     for (x, y, *yerr), key in yolo_data:
-        label = "Trained with {}--{} digits".format(key.min_chars, key.max_chars)
+        label = "Trained on {}--{} digits".format(key.min_chars, key.max_chars)
         ax.errorbar(x, y, yerr=yerr, label=label)
 
     x, y = get_transfer_baseline_data(baseline_path_count_error, "n_train", measure, "ci95")
-    ax.plot(x, y, label="Baseline")
+    ax.plot(x, y, label="ConnComp")
 
-    ax.set_ylabel('Count 0-1 Error', fontsize=12)
-    ax.set_xlabel('\# Digits in Image', fontsize=12)
-    ax.tick_params(axis='both', labelsize=14)
+    ax.set_ylabel('Count 0-1 Error', fontsize=fontsize)
+    ax.tick_params(axis='both', labelsize=labelsize)
     ax.set_ylim((0.0, 1.05))
+    ax.set_xlabel('\# Digits in Test Image', fontsize=fontsize)
     ax.set_xticks([0, 5, 10, 15, 20])
 
-    plt.subplots_adjust(left=0.12, bottom=0.13, right=0.99, top=0.99)
-    plot_path = os.path.join(plot_dir, 'transfer/count_error.' + extension)
+    plt.subplots_adjust(left=0.07, bottom=0.15, right=0.98, top=0.76, wspace=.27)
+
+    plot_path = os.path.join(plot_dir, 'transfer/main.' + extension)
     os.makedirs(os.path.dirname(plot_path), exist_ok=True)
     fig.savefig(plot_path)
     plt.show()
@@ -496,9 +485,9 @@ def plot_comparison(extension):
     line.lines[0].get_c()
 
     x, y, *yerr = get_arithmetic_data([baseline_path], "n_digits", "_test_AP", 0, "ci95", y_func=y_func)
-    ax.plot(x, y, label="Baseline", marker="s", ls=":")
+    ax.plot(x, y, label="ConnComp", marker="s", ls=":")
 
-    ax.set_ylabel('AP', fontsize=12)
+    ax.set_ylabel('Average Precision', fontsize=12)
     ax.set_xlabel('\# Digits in Image', fontsize=12)
     ax.tick_params(axis='both', labelsize=14)
     ax.set_ylim((0., 105.))
@@ -529,69 +518,71 @@ def plot_addition(extension):
     simple_unfixed_path = os.path.join(data_dir, "addition/stage2/run_search_addition-stage2_env=task=arithmetic2_run-kind=unfixed_alg=simple-math_duration=long_seed=0_2018_07_28_22_03_41/")
     yolo_air_unfixed_path = os.path.join(data_dir, "addition/stage2/run_search_addition-stage2_env=task=arithmetic2_run-kind=unfixed_alg=yolo-air-math_duration=long_seed=0_2018_07_28_22_04_21/")
 
-    # -----
-
-    fig = plt.figure(figsize=(5, 3.5))
+    fig = plt.figure(figsize=(5, 4.5))
     ax = plt.gca()
 
-    x, y, *yerr = get_arithmetic_data([air_fixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="AIR - Fixed", marker="o", ls="--")
-    air_color = line.lines[0].get_c()
-
-    x, y, *yerr = get_arithmetic_data([baseline_fixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="Baseline - Fixed", marker="o", ls="--")
-    baseline_color = line.lines[0].get_c()
-
-    x, y, *yerr = get_arithmetic_data([ground_truth_fixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="Ground Truth - Fixed", marker="o", ls="--")
-    ground_truth_color = line.lines[0].get_c()
-
-    x, y, *yerr = get_arithmetic_data([simple_fixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="CNN - Fixed", marker="^", ls="--")
-    simple_color = line.lines[0].get_c()
-
-    x, y, *yerr = get_arithmetic_data([yolo_air_fixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="SPAIR - Fixed", marker="v", ls="--")
-    yolo_air_color = line.lines[0].get_c()
-
-    # -----
-
     x, y, *yerr = get_arithmetic_data([baseline_raw_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="Baseline", marker="o", ls="-", color=baseline_color)
+    line = ax.errorbar(x, y, yerr=yerr, label="ConnComp", marker="o", ls="-")
 
     x, y, *yerr = get_arithmetic_data([ground_truth_raw_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="Ground Truth", marker="^", ls="-", color=ground_truth_color)
+    line = ax.errorbar(x, y, yerr=yerr, label="Ground Truth", marker="^", ls="-")
 
     x, y, *yerr = get_arithmetic_data([simple_raw_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="CNN", marker="v", ls="-", color=simple_color)
+    line = ax.errorbar(x, y, yerr=yerr, label="ConvNet", marker="v", ls="-")
 
     # -----
 
-    x, y, *yerr = get_arithmetic_data([air_unfixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="AIR - Unfixed", marker="o", ls="-.", color=air_color)
-
-    x, y, *yerr = get_arithmetic_data([baseline_unfixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="Baseline - Unfixed", marker="o", ls="-.", color=baseline_color)
-
-    x, y, *yerr = get_arithmetic_data([ground_truth_unfixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="Ground Truth - Unfixed", marker="o", ls="-.", color=ground_truth_color)
-
-    x, y, *yerr = get_arithmetic_data([simple_unfixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="CNN - Unfixed", marker="^", ls="-.", color=simple_color)
+    x, y, *yerr = get_arithmetic_data([yolo_air_fixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
+    line = ax.errorbar(x, y, yerr=yerr, label="SPAIR - Fixed", marker="v", ls="-")
+    yolo_air_color = line.lines[0].get_c()
 
     x, y, *yerr = get_arithmetic_data([yolo_air_unfixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="SPAIR - Unfixed", marker="v", ls="-.", color=yolo_air_color)
+    line = ax.errorbar(x, y, yerr=yerr, label="SPAIR - Unfixed", marker="v", ls="--", color=yolo_air_color)
 
-    ax.set_ylabel('Accuracy', fontsize=12)
-    ax.set_xlabel('\# Training Examples / 1000', fontsize=12)
-    ax.tick_params(axis='both', labelsize=14)
+    # -----
+
+    x, y, *yerr = get_arithmetic_data([air_fixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
+    line = ax.errorbar(x, y, yerr=yerr, label="AIR - Fixed", marker="o", ls="-")
+    air_color = line.lines[0].get_c()
+
+    x, y, *yerr = get_arithmetic_data([air_unfixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
+    line = ax.errorbar(x, y, yerr=yerr, label="AIR - Unfixed", marker="o", ls="--", color=air_color)
+
+    # -----
+
+    # x, y, *yerr = get_arithmetic_data([baseline_fixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
+    # line = ax.errorbar(x, y, yerr=yerr, label="ConnComp - Fixed", marker="o", ls="--")
+    # baseline_color = line.lines[0].get_c()
+
+    # x, y, *yerr = get_arithmetic_data([ground_truth_fixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
+    # line = ax.errorbar(x, y, yerr=yerr, label="Ground Truth - Fixed", marker="o", ls="--")
+    # ground_truth_color = line.lines[0].get_c()
+
+    # x, y, *yerr = get_arithmetic_data([simple_fixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
+    # line = ax.errorbar(x, y, yerr=yerr, label="CNN - Fixed", marker="^", ls="--")
+    # simple_color = line.lines[0].get_c()
+
+    # -----
+
+    # x, y, *yerr = get_arithmetic_data([baseline_unfixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
+    # line = ax.errorbar(x, y, yerr=yerr, label="ConnComp - Unfixed", marker="o", ls="-.", color=baseline_color)
+
+    # x, y, *yerr = get_arithmetic_data([ground_truth_unfixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
+    # line = ax.errorbar(x, y, yerr=yerr, label="Ground Truth - Unfixed", marker="o", ls="-.", color=ground_truth_color)
+
+    # x, y, *yerr = get_arithmetic_data([simple_unfixed_path], "n_train", "_test_math_accuracy", 0, "ci95")
+    # line = ax.errorbar(x, y, yerr=yerr, label="CNN - Unfixed", marker="^", ls="-.", color=simple_color)
+
+    ax.set_ylabel('Accuracy')
+    ax.set_xlabel('\# Training Examples / 1000')
+    ax.tick_params(axis='both')
     ax.set_ylim((0., 1.05))
     ax.set_xscale("log")
     ax.set_xticks(x)
     ax.set_xticklabels((np.array(x) / 1000).astype('i'))
 
-    # plt.legend(loc="upper left", handlelength=4)
-    plt.subplots_adjust(left=0.12, bottom=0.13, right=0.99, top=0.99)
+    plt.legend(loc="lower center", handlelength=2.5, bbox_to_anchor=(0.5, 1.01), ncol=3, columnspacing=1)
+    plt.subplots_adjust(left=0.10, bottom=0.10, right=0.99, top=0.82)
     plot_path = os.path.join(plot_dir, 'addition/main.' + extension)
     os.makedirs(os.path.dirname(plot_path), exist_ok=True)
     fig.savefig(plot_path)
