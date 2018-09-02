@@ -69,15 +69,15 @@ extra_config = {
     0: {'count_prior_decay_steps': 4000,
         'final_count_prior_log_odds': 0.05,
         'hw_prior_std': 0.5,
-        'kernel_size': (2, 2)},
+        'kernel_size': 2},
     1: {'count_prior_decay_steps': 3000,
         'final_count_prior_log_odds': 0.0125,
         'hw_prior_std': 0.5,
-        'kernel_size': (2, 2)},
+        'kernel_size': 2},
     2: {'count_prior_decay_steps': 2000,
         'final_count_prior_log_odds': 0.1,
         'hw_prior_std': 0.5,
-        'kernel_size': (2, 2)},
+        'kernel_size': 2},
 }
 config.update(extra_config[args.n_lookback])
 config["sequential_cfg:n_lookback"] = args.n_lookback
