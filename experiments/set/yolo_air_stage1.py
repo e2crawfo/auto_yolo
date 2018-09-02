@@ -1,5 +1,4 @@
 from auto_yolo import envs
-from dps.utils.tf import MLP, IdentityFunction
 
 readme = "Testing yolo_air."
 
@@ -7,9 +6,9 @@ distributions = None
 
 durations = dict(
     long=dict(
-        max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="24hours",
+        max_hosts=1, ppn=6, cpp=2, gpu_set="0,1", wall_time="6hours",
         project="rpp-bengioy", cleanup_time="20mins",
-        slack_time="5mins", n_repeats=6, step_time_limit="24hours"),
+        slack_time="5mins", n_repeats=6),
 
     build=dict(
         max_hosts=1, ppn=1, cpp=2, gpu_set="0", wall_time="2hours",
@@ -41,9 +40,6 @@ config = dict(
     max_overlap=14*14/3,
     background_colours="cyan magenta yellow",
     background_cfg=dict(mode="learn", A=3),
-    # background_cfg=dict(mode="learn_solid"),
-    build_background_encoder=lambda scope: MLP([10, 10], scope=scope),
-    build_background_decoder=IdentityFunction
 )
 
 envs.run_experiment(

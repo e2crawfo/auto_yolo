@@ -1,7 +1,4 @@
-import argparse
-
 from auto_yolo import envs
-from auto_yolo.models import yolo_air
 
 readme = "Searching for YOLO_AIR parameters."
 
@@ -23,10 +20,6 @@ durations = dict(
         slack_time="2mins", n_repeats=1, config=dict(max_steps=100))
 )
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--n-lookback", type=int, default=1)
-args, _ = parser.parse_known_args()
-
 distributions = dict(
     kernel_size=[1, 2],
     hw_prior_std=[0.5, 1.0, 2.0],  # Anything outside of these bounds doesn't work very well.
@@ -34,23 +27,23 @@ distributions = dict(
     count_prior_decay_steps=[1000, 2000, 3000, 4000],
 )
 
-if not args.n_lookback:
-    distributions["kernel_size"] = [1, 2, 3]
-
 config = dict(
     curriculum=[dict()],
-    n_train=64000, stopping_criteria="AP,max", threshold=0.99, patience=50000,
-    render_hook=yolo_air.YoloAir_ComparisonRenderHook(show_zero_boxes=False),
-    min_digits=1, max_digits=9, max_steps=2e5,
-    background_cfg=dict(mode="learn_solid"),
-    train_example_range=(0.0, 0.7),
-    val_example_range=(0.7, 0.8),
-    test_example_range=(0.8, 0.9),
-)
-config["sequential_cfg:n_lookback"] = args.n_lookback
+    stopping_criteria="AP,max", threshold=0.99, patience=50000, max_steps=2e5,
 
+    n_train=128000,
+    obj_logit_scale=1.0,
+    alpha_logit_scale=1.0,
+    alpha_logit_bias=1.0,
+    obj_temp=1.0,
+    training_wheels=0.0,
+
+    max_overlap=14*14/3,
+    background_colours="cyan magenta yellow",
+    background_cfg=dict(mode="learn", A=3),
+)
 
 envs.run_experiment(
-    "yolo_air_search_n_lookback={}".format(args.n_lookback), config, readme,
-    distributions=distributions, alg="yolo_air", task="arithmetic", durations=durations,
+    "yolo_air_search_SET", config, readme, alg="yolo_air",
+    task="set", durations=durations, distributions=distributions,
 )
