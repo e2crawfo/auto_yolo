@@ -928,8 +928,17 @@ class VariationalAutoencoder(ScopedFunction):
                 # --- decode ---
 
                 background = self.background_decoder(bg_attr, self.inp.shape[1:], self.is_training)
-                background = background[:, :self.inp.shape[1], :self.inp.shape[2], :]
-                background = tf.nn.sigmoid(tf.clip_by_value(background, -10, 10))
+
+                if len(background.shape) == 2:
+                    # background decoder predicts a solid colour
+                    assert background.shape[1] == 3
+
+                    background = tf.nn.sigmoid(tf.clip_by_value(background, -10, 10))
+                    background = background[:, None, None, :]
+                    background = tf.tile(background, (1, self.inp.shape[1], self.inp.shape[2], 1))
+                else:
+                    background = background[:, :self.inp.shape[1], :self.inp.shape[2], :]
+                    background = tf.nn.sigmoid(tf.clip_by_value(background, -10, 10))
 
             elif cfg.background_cfg.mode == "data":
                 background = self._tensors["background"]
