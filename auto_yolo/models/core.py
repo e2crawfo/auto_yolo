@@ -10,7 +10,7 @@ from dps import cfg
 from dps.updater import Updater as _Updater
 from dps.utils import Param, prime_factors, square_subplots
 from dps.utils.tf import (
-    ConvNet, build_gradient_train_op, tf_mean_sum,
+    ConvNet, build_gradient_train_op, tf_mean_sum, apply_mask_and_group_at_front,
     ScopedFunction, build_scheduled_value, FIXED_COLLECTION)
 from dps.updater import DataManager
 from dps.train import Hook
@@ -734,6 +734,7 @@ class VariationalAutoencoder(ScopedFunction):
     math_A = Param()
 
     noisy = Param()
+    max_possible_objects = Param()
 
     needs_background = True
 
@@ -964,8 +965,24 @@ class VariationalAutoencoder(ScopedFunction):
         # --- process representation ---
 
         math_rep, mask = self.build_math_representation()
+
+        if self.max_possible_objects is not None:
+            math_rep, _, mask = apply_mask_and_group_at_front(math_rep, mask)
+            n_pad = self.max_possible_objects - tf.shape(math_rep)[1]
+            mask = tf.cast(mask, tf.float32)
+
+            batch_size = tf.shape(math_rep)[0]
+            A = math_rep.shape[2]
+
+            math_rep = tf.pad(math_rep, [(0, 0), (0, n_pad), (0, 0)])
+            math_rep = tf.reshape(math_rep, (batch_size, self.max_possible_objects, A))
+
+            mask = tf.pad(mask, [(0, 0), (0, n_pad)])
+            mask = tf.reshape(mask, (batch_size, self.max_possible_objects, 1))
+
         mask_shape = tf.concat([tf.shape(math_rep)[:-1], [1]], axis=0)
         mask = tf.reshape(mask, mask_shape)
+
         math_rep = tf.concat([mask, math_rep], axis=-1)
 
         logits = self.math_network(math_rep, cfg.n_classes, self.is_training)

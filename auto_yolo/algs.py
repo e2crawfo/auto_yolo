@@ -56,7 +56,11 @@ alg_config = Config(
     train_math=False,
     math_A=None,
 
-    noisy=True
+    noisy=True,
+
+    build_background_encoder=lambda scope: MLP([10, 10], scope=scope),
+    build_background_decoder=IdentityFunction,
+    max_possible_objects=None
 )
 
 simple_config = alg_config.copy(
@@ -122,8 +126,6 @@ yolo_air_config = alg_config.copy(
     build_next_step=core.NextStep,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
-    build_background_encoder=lambda scope: MLP([10, 10], scope=scope),
-    build_background_decoder=IdentityFunction,
 
     n_backbone_features=100,
     n_passthrough_features=100,

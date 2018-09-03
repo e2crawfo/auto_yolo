@@ -1,20 +1,17 @@
 import argparse
-import tensorflow as tf
 
 from auto_yolo import envs
 from auto_yolo import algs
-from auto_yolo.models import networks
-from dps.utils.tf import (
-    MLP, IdentityFunction, FeedforwardCell, ScopedCellWrapper, AttentionalRelationNetwork, ObjectNetwork)
+from dps.utils.tf import IdentityFunction
 from dps.utils import Config
 
-distributions = [dict(n_train=1000 * 2**i) for i in range(8)]
+distributions = dict(decoder_kind="mlp recurrent obj arn1 arn3".split())
 
 durations = dict(
     long=dict(
-        max_hosts=1, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="24hours",
+        max_hosts=1, ppn=12, cpp=2, gpu_set="0,1,2,3", wall_time="12hours",
         project="rpp-bengioy", cleanup_time="20mins",
-        slack_time="5mins", n_repeats=6, step_time_limit="24hours"),
+        slack_time="5mins", n_repeats=7, step_time_limit="12hours"),
 
     build=dict(
         max_hosts=1, ppn=1, cpp=2, gpu_set="0", wall_time="2hours",
@@ -26,28 +23,44 @@ durations = dict(
         max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="20mins",
         project="rpp-bengioy", cleanup_time="1mins", config=dict(max_steps=100),
         slack_time="1mins", n_repeats=1, n_param_settings=4),
+
+    oak=dict(
+        max_hosts=1, ppn=2, cpp=2, gpu_set="0", wall_time="20mins",
+        project="rpp-bengioy", cleanup_time="1mins", config=dict(max_steps=100),
+        slack_time="1mins", n_repeats=1, n_param_settings=5,
+        kind="parallel", host_pool=[":"]),
 )
 
 
 def prepare_func():
     from dps import cfg
+    from auto_yolo.models import networks
+    from dps.utils.tf import AttentionalRelationNetwork, ObjectNetwork, MLP
+    import tensorflow as tf
 
     decoder_kind = cfg.decoder_kind
     if decoder_kind == "mlp":
         cfg.build_math_network = lambda scope: MLP([256, 256, 256, 256, 256], scope=scope)
+        cfg.max_possible_objects = 7
     elif decoder_kind == "recurrent":
         cfg.build_math_network = networks.SimpleRecurrentRegressionNetwork
         cfg.build_math_cell = lambda scope: tf.contrib.rnn.LSTMBlockCell(cfg.n_recurrent_units)
     elif decoder_kind == "obj":
         cfg.build_math_network = ObjectNetwork
+        cfg.build_on_input_network = lambda scope: MLP([256, 256], scope=scope)
+        cfg.build_on_object_network = lambda scope: MLP([256, 256, 256], scope=scope)
+        cfg.build_on_output_network = lambda scope: MLP([256, 256, 256], scope=scope)
+    elif decoder_kind == "arn1":
+        cfg.n_repeats = 1
     elif decoder_kind == "arn3":
-        cfg.build_math_network = AttentionalRelationNetwork
         cfg.n_repeats = 3
-    elif decoder_kind == "arn6":
-        cfg.build_math_network = AttentionalRelationNetwork
-        cfg.n_repeats = 6
     else:
         raise Exception("Unknown value for decoder_kind: '{}'".format(decoder_kind))
+
+    if decoder_kind.startswith("arn"):
+        cfg.build_math_network = AttentionalRelationNetwork
+        cfg.build_arn_network = lambda scope: MLP([256, 256], scope=scope)
+        cfg.build_arn_object_network = lambda scope: MLP([256, 256, 256], scope=scope)
 
     if "stage1_path" in cfg:
         import os, glob  # noqa
@@ -60,11 +73,9 @@ def prepare_func():
 
 
 config = Config(
-    max_steps=2e5, patience=10000, n_train=4000, idx=0, repeat=0,
+    max_steps=2e5, patience=20000, idx=0, repeat=0,
     prepare_func=prepare_func,
     math_input_network=IdentityFunction,
-
-    # mlp
 
     # recurrent
     n_recurrent_units=256,
@@ -76,12 +87,7 @@ config = Config(
     layer_norm=True,
     use_mask=True,
 
-    build_on_input_network=lambda scope: MLP([256, 256], scope=scope),
-    build_on_object_network=lambda scope: MLP([256, 256, 256], scope=scope),
-    build_on_output_network=lambda scope: MLP([256, 256, 256], scope=scope),
-
-    build_arn_network=lambda scope: MLP([256, 256], scope=scope),
-    build_arn_object_network=lambda scope: MLP([256, 256, 256], scope=scope),
+    decoder_kind="mlp",
 )
 
 

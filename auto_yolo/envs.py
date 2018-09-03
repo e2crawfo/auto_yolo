@@ -453,16 +453,18 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
         config.update(
             build_env=Nips2018Set,
             n_classes=2,
-            max_overlap=int(14*14)/4,
             n_distractor_shapes=None,
             image_shape=(48, 48),
-            background_colours="white",
             colours="red green blue",
             shapes="circle square diamond",
             digits="simple1 simple2 simple3",
             digit_colour="black",
             n_cards=7,
             set_size=3,
+            n_train=128000,
+            max_overlap=14*14/3,
+            background_colours="cyan magenta yellow",
+            background_cfg=dict(mode="learn", A=3),
         )
     elif task == "clevr":
         config.update(

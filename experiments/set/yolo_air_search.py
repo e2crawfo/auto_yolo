@@ -31,16 +31,11 @@ config = dict(
     curriculum=[dict()],
     stopping_criteria="AP,max", threshold=0.99, patience=50000, max_steps=2e5,
 
-    n_train=128000,
     obj_logit_scale=1.0,
     alpha_logit_scale=1.0,
     alpha_logit_bias=1.0,
     obj_temp=1.0,
     training_wheels=0.0,
-
-    max_overlap=14*14/3,
-    background_colours="cyan magenta yellow",
-    background_cfg=dict(mode="learn", A=3),
 )
 
 envs.run_experiment(
