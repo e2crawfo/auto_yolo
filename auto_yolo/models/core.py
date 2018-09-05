@@ -802,11 +802,16 @@ class VariationalAutoencoder(ScopedFunction):
         return self._tensors["float_is_training"]
 
     def _process_labels(self, labels):
-        self._tensors.update(
-            annotations=labels[0],
-            n_annotations=labels[1],
-            targets=labels[2],
-        )
+        if labels:
+            self._tensors.update(
+                annotations=labels[0],
+                n_annotations=labels[1],
+            )
+
+        if len(labels) > 2:
+            self._tensors.update(
+                targets=labels[2]
+            )
 
         if len(labels) > 3:
             self._tensors.update(

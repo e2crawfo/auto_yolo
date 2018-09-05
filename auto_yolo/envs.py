@@ -8,6 +8,7 @@ from dps.datasets import (
 from dps.env.basic import collect
 from dps.datasets.shapes import ShapesDataset, BlueXAboveRedCircle, SetThreeAttr
 from dps.datasets.clevr import ClevrDataset
+from dps.datasets.atari import StaticAtariDataset
 from dps.utils import Config, pdb_postmortem
 from dps.train import training_loop
 from dps.hyper import build_and_submit
@@ -96,15 +97,15 @@ class Nips2018Grid(object):
         train_seed, val_seed, test_seed = 0, 1, 2
         train = GridEmnistObjectDetectionDataset(
             n_examples=int(cfg.n_train), shuffle=True,
-            example_range=cfg.train_example_range, seed=train_seed)
+            episode_range=cfg.train_episode_range, seed=train_seed)
 
         val = GridEmnistObjectDetectionDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            example_range=cfg.val_example_range, seed=val_seed)
+            episode_range=cfg.val_episode_range, seed=val_seed)
 
         test = GridEmnistObjectDetectionDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            example_range=cfg.test_example_range, seed=test_seed)
+            episode_range=cfg.test_episode_range, seed=test_seed)
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -117,15 +118,15 @@ class Nips2018Scatter(object):
         train_seed, val_seed, test_seed = 0, 1, 2
         train = EmnistObjectDetectionDataset(
             n_examples=int(cfg.n_train), shuffle=True,
-            example_range=cfg.train_example_range, seed=train_seed)
+            episode_range=cfg.train_episode_range, seed=train_seed)
 
         val = EmnistObjectDetectionDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            example_range=cfg.val_example_range, seed=val_seed)
+            episode_range=cfg.val_episode_range, seed=val_seed)
 
         test = EmnistObjectDetectionDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            example_range=cfg.test_example_range, seed=test_seed)
+            episode_range=cfg.test_episode_range, seed=test_seed)
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -139,15 +140,15 @@ class Nips2018Arithmetic(object):
 
         train = VisualArithmeticDataset(
             n_examples=int(cfg.n_train), shuffle=True,
-            example_range=cfg.train_example_range, seed=train_seed)
+            episode_range=cfg.train_episode_range, seed=train_seed)
 
         val = VisualArithmeticDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            example_range=cfg.val_example_range, seed=val_seed)
+            episode_range=cfg.val_episode_range, seed=val_seed)
 
         test = VisualArithmeticDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            example_range=cfg.test_example_range, seed=test_seed)
+            episode_range=cfg.test_episode_range, seed=test_seed)
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -201,9 +202,23 @@ class Nips2018Clevr(object):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
 
-        train = ClevrDataset(clevr_kind="train", n_examples=cfg.n_train, seed=train_seed, example_range=None)
-        val = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=val_seed, example_range=cfg.val_example_range)
-        test = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=test_seed, example_range=cfg.test_example_range)
+        train = ClevrDataset(clevr_kind="train", n_examples=cfg.n_train, seed=train_seed, episode_range=None)
+        val = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=val_seed, episode_range=cfg.val_episode_range)
+        test = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=test_seed, episode_range=cfg.test_episode_range)
+
+        self.datasets = dict(train=train, val=val, test=test)
+
+    def close(self):
+        pass
+
+
+class Nips2018Atari(object):
+    def __init__(self):
+        train_seed, val_seed, test_seed = 0, 1, 2
+
+        train = StaticAtariDataset(seed=train_seed, episode_range=cfg.train_episode_range)
+        val = StaticAtariDataset(seed=val_seed, episode_range=cfg.val_episode_range)
+        test = StaticAtariDataset(seed=test_seed, episode_range=cfg.test_episode_range)
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -227,9 +242,9 @@ class Nips2018Collect(object):
 
 
 env_config = Config(
-    train_example_range=(0.0, 0.8),
-    val_example_range=(0.8, 0.9),
-    test_example_range=(0.9, 1.0),
+    train_episode_range=(0.0, 0.8),
+    val_episode_range=(0.8, 0.9),
+    test_episode_range=(0.9, 1.0),
 )
 
 
@@ -469,6 +484,21 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
     elif task == "clevr":
         config.update(
             build_env=Nips2018Clevr, image_shape=(80, 120),
+        )
+    elif task == "atari":
+        config.update(
+            build_env=Nips2018Atari,
+            history_length=1,
+            store_o=True,
+            store_r=False,
+            store_a=False,
+            store_next_o=False,
+            after_warp=False,
+            max_samples_per_ep=100,
+            train_episode_range=(None, -2),
+            val_episode_range=(-2, -1),
+            test_episode_range=(-1, None),
+            background_cfg=dict(mode="learn_solid"),
         )
     else:
         raise Exception("Unknown task `{}`".format(task))

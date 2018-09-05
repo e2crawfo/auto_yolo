@@ -96,9 +96,14 @@ class YoloAir_Network(VariationalAutoencoder):
 
         self.anchor_boxes = np.array(self.anchor_boxes)
 
-        ap_iou_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-        self.eval_funcs = {"AP_at_point_{}".format(int(10 * v)): AP(v) for v in ap_iou_values}
-        self.eval_funcs["AP"] = AP(ap_iou_values)
+    @property
+    def eval_funcs(self):
+        if "annotations" in self._tensors:
+            ap_iou_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+            self.eval_funcs = {"AP_at_point_{}".format(int(10 * v)): AP(v) for v in ap_iou_values}
+            self.eval_funcs["AP"] = AP(ap_iou_values)
+        else:
+            return {}
 
     def _get_scheduled_value(self, name):
         scalar = self._tensors.get(name, None)
@@ -109,10 +114,14 @@ class YoloAir_Network(VariationalAutoencoder):
 
     def _build_box(self, box_params, is_training):
         mean, log_std = tf.split(box_params, 2, axis=-1)
+
         std = 2 * tf.nn.sigmoid(tf.clip_by_value(log_std, -10, 10))
         # std = tf.exp(log_std)
         if not self.noisy:
             std = tf.zeros_like(std)
+
+        mean = self.training_wheels * tf.stop_gradient(mean) + (1-self.training_wheels) * mean
+        std = self.training_wheels * tf.stop_gradient(std) + (1-self.training_wheels) * std
 
         cy_mean, cx_mean, h_mean, w_mean = tf.split(mean, 4, axis=-1)
         cy_std, cx_std, h_std, w_std = tf.split(std, 4, axis=-1)
