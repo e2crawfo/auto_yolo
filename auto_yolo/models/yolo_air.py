@@ -67,6 +67,8 @@ class YoloAir_Network(VariationalAutoencoder):
     object_encoder = None
     object_decoder = None
 
+    _eval_funcs = None
+
     def __init__(self, env, updater, scope=None, **kwargs):
         super(YoloAir_Network, self).__init__(env, updater, scope=scope, **kwargs)
 
@@ -99,11 +101,14 @@ class YoloAir_Network(VariationalAutoencoder):
     @property
     def eval_funcs(self):
         if "annotations" in self._tensors:
-            ap_iou_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-            self.eval_funcs = {"AP_at_point_{}".format(int(10 * v)): AP(v) for v in ap_iou_values}
-            self.eval_funcs["AP"] = AP(ap_iou_values)
+            if self._eval_funcs is None:
+                ap_iou_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+                eval_funcs = {"AP_at_point_{}".format(int(10 * v)): AP(v) for v in ap_iou_values}
+                eval_funcs["AP"] = AP(ap_iou_values)
+                self._eval_funcs = eval_funcs
+            return self._eval_funcs
         else:
-            return {}
+            return {eval_funcs}
 
     def _get_scheduled_value(self, name):
         scalar = self._tensors.get(name, None)
@@ -937,3 +942,134 @@ class YoloAir_ComparisonRenderHook(RenderHook):
 
             plt.subplots_adjust(left=.01, right=.99, top=.99, bottom=0.01, wspace=0.1, hspace=0.1)
             self.savefig("ground_truth/" + str(n), fig, updater, is_dir=False)
+
+
+class YoloAir_PaperSetRenderHook(RenderHook):
+    fetches = "obj raw_obj z inp output objects n_objects normalized_box input_glimpses"
+
+    def __call__(self, updater):
+        self.fetches += " annotations n_annotations"
+
+        fetched = self._fetch(updater)
+
+        try:
+            self._plot_reconstruction(updater, fetched)
+            self._plot_patches(updater, fetched, self.N)
+        except Exception:
+            pass
+
+    def _plot_reconstruction(self, updater, fetched):
+        inp = fetched['inp']
+        output = fetched['output']
+
+        _, image_height, image_width, _ = inp.shape
+
+        obj = fetched['obj'].reshape(self.N, -1)
+
+        box = (
+            fetched['normalized_box'] *
+            [image_height, image_width, image_height, image_width]
+        )
+        box = box.reshape(self.N, -1, 4)
+
+        n_annotations = fetched.get("n_annotations", [0] * self.N)
+        annotations = fetched.get("annotations", None)
+
+        pred_colour = np.array(to_rgb(self.pred_colour))
+        gt_colour = np.array(to_rgb(self.gt_colour))
+        cutoff = 0.5
+
+        import pdb; pdb.set_trace()
+
+        for n, (pred, gt) in enumerate(zip(output, inp)):
+            fig, axes = plt.subplots(1, 3, figsize=(6, 3))
+            axes = np.array(axes).reshape(3)
+
+            ax1 = axes[0]
+            self.imshow(ax1, gt)
+
+            ax2 = axes[1]
+            self.imshow(ax2, pred)
+
+            ax3 = axes[2]
+            self.imshow(ax3, pred)
+
+            # Plot proposed bounding boxes
+            for o, (top, left, height, width) in zip(obj[n], box[n]):
+                if o > cutoff:
+                    rect = patches.Rectangle(
+                        (left, top), width, height, linewidth=2, edgecolor=pred_colour, facecolor='none')
+                    ax3.add_patch(rect)
+
+            # Plot true bounding boxes
+            for k in range(n_annotations[n]):
+                _, top, bottom, left, right = annotations[n][k]
+
+                height = bottom - top
+                width = right - left
+
+                rect = patches.Rectangle(
+                    (left, top), width, height, linewidth=1, edgecolor=gt_colour, facecolor='none')
+                ax3.add_patch(rect)
+
+            for ax in axes.flatten():
+                ax.set_axis_off()
+
+            plt.subplots_adjust(left=0.02, right=.98, top=.98, bottom=0.02, wspace=0.1, hspace=0.1)
+            self.savefig("sampled_reconstruction/" + str(n), fig, updater)
+
+    def _plot_patches(self, updater, fetched, N):
+        # Create a plot showing what each object is generating
+        import matplotlib.pyplot as plt
+
+        H, W, B = updater.network.H, updater.network.W, updater.network.B
+
+        input_glimpses = fetched.get('input_glimpses', None)
+        objects = fetched['objects']
+        obj = fetched['obj']
+        raw_obj = fetched['raw_obj']
+        z = fetched['z']
+
+        on_colour = np.array(to_rgb("xkcd:azure"))
+        off_colour = np.array(to_rgb("xkcd:red"))
+
+        for idx in range(N):
+            fig, axes = plt.subplots(3*H, W*B, figsize=(20, 20))
+            axes = np.array(axes).reshape(3*H, W*B)
+
+            for h in range(H):
+                for w in range(W):
+                    for b in range(B):
+                        _obj = obj[idx, h, w, b, 0]
+                        _raw_obj = raw_obj[idx, h, w, b, 0]
+                        _z = z[idx, h, w, b, 0]
+
+                        ax = axes[3*h, w * B + b]
+                        self.imshow(ax, objects[idx, h, w, b, :, :, :3])
+
+                        colour = _obj * on_colour + (1-_obj) * off_colour
+                        obj_rect = patches.Rectangle(
+                            (1, 0), 0.2, 1, clip_on=False, transform=ax.transAxes, facecolor=colour)
+                        ax.add_patch(obj_rect)
+
+                        if h == 0 and b == 0:
+                            ax.set_title("w={}".format(w))
+                        if w == 0 and b == 0:
+                            ax.set_ylabel("h={}".format(h))
+
+                        ax = axes[3*h+1, w * B + b]
+                        self.imshow(ax, objects[idx, h, w, b, :, :, 3], cmap="gray")
+
+                        ax.set_title("obj={}, raw_obj={}, z={}, b={}".format(_obj, _raw_obj, _z, b))
+
+                        ax = axes[3*h+2, w * B + b]
+                        ax.set_title("input glimpse")
+
+                        self.imshow(ax, input_glimpses[idx, h, w, b, :, :, :])
+
+            for ax in axes.flatten():
+                ax.set_axis_off()
+
+            plt.subplots_adjust(left=0.02, right=.98, top=.98, bottom=0.02, wspace=0.1, hspace=0.1)
+
+            self.savefig("sampled_patches/" + str(idx), fig, updater)

@@ -158,7 +158,7 @@ def plot_transfer(extension):
 
     # -----
 
-    fig, axes = plt.subplots(1, 3, figsize=(7, 3))
+    fig, axes = plt.subplots(1, 3, figsize=(8, 2.2))
     ax = axes[0]
 
     y_func = lambda y: 100 * y
@@ -181,6 +181,7 @@ def plot_transfer(extension):
     ax.set_ylim((0., 105.))
     ax.set_xlabel('\# Digits in Test Image', fontsize=fontsize)
     ax.set_xticks([0, 5, 10, 15, 20])
+    ax.legend(loc="lower left", fontsize=8)
 
     # -----
 
@@ -202,7 +203,6 @@ def plot_transfer(extension):
     ax.tick_params(axis='both', labelsize=labelsize)
     ax.set_ylim((0.0, 3.1))
     ax.set_xticks([0, 5, 10, 15, 20])
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.05), ncol=2)
 
     # -----
 
@@ -225,7 +225,7 @@ def plot_transfer(extension):
     ax.set_xlabel('\# Digits in Test Image', fontsize=fontsize)
     ax.set_xticks([0, 5, 10, 15, 20])
 
-    plt.subplots_adjust(left=0.07, bottom=0.15, right=0.98, top=0.76, wspace=.27)
+    plt.subplots_adjust(left=0.07, bottom=0.2, right=0.98, top=0.94, wspace=.27)
 
     plot_path = os.path.join(plot_dir, 'transfer/main.' + extension)
     os.makedirs(os.path.dirname(plot_path), exist_ok=True)
@@ -733,4 +733,3 @@ if __name__ == "__main__":
 
                 if args.show:
                     plt.show(block=not args.no_block)
-

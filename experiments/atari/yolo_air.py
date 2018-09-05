@@ -55,7 +55,7 @@ config = dict(
     hw_prior_mean=np.log(0.1/0.9),
     hw_prior_std=0.5,
     count_prior_decay_steps=3000,
-    final_count_prior_log_odds=0.0125,
+    final_count_prior_log_odds=0.1,
     kernel_size=2,
     training_wheels="Exp(1.0, 0.0, decay_rate=0.0, decay_steps=4000, staircase=True)",
 
