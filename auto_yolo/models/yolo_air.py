@@ -979,8 +979,6 @@ class YoloAir_PaperSetRenderHook(RenderHook):
         gt_colour = np.array(to_rgb(self.gt_colour))
         cutoff = 0.5
 
-        import pdb; pdb.set_trace()
-
         for n, (pred, gt) in enumerate(zip(output, inp)):
             fig, axes = plt.subplots(1, 3, figsize=(6, 3))
             axes = np.array(axes).reshape(3)
