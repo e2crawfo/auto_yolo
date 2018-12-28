@@ -40,7 +40,7 @@ if not args.n_lookback:
 config = dict(
     curriculum=[dict()],
     n_train=64000, stopping_criteria="AP,max", threshold=0.99, patience=50000,
-    render_hook=yolo_air.YoloAir_ComparisonRenderHook(show_zero_boxes=False),
+    render_hook=yolo_air.YoloAir_RenderHook(),
     min_digits=1, max_digits=9, max_steps=2e5,
     background_cfg=dict(mode="learn_solid"),
     train_example_range=(0.0, 0.7),

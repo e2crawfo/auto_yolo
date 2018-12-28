@@ -1,1 +1,2 @@
--e git+https://github.com/e2crawfo/dps.git@master#egg=dps
+# -e git+https://github.com/e2crawfo/dps.git@auto_yolo#egg=dps
+dm-sonnet==1.17

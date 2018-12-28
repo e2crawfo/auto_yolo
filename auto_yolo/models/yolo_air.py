@@ -938,8 +938,6 @@ class YoloAir_ComparisonRenderHook(RenderHook):
                     (left, top), width, height, linewidth=2, edgecolor=colour, facecolor='none')
                 ax.add_patch(rect)
 
-            # self.imshow(ax, pred)
-
             plt.subplots_adjust(left=.01, right=.99, top=.99, bottom=0.01, wspace=0.1, hspace=0.1)
             self.savefig("ground_truth/" + str(n), fig, updater, is_dir=False)
 

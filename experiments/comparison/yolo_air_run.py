@@ -33,7 +33,7 @@ durations = dict(
 config = dict(
     curriculum=[dict()],
     n_train=64000, stopping_criteria="AP,max", threshold=0.99, patience=50000,
-    render_hook=yolo_air.YoloAir_ComparisonRenderHook(show_zero_boxes=False),
+    render_hook=yolo_air.YoloAir_RenderHook(),
 )
 
 envs.run_experiment(

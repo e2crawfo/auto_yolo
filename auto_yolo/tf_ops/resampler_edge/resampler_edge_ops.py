@@ -32,14 +32,10 @@ _resampler_edge_so = None
 def resampler_edge_so():
     global _resampler_edge_so
     if _resampler_edge_so is None:
-        try:
-            loc = os.path.join(os.path.split(__file__)[0], "_resampler_edge.so")
-            print("Loading resampler_edge library at {}.".format(loc))
-            _resampler_edge_so = tf.load_op_library(loc)
-        except Exception as e:
-            print("Failed. Reason:\n{}".format(traceback.format_exc()))
-        else:
-            print("Success.")
+        loc = os.path.join(os.path.split(__file__)[0], "_resampler_edge.so")
+        print("\nLoading resampler_edge library at {}.".format(loc))
+        _resampler_edge_so = tf.load_op_library(loc)
+        print("Success.\n")
     return _resampler_edge_so
 
 

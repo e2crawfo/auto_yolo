@@ -554,13 +554,15 @@ class Updater(_Updater):
                                         cfg.batch_size)
         self.data_manager.build_graph()
 
-        inp, *labels = self.data_manager.iterator.get_next()
-        self.inp = inp
-        network_outputs = self.network((inp, labels), self.data_manager.is_training)
+        data = self.data_manager.iterator.get_next()
+        self.inp = data["image"]
+        network_outputs = self.network(data, self.data_manager.is_training)
 
         network_tensors = network_outputs["tensors"]
         network_recorded_tensors = network_outputs["recorded_tensors"]
         network_losses = network_outputs["losses"]
+
+        self.tensors = network_tensors
 
         self.recorded_tensors = recorded_tensors = dict(global_step=tf.train.get_or_create_global_step())
 
@@ -584,7 +586,7 @@ class Updater(_Updater):
 
         output = network_tensors["output"]
         recorded_tensors.update({
-            "loss_" + name: tf_mean_sum(builder(output, inp))
+            "loss_" + name: tf_mean_sum(builder(output, self.inp))
             for name, builder in loss_builders.items()
         })
 
@@ -619,9 +621,9 @@ class EvalHook(Hook):
         self.data_manager = DataManager(val_dataset=dataset, batch_size=cfg.batch_size)
         self.data_manager.build_graph()
 
-        inp, *labels = self.data_manager.iterator.get_next()
-        self.inp = inp
-        network_outputs = self.network((inp, labels), self.data_manager.is_training)
+        data = self.data_manager.iterator.get_next()  # a dict mapping from names to tensors
+        self.inp = data["image"]
+        network_outputs = self.network(data, self.data_manager.is_training)
 
         network_tensors = network_outputs["tensors"]
         network_recorded_tensors = network_outputs["recorded_tensors"]
@@ -801,26 +803,9 @@ class VariationalAutoencoder(ScopedFunction):
     def float_is_training(self):
         return self._tensors["float_is_training"]
 
-    def _process_labels(self, labels):
-        if labels:
-            self._tensors.update(
-                annotations=labels[0],
-                n_annotations=labels[1],
-            )
+    def _call(self, data, is_training):
 
-        if len(labels) > 2:
-            self._tensors.update(
-                targets=labels[2]
-            )
-
-        if len(labels) > 3:
-            self._tensors.update(
-                background=labels[3]
-            )
-
-    def _call(self, inp, is_training):
-        self.original_inp = inp
-        inp, labels = inp
+        inp = data["image"]
 
         self._tensors = dict(
             inp=inp,
@@ -829,8 +814,21 @@ class VariationalAutoencoder(ScopedFunction):
             batch_size=tf.shape(inp)[0],
         )
 
-        self.labels = labels
-        self._process_labels(labels)
+        if "annotations" in data:
+            self._tensors.update(
+                annotations=data["annotations"][0],
+                n_annotations=data["annotations"][1],
+            )
+
+        if "label" in data:
+            self._tensors.update(
+                targets=data["label"],
+            )
+
+        if "background" in data:
+            self._tensors.update(
+                background=data["background"],
+            )
 
         self.recorded_tensors = dict(
             batch_size=tf.to_float(self.batch_size),

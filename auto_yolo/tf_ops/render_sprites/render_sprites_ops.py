@@ -32,14 +32,11 @@ _render_sprites_so = None
 def render_sprites_so():
     global _render_sprites_so
     if _render_sprites_so is None:
-        try:
-            loc = os.path.join(os.path.split(__file__)[0], "_render_sprites.so")
-            print("Loading render_sprites library at {}.".format(loc))
-            _render_sprites_so = tf.load_op_library(loc)
-        except Exception as e:
-            print("Failed. Reason:\n{}".format(traceback.format_exc()))
-        else:
-            print("Success.")
+        loc = os.path.join(os.path.split(__file__)[0], "_render_sprites.so")
+        print("Loading render_sprites library at {}.".format(loc))
+        _render_sprites_so = tf.load_op_library(loc)
+        print("Success.\n")
+
     return _render_sprites_so
 
 
