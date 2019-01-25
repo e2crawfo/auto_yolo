@@ -1,6 +1,8 @@
 # Requires tensorflow >= 1.6.0 (haven't tested on 1.5, definitely doesn't work on 1.4)
 TF_CFLAGS=$(shell python -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_compile_flags()))')
 TF_LFLAGS=$(shell python -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_link_flags()))')
+CUDA_HOME="/usr/local/cuda"
+CUDA_PARENT=$(shell dirname $(CUDA_HOME))
 
 all: _render_sprites.so
 
