@@ -1,6 +1,5 @@
 import tensorflow as tf
 import numpy as np
-from sklearn.cluster import k_means
 import collections
 from matplotlib.colors import to_rgb
 import matplotlib.pyplot as plt
@@ -8,9 +7,9 @@ from matplotlib import animation
 
 from dps import cfg
 from dps.updater import Updater as _Updater
-from dps.utils import Param, prime_factors, square_subplots
+from dps.utils import Param, square_subplots
 from dps.utils.tf import (
-    ConvNet, build_gradient_train_op, tf_mean_sum, apply_mask_and_group_at_front,
+    build_gradient_train_op, tf_mean_sum, apply_mask_and_group_at_front,
     ScopedFunction, build_scheduled_value, FIXED_COLLECTION)
 from dps.updater import DataManager
 from dps.train import Hook
@@ -21,9 +20,9 @@ def normal_kl(mean, std, prior_mean, prior_std):
     prior_var = prior_std**2
 
     return 0.5 * (
-        tf.log(prior_var) - tf.log(var) -
-        1.0 + var / prior_var +
-        tf.square(mean - prior_mean) / prior_var
+        tf.log(prior_var) - tf.log(var)
+        - 1.0 + var / prior_var
+        + tf.square(mean - prior_mean) / prior_var
     )
 
 
@@ -56,163 +55,10 @@ def concrete_binary_sample_kl(pre_sigmoid_sample,
     return log_posterior - log_prior
 
 
-class Backbone(ConvNet):
-    pixels_per_cell = Param()
-    kernel_size = Param()
-    n_channels = Param()
-    n_final_layers = Param(2)
-
-    def __init__(self, check_output_shape=False, **kwargs):
-        sh = sorted(prime_factors(self.pixels_per_cell[0]))
-        sw = sorted(prime_factors(self.pixels_per_cell[1]))
-        assert max(sh) <= 4
-        assert max(sw) <= 4
-
-        if len(sh) < len(sw):
-            sh = sh + [1] * (len(sw) - len(sh))
-        elif len(sw) < len(sh):
-            sw = sw + [1] * (len(sh) - len(sw))
-
-        layout = [dict(filters=self.n_channels, kernel_size=4, strides=(_sh, _sw), padding="RIGHT_ONLY")
-                  for _sh, _sw in zip(sh, sw)]
-
-        # These layers don't change the shape
-        layout += [
-            dict(filters=self.n_channels, kernel_size=self.kernel_size, strides=1, padding="SAME")
-            for i in range(self.n_final_layers)]
-
-        super(Backbone, self).__init__(layout, check_output_shape=check_output_shape, **kwargs)
-
-
-class InverseBackbone(ConvNet):
-    pixels_per_cell = Param()
-    kernel_size = Param()
-    n_channels = Param()
-    n_final_layers = Param(2)
-
-    def __init__(self, **kwargs):
-        # These layers don't change the shape
-        layout = [
-            dict(filters=self.n_channels, kernel_size=self.kernel_size, strides=1, padding="SAME", transpose=True)
-            for i in range(self.n_final_layers)]
-
-        sh = sorted(prime_factors(self.pixels_per_cell[0]))
-        sw = sorted(prime_factors(self.pixels_per_cell[1]))
-        assert max(sh) <= 4
-        assert max(sw) <= 4
-
-        if len(sh) < len(sw):
-            sh = sh + [1] * (len(sw) - len(sh))
-        elif len(sw) < len(sh):
-            sw = sw + [1] * (len(sh) - len(sw))
-
-        layout += [dict(filters=self.n_channels, kernel_size=4, strides=(_sh, _sw), padding="SAME", transpose=True)
-                   for _sh, _sw in zip(sh, sw)]
-
-        super(InverseBackbone, self).__init__(layout, check_output_shape=False, **kwargs)
-
-
-class NewBackbone(ConvNet):
-    pixels_per_cell = Param()
-    max_object_shape = Param()
-    n_channels = Param()
-    n_base_layers = Param(3)
-    n_final_layers = Param(2)
-
-    kernel_size = Param()
-
-    def __init__(self, **kwargs):
-        receptive_field_shape = (
-            self.max_object_shape[0] + self.pixels_per_cell[0],
-            self.max_object_shape[1] + self.pixels_per_cell[1],
-        )
-        cumulative_filter_shape = (
-            receptive_field_shape[0] + self.n_base_layers - 1,
-            receptive_field_shape[1] + self.n_base_layers - 1,
-        )
-
-        layout = []
-
-        for i in range(self.n_base_layers):
-            fh = cumulative_filter_shape[0] // self.n_base_layers
-            if i < cumulative_filter_shape[0] % self.n_base_layers:
-                fh += 1
-
-            fw = cumulative_filter_shape[1] // self.n_base_layers
-            if i < cumulative_filter_shape[1] % self.n_base_layers:
-                fw += 1
-
-            layout.append(
-                dict(filters=self.n_channels, kernel_size=(fh, fw), padding="VALID", strides=1))
-
-        layout.append(dict(filters=self.n_channels, kernel_size=1, padding="VALID", strides=self.pixels_per_cell))
-
-        layout += [
-            dict(filters=self.n_channels, kernel_size=self.kernel_size, strides=1, padding="SAME")
-            for i in range(self.n_final_layers)]
-
-        super(NewBackbone, self).__init__(layout, check_output_shape=True, **kwargs)
-
-    def _call(self, inp, output_size, is_training):
-        mod = int(inp.shape[1]) % self.pixels_per_cell[0]
-        bottom_padding = self.pixels_per_cell[0] - mod if mod > 0 else 0
-
-        padding_h = int(np.ceil(self.max_object_shape[0] / 2))
-
-        mod = int(inp.shape[2]) % self.pixels_per_cell[1]
-        right_padding = self.pixels_per_cell[1] - mod if mod > 0 else 0
-
-        padding_w = int(np.ceil(self.max_object_shape[1] / 2))
-
-        padding = [[0, 0], [padding_h, bottom_padding + padding_h], [padding_w, right_padding + padding_w], [0, 0]]
-
-        inp = tf.pad(inp, padding)
-
-        return super(NewBackbone, self)._call(inp, output_size, is_training)
-
-
-class NextStep(ConvNet):
-    kernel_size = Param()
-    n_channels = Param()
-
-    def __init__(self, **kwargs):
-        layout = [
-            dict(filters=self.n_channels, kernel_size=self.kernel_size, strides=1, padding="SAME"),
-            dict(filters=self.n_channels, kernel_size=self.kernel_size, strides=1, padding="SAME"),
-        ]
-        super(NextStep, self).__init__(layout, check_output_shape=True, **kwargs)
-
-
-class ObjectDecoder(ConvNet):
-    n_decoder_channels = Param()
-
-    def __init__(self, **kwargs):
-        layout = [
-            dict(filters=self.n_decoder_channels, kernel_size=3, strides=1, padding="VALID", transpose=True),
-            dict(filters=self.n_decoder_channels, kernel_size=5, strides=1, padding="VALID", transpose=True),
-            dict(filters=self.n_decoder_channels, kernel_size=3, strides=2, padding="SAME", transpose=True),
-            dict(filters=4, kernel_size=4, strides=1, padding="SAME", transpose=True),
-        ]
-        super(ObjectDecoder, self).__init__(layout, check_output_shape=True, **kwargs)
-
-
-class ObjectDecoder28x28(ConvNet):
-    n_decoder_channels = Param()
-
-    def __init__(self, **kwargs):
-        layout = [
-            dict(filters=self.n_decoder_channels, kernel_size=3, strides=1, padding="VALID", transpose=True),
-            dict(filters=self.n_decoder_channels, kernel_size=5, strides=1, padding="VALID", transpose=True),
-            dict(filters=self.n_decoder_channels, kernel_size=3, strides=2, padding="SAME", transpose=True),
-            dict(filters=4, kernel_size=4, strides=2, padding="SAME", transpose=True),
-        ]
-        super(ObjectDecoder28x28, self).__init__(layout, check_output_shape=True, **kwargs)
-
-
 def build_xent_loss(predictions, targets):
     return -(
-        targets * tf.log(predictions + 1e-9) +
-        (1. - targets) * tf.log(1. - predictions + 1e-9))
+        targets * tf.log(predictions + 1e-9)
+        + (1. - targets) * tf.log(1. - predictions + 1e-9))
 
 
 def build_squared_loss(predictions, targets):
@@ -488,65 +334,6 @@ class Updater(_Updater):
 
         return {k: v / n_points for k, v in record.items()}
 
-    def compute_validation_pixelwise_mean(self):
-        sess = tf.get_default_session()
-
-        mean = np.array([0, 0, 0])
-        mean = None
-        n_points = 0
-        feed_dict = self.data_manager.do_val()
-
-        while True:
-            try:
-                inp = sess.run(self.network.inp, feed_dict=feed_dict)
-            except tf.errors.OutOfRangeError:
-                break
-
-            n_new = inp.shape[0]
-            if mean is None:
-                mean = np.mean(inp, axis=0)
-            else:
-                mean = mean * (n_points / (n_points + n_new)) + np.sum(inp, axis=0) / (n_points + n_new)
-            n_points += n_new
-        return mean
-
-    def compute_validation_mean(self):
-        sess = tf.get_default_session()
-
-        mean = np.array([0, 0, 0])
-        n_points = 0
-        feed_dict = self.data_manager.do_val()
-
-        while True:
-            try:
-                inp = sess.run(self.network.inp, feed_dict=feed_dict)
-            except tf.errors.OutOfRangeError:
-                break
-
-            n_new = np.product(inp.shape[:3])
-            mean = mean * (n_points / (n_points + n_new)) + np.sum(inp, axis=(0, 1, 2)) / (n_points + n_new)
-            n_points += n_new
-        return mean
-
-    def compute_validation_mode(self):
-        sess = tf.get_default_session()
-
-        feed_dict = self.data_manager.do_val()
-        counter = collections.Counter()
-
-        while True:
-            try:
-                inp = sess.run(self.network.inp, feed_dict=feed_dict)
-            except tf.errors.OutOfRangeError:
-                break
-
-            transformed = (255. * inp).astype('i')
-            counter.update(tuple(t) for t in transformed.reshape(-1, 3))
-
-        most_common = counter.most_common(1)[0][0]
-
-        return np.array(most_common) / 255.
-
     def _build_graph(self):
         self.data_manager = DataManager(self.env.datasets['train'],
                                         self.env.datasets['val'],
@@ -643,7 +430,7 @@ class EvalHook(Hook):
 
         output = network_tensors["output"]
         recorded_tensors.update({
-            "loss_" + name: tf_mean_sum(builder(output, inp))
+            "loss_" + name: tf_mean_sum(builder(output, self.inp))
             for name, builder in loss_builders.items()
         })
 
@@ -854,45 +641,7 @@ class VariationalAutoencoder(ScopedFunction):
 
     def build_background(self):
         if self.needs_background:
-            if cfg.background_cfg.mode == "static":
-                raise Exception("NotImplemented")
-
-                with cfg.background_cfg.static_cfg:
-                    from kmodes.kmodes import KModes
-                    print("Clustering...")
-                    print(cfg.background_cfg.static_cfg)
-
-                    cluster_data = self.env.datasets["train"].X
-                    image_shape = cluster_data.shape[1:]
-                    indices = np.random.choice(
-                        cluster_data.shape[0], replace=False, size=cfg.n_clustering_examples)
-                    cluster_data = cluster_data[indices, ...]
-                    cluster_data = cluster_data.reshape(cluster_data.shape[0], -1)
-
-                    if cfg.use_k_modes:
-                        km = KModes(n_clusters=cfg.n_clusters, init='Huang', n_init=1, verbose=1)
-                        km.fit(cluster_data)
-                        centroids = km.cluster_centroids_ / 255.
-                    else:
-                        cluster_data = cluster_data / 255.
-                        result = k_means(cluster_data, cfg.n_clusters)
-                        centroids = result[0]
-                    centroids = np.clip(centroids, 0.0, 1.0)
-                    centroids = centroids.reshape(cfg.n_clusters, *image_shape)
-
-            elif cfg.background_cfg.mode == "pixelwise_mean":
-                mean = self.updater.compute_validation_pixelwise_mean()
-                background = mean[None, :, :, :] * tf.ones_like(self.inp)
-
-            elif cfg.background_cfg.mode == "mean":
-                mean = self.updater.compute_validation_mean()
-                background = mean[None, None, None, :] * tf.ones_like(self.inp)
-
-            elif cfg.background_cfg.mode == "mode":
-                mode = self.updater.compute_validation_mode()
-                background = mode[None, None, None, :] * tf.ones_like(self.inp)
-
-            elif cfg.background_cfg.mode == "colour":
+            if cfg.background_cfg.mode == "colour":
                 rgb = np.array(to_rgb(cfg.background_cfg.colour))[None, None, None, :]
                 background = rgb * tf.ones_like(self.inp)
 
@@ -946,8 +695,9 @@ class VariationalAutoencoder(ScopedFunction):
 
             elif cfg.background_cfg.mode == "data":
                 background = self._tensors["background"]
+
             else:
-                background = tf.zeros_like(self.inp)
+                raise Exception("Unrecognized background mode: {}.".format(cfg.background_cfg.mode))
 
             self._tensors["background"] = background
 

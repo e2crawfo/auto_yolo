@@ -108,7 +108,7 @@ class YoloAir_Network(VariationalAutoencoder):
                 self._eval_funcs = eval_funcs
             return self._eval_funcs
         else:
-            return {eval_funcs}
+            return {}
 
     def _get_scheduled_value(self, name):
         scalar = self._tensors.get(name, None)
@@ -245,8 +245,8 @@ class YoloAir_Network(VariationalAutoencoder):
 
         if self.noisy:
             obj = (
-                self.float_is_training * raw_obj +
-                (1 - self.float_is_training) * tf.round(raw_obj)
+                self.float_is_training * raw_obj
+                + (1 - self.float_is_training) * tf.round(raw_obj)
             )
         else:
             obj = tf.round(raw_obj)
@@ -483,12 +483,12 @@ class YoloAir_Network(VariationalAutoencoder):
 
         # box centre normalized to image height and width
         yt = (
-            (self.pixels_per_cell[0] / self.image_height) *
-            (cell_y + tf.range(self.H, dtype=tf.float32)[None, :, None, None, None])
+            (self.pixels_per_cell[0] / self.image_height)
+            * (cell_y + tf.range(self.H, dtype=tf.float32)[None, :, None, None, None])
         )
         xt = (
-            (self.pixels_per_cell[1] / self.image_width) *
-            (cell_x + tf.range(self.W, dtype=tf.float32)[None, None, :, None, None])
+            (self.pixels_per_cell[1] / self.image_width)
+            * (cell_x + tf.range(self.W, dtype=tf.float32)[None, None, :, None, None])
         )
 
         # `render_sprites` requires box top-left, whereas y and x give box center
@@ -611,8 +611,8 @@ class YoloAir_Network(VariationalAutoencoder):
                         prob = self._tensors["obj_prob"][:, h, w, b, :]
 
                         _obj_kl = (
-                            prob * (tf_safe_log(prob) - tf_safe_log(p_z)) +
-                            (1-prob) * (tf_safe_log(1-prob) - tf_safe_log(1-p_z))
+                            prob * (tf_safe_log(prob) - tf_safe_log(p_z))
+                            + (1-prob) * (tf_safe_log(1-prob) - tf_safe_log(1-p_z))
                         )
 
                     obj_kl.append(_obj_kl)
@@ -696,8 +696,8 @@ class YoloAir_Network(VariationalAutoencoder):
             inp = self._tensors['inp']
             self._tensors['per_pixel_reconstruction_loss'] = loss_builders[loss_key](output, inp)
             self.losses['reconstruction'] = (
-                self.reconstruction_weight *
-                tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
+                self.reconstruction_weight
+                * tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
             )
 
         if self.train_kl:
@@ -754,8 +754,8 @@ class YoloAir_RenderHook(RenderHook):
         obj = fetched['obj'].reshape(self.N, -1)
 
         box = (
-            fetched['normalized_box'] *
-            [image_height, image_width, image_height, image_width]
+            fetched['normalized_box']
+            * [image_height, image_width, image_height, image_width]
         )
         box = box.reshape(self.N, -1, 4)
 
@@ -912,8 +912,8 @@ class YoloAir_ComparisonRenderHook(RenderHook):
         obj = fetched['obj'].reshape(self.N, -1)
 
         box = (
-            fetched['normalized_box'] *
-            [image_height, image_width, image_height, image_width]
+            fetched['normalized_box']
+            * [image_height, image_width, image_height, image_width]
         )
         box = box.reshape(self.N, -1, 4)
 
@@ -944,10 +944,10 @@ class YoloAir_ComparisonRenderHook(RenderHook):
 
 class YoloAir_PaperSetRenderHook(RenderHook):
     fetches = "obj raw_obj z inp output objects n_objects normalized_box input_glimpses"
+    do_annotations = True
 
     def __call__(self, updater):
         self.fetches += " annotations n_annotations"
-
         fetched = self._fetch(updater)
 
         try:
@@ -965,16 +965,18 @@ class YoloAir_PaperSetRenderHook(RenderHook):
         obj = fetched['obj'].reshape(self.N, -1)
 
         box = (
-            fetched['normalized_box'] *
-            [image_height, image_width, image_height, image_width]
+            fetched['normalized_box']
+            * [image_height, image_width, image_height, image_width]
         )
         box = box.reshape(self.N, -1, 4)
 
-        n_annotations = fetched.get("n_annotations", [0] * self.N)
-        annotations = fetched.get("annotations", None)
-
         pred_colour = np.array(to_rgb(self.pred_colour))
-        gt_colour = np.array(to_rgb(self.gt_colour))
+
+        if self.do_annotations:
+            n_annotations = fetched.get("n_annotations", [0] * self.N)
+            annotations = fetched.get("annotations", None)
+            gt_colour = np.array(to_rgb(self.gt_colour))
+
         cutoff = 0.5
 
         for n, (pred, gt) in enumerate(zip(output, inp)):
@@ -997,16 +999,17 @@ class YoloAir_PaperSetRenderHook(RenderHook):
                         (left, top), width, height, linewidth=2, edgecolor=pred_colour, facecolor='none')
                     ax3.add_patch(rect)
 
-            # Plot true bounding boxes
-            for k in range(n_annotations[n]):
-                _, top, bottom, left, right = annotations[n][k]
+            if self.do_annotations:
+                # Plot true bounding boxes
+                for k in range(n_annotations[n]):
+                    _, top, bottom, left, right = annotations[n][k]
 
-                height = bottom - top
-                width = right - left
+                    height = bottom - top
+                    width = right - left
 
-                rect = patches.Rectangle(
-                    (left, top), width, height, linewidth=1, edgecolor=gt_colour, facecolor='none')
-                ax3.add_patch(rect)
+                    rect = patches.Rectangle(
+                        (left, top), width, height, linewidth=1, edgecolor=gt_colour, facecolor='none')
+                    ax3.add_patch(rect)
 
             for ax in axes.flatten():
                 ax.set_axis_off()

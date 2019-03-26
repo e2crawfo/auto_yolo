@@ -68,8 +68,8 @@ simple_config = alg_config.copy(
     build_network=simple.SimpleVAE,
     render_hook=simple.SimpleVAE_RenderHook(),
 
-    build_encoder=core.Backbone,
-    build_decoder=core.InverseBackbone,
+    build_encoder=networks.Backbone,
+    build_decoder=networks.InverseBackbone,
     n_channels=128,
     n_final_layers=3,
     kernel_size=1,
@@ -122,8 +122,8 @@ yolo_air_config = alg_config.copy(
 
     render_hook=yolo_air.YoloAir_RenderHook(),
 
-    build_backbone=core.Backbone,
-    build_next_step=core.NextStep,
+    build_backbone=networks.Backbone,
+    build_next_step=networks.NextStep,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
 
@@ -177,8 +177,8 @@ yolo_air_transfer_config = yolo_air_config.copy(
     min_chars=6, max_chars=10,
     load_path=0,
     curriculum=(
-        [dict(postprocessing="random")] +
-        [dict(min_chars=n, max_chars=n, n_train=32, do_train=False) for n in range(1, 21)]),
+        [dict(postprocessing="random")]
+        + [dict(min_chars=n, max_chars=n, n_train=32, do_train=False) for n in range(1, 21)]),
 )
 
 progression_curriculum = [
@@ -340,8 +340,8 @@ def math_prepare_func():
         cfg.build_math_network = networks.AdditionNetwork
         cfg.math_A = 10
         n_cells = (
-            int(np.ceil(cfg.image_shape[0] / cfg.pixels_per_cell[0])) *
-            int(np.ceil(cfg.image_shape[1] / cfg.pixels_per_cell[1])))
+            int(np.ceil(cfg.image_shape[0] / cfg.pixels_per_cell[0]))
+            * int(np.ceil(cfg.image_shape[1] / cfg.pixels_per_cell[1])))
         cfg.largest_digit = n_cells * 9
     else:
         raise Exception("Unknown value for decoder_kind: '{}'".format(decoder_kind))
@@ -467,10 +467,10 @@ air_math_config = air_config.copy(
 #
 # simple_math_config = math_config.copy(
 #     alg_name="simple_math",
-#     build_network=core.SimpleMathNetwork,
-#     render_hook=core.SimpleMath_RenderHook(),
-#     build_math_encoder=core.Backbone,
-#     build_math_decoder=core.InverseBackbone,
+#     build_network=networks.SimpleMathNetwork,
+#     render_hook=networks.SimpleMath_RenderHook(),
+#     build_math_encoder=networks.Backbone,
+#     build_math_decoder=networks.InverseBackbone,
 #     train_reconstruction=False,
 #     train_kl=False,
 #     noisy=False,
@@ -486,7 +486,7 @@ air_math_config = air_config.copy(
 # yolo_xo_config = math_config.copy(
 #     alg_name="yolo_xo",
 #     build_network=yolo_xo.YoloAIR_XONetwork,
-#     build_math_network=core.AttentionRegressionNetwork,
+#     build_math_network=networks.AttentionRegressionNetwork,
 #     balanced=True,
 # )
 #
@@ -521,7 +521,7 @@ air_math_config = air_config.copy(
 # simple_xo_config = simple_math_config.copy(
 #     alg_name="simple_xo",
 #     build_network=yolo_xo.SimpleXONetwork,
-#     build_math_network=core.AttentionRegressionNetwork,
+#     build_math_network=networks.AttentionRegressionNetwork,
 # )
 #
 # simple_xo_2stage_config = simple_xo_config.copy(

@@ -525,7 +525,7 @@ def plot_addition(extension):
     line = ax.errorbar(x, y, yerr=yerr, label="ConnComp", marker="o", ls="-")
 
     x, y, *yerr = get_arithmetic_data([ground_truth_raw_path], "n_train", "_test_math_accuracy", 0, "ci95")
-    line = ax.errorbar(x, y, yerr=yerr, label="GroundTruth", marker="^", ls="-")
+    line = ax.errorbar(x, y, yerr=yerr, label="TrueBB", marker="^", ls="-")
 
     x, y, *yerr = get_arithmetic_data([simple_raw_path], "n_train", "_test_math_accuracy", 0, "ci95")
     line = ax.errorbar(x, y, yerr=yerr, label="ConvNet", marker="v", ls="-")
@@ -597,7 +597,7 @@ def plot_ablation(extension):
 
     # -----
 
-    fig, axes = plt.subplots(1, 3, figsize=(7, 3))
+    fig, axes = plt.subplots(1, 3, figsize=(8, 2.2))
     ax = axes[0]
 
     y_func = lambda y: 100 * y
@@ -609,14 +609,14 @@ def plot_ablation(extension):
         if not key_filter(key):
             continue
 
-        label = "No Lateral Conns, Trained on {}--{} digits".format(key.min_chars, key.max_chars)
+        label = "No Lateral Conns, {}--{} digits".format(key.min_chars, key.max_chars)
         ax.errorbar(x, y, yerr=yerr, label=label)
 
     nb1_data = get_transfer_data(yolo_path_n_lookback_1, "n_train", measure, "ci95", y_func=y_func)
     for (x, y, *yerr), key in nb1_data:
         if not key_filter(key):
             continue
-        label = "With Lateral Conns, Trained on {}--{} digits".format(key.min_chars, key.max_chars)
+        label = "With Lateral Conns, {}--{} digits".format(key.min_chars, key.max_chars)
         ax.errorbar(x, y, yerr=yerr, label=label)
 
     fontsize = None
@@ -627,6 +627,7 @@ def plot_ablation(extension):
     ax.set_ylim((0., 105.))
     ax.set_xlabel('\# Digits in Test Image', fontsize=fontsize)
     ax.set_xticks([0, 5, 10, 15, 20])
+    ax.legend(loc="lower left", fontsize=8)
 
     # -----
 
@@ -638,22 +639,19 @@ def plot_ablation(extension):
     for (x, y, *yerr), key in nb0_data:
         if not key_filter(key):
             continue
-        label = "No Lateral Conns, Trained on {}--{} digits".format(key.min_chars, key.max_chars)
-        ax.errorbar(x, y, yerr=yerr, label=label)
+        ax.errorbar(x, y, yerr=yerr)
 
     nb1_data = get_transfer_data(yolo_path_n_lookback_1, "n_train", measure, "ci95")
     for (x, y, *yerr), key in nb1_data:
         if not key_filter(key):
             continue
-        label = "With Lateral Conns, Trained on {}--{} digits".format(key.min_chars, key.max_chars)
-        ax.errorbar(x, y, yerr=yerr, label=label)
+        ax.errorbar(x, y, yerr=yerr)
 
     ax.set_ylabel(r'Count Absolute Error', fontsize=fontsize)
     ax.set_xlabel('\# Digits in Test Image', fontsize=fontsize)
     ax.tick_params(axis='both', labelsize=labelsize)
     ax.set_ylim((0.0, 4.))
     ax.set_xticks([0, 5, 10, 15, 20])
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.05), ncol=2)
 
     # -----
 
@@ -665,15 +663,13 @@ def plot_ablation(extension):
     for (x, y, *yerr), key in nb0_data:
         if not key_filter(key):
             continue
-        label = "No Lateral Conns, Trained on {}--{} digits".format(key.min_chars, key.max_chars)
-        ax.errorbar(x, y, yerr=yerr, label=label)
+        ax.errorbar(x, y, yerr=yerr)
 
     nb1_data = get_transfer_data(yolo_path_n_lookback_1, "n_train", measure, "ci95")
     for (x, y, *yerr), key in nb1_data:
         if not key_filter(key):
             continue
-        label = "With Lateral Conns, Trained on {}--{} digits".format(key.min_chars, key.max_chars)
-        ax.errorbar(x, y, yerr=yerr, label=label)
+        ax.errorbar(x, y, yerr=yerr)
 
     ax.set_ylabel('Count 0-1 Error', fontsize=fontsize)
     ax.tick_params(axis='both', labelsize=labelsize)
@@ -681,7 +677,9 @@ def plot_ablation(extension):
     ax.set_xlabel('\# Digits in Test Image', fontsize=fontsize)
     ax.set_xticks([0, 5, 10, 15, 20])
 
-    plt.subplots_adjust(left=0.07, bottom=0.15, right=0.98, top=0.76, wspace=.27)
+    # -----
+
+    plt.subplots_adjust(left=0.07, bottom=0.2, right=0.98, top=0.94, wspace=.27)
 
     plot_path = os.path.join(plot_dir, 'ablation/main.' + extension)
     os.makedirs(os.path.dirname(plot_path), exist_ok=True)

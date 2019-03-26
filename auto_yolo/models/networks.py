@@ -2,9 +2,164 @@ import tensorflow as tf
 import numpy as np
 
 from dps import cfg
-from dps.utils import Param
+from dps.utils import Param, prime_factors
 from dps.utils.tf import (
     ConvNet, ScopedFunction, MLP, apply_mask_and_group_at_front)
+
+
+class Backbone(ConvNet):
+    pixels_per_cell = Param()
+    kernel_size = Param()
+    n_channels = Param()
+    n_final_layers = Param(2)
+
+    def __init__(self, check_output_shape=False, **kwargs):
+        sh = sorted(prime_factors(self.pixels_per_cell[0]))
+        sw = sorted(prime_factors(self.pixels_per_cell[1]))
+        assert max(sh) <= 4
+        assert max(sw) <= 4
+
+        if len(sh) < len(sw):
+            sh = sh + [1] * (len(sw) - len(sh))
+        elif len(sw) < len(sh):
+            sw = sw + [1] * (len(sh) - len(sw))
+
+        layout = [
+            dict(filters=self.n_channels, kernel_size=4, strides=(_sh, _sw), padding="RIGHT_ONLY")
+            for _sh, _sw in zip(sh, sw)]
+
+        # These layers don't change the shape
+        layout += [
+            dict(filters=self.n_channels, kernel_size=self.kernel_size, strides=1, padding="SAME")
+            for i in range(self.n_final_layers)]
+
+        super(Backbone, self).__init__(layout, check_output_shape=check_output_shape, **kwargs)
+
+
+class InverseBackbone(ConvNet):
+    pixels_per_cell = Param()
+    kernel_size = Param()
+    n_channels = Param()
+    n_final_layers = Param(2)
+
+    def __init__(self, **kwargs):
+        # These layers don't change the shape
+        layout = [
+            dict(filters=self.n_channels, kernel_size=self.kernel_size, strides=1, padding="SAME", transpose=True)
+            for i in range(self.n_final_layers)]
+
+        sh = sorted(prime_factors(self.pixels_per_cell[0]))
+        sw = sorted(prime_factors(self.pixels_per_cell[1]))
+        assert max(sh) <= 4
+        assert max(sw) <= 4
+
+        if len(sh) < len(sw):
+            sh = sh + [1] * (len(sw) - len(sh))
+        elif len(sw) < len(sh):
+            sw = sw + [1] * (len(sh) - len(sw))
+
+        layout += [dict(filters=self.n_channels, kernel_size=4, strides=(_sh, _sw), padding="SAME", transpose=True)
+                   for _sh, _sw in zip(sh, sw)]
+
+        super(InverseBackbone, self).__init__(layout, check_output_shape=False, **kwargs)
+
+
+class NewBackbone(ConvNet):
+    pixels_per_cell = Param()
+    max_object_shape = Param()
+    n_channels = Param()
+    n_base_layers = Param(3)
+    n_final_layers = Param(2)
+
+    kernel_size = Param()
+
+    def __init__(self, **kwargs):
+        receptive_field_shape = (
+            self.max_object_shape[0] + self.pixels_per_cell[0],
+            self.max_object_shape[1] + self.pixels_per_cell[1],
+        )
+        cumulative_filter_shape = (
+            receptive_field_shape[0] + self.n_base_layers - 1,
+            receptive_field_shape[1] + self.n_base_layers - 1,
+        )
+
+        layout = []
+
+        for i in range(self.n_base_layers):
+            fh = cumulative_filter_shape[0] // self.n_base_layers
+            if i < cumulative_filter_shape[0] % self.n_base_layers:
+                fh += 1
+
+            fw = cumulative_filter_shape[1] // self.n_base_layers
+            if i < cumulative_filter_shape[1] % self.n_base_layers:
+                fw += 1
+
+            layout.append(
+                dict(filters=self.n_channels, kernel_size=(fh, fw), padding="VALID", strides=1))
+
+        layout.append(dict(filters=self.n_channels, kernel_size=1, padding="VALID", strides=self.pixels_per_cell))
+
+        layout += [
+            dict(filters=self.n_channels, kernel_size=self.kernel_size, strides=1, padding="SAME")
+            for i in range(self.n_final_layers)]
+
+        super(NewBackbone, self).__init__(layout, check_output_shape=True, **kwargs)
+
+    def _call(self, inp, output_size, is_training):
+        mod = int(inp.shape[1]) % self.pixels_per_cell[0]
+        bottom_padding = self.pixels_per_cell[0] - mod if mod > 0 else 0
+
+        padding_h = int(np.ceil(self.max_object_shape[0] / 2))
+
+        mod = int(inp.shape[2]) % self.pixels_per_cell[1]
+        right_padding = self.pixels_per_cell[1] - mod if mod > 0 else 0
+
+        padding_w = int(np.ceil(self.max_object_shape[1] / 2))
+
+        padding = [[0, 0], [padding_h, bottom_padding + padding_h], [padding_w, right_padding + padding_w], [0, 0]]
+
+        inp = tf.pad(inp, padding)
+
+        return super(NewBackbone, self)._call(inp, output_size, is_training)
+
+
+class NextStep(ConvNet):
+    kernel_size = Param()
+    n_channels = Param()
+
+    def __init__(self, **kwargs):
+        layout = [
+            dict(filters=self.n_channels, kernel_size=self.kernel_size, strides=1, padding="SAME"),
+            dict(filters=self.n_channels, kernel_size=self.kernel_size, strides=1, padding="SAME"),
+        ]
+        super(NextStep, self).__init__(layout, check_output_shape=True, **kwargs)
+
+
+class ObjectDecoder(ConvNet):
+    n_decoder_channels = Param()
+
+    def __init__(self, **kwargs):
+        layout = [
+            dict(filters=self.n_decoder_channels, kernel_size=3, strides=1, padding="VALID", transpose=True),
+            dict(filters=self.n_decoder_channels, kernel_size=5, strides=1, padding="VALID", transpose=True),
+            dict(filters=self.n_decoder_channels, kernel_size=3, strides=2, padding="SAME", transpose=True),
+            dict(filters=4, kernel_size=4, strides=1, padding="SAME", transpose=True),
+        ]
+        super(ObjectDecoder, self).__init__(layout, check_output_shape=True, **kwargs)
+
+
+class ObjectDecoder28x28(ConvNet):
+    n_decoder_channels = Param()
+
+    def __init__(self, **kwargs):
+        layout = [
+            dict(filters=self.n_decoder_channels, kernel_size=3, strides=1, padding="VALID", transpose=True),
+            dict(filters=self.n_decoder_channels, kernel_size=5, strides=1, padding="VALID", transpose=True),
+            dict(filters=self.n_decoder_channels, kernel_size=3, strides=2, padding="SAME", transpose=True),
+            dict(filters=4, kernel_size=4, strides=2, padding="SAME", transpose=True),
+        ]
+        super(ObjectDecoder28x28, self).__init__(layout, check_output_shape=True, **kwargs)
+
 
 
 class SimpleRecurrentRegressionNetwork(ScopedFunction):
