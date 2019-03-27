@@ -271,7 +271,7 @@ grid_config = env_config.copy(
     backgrounds="",
     backgrounds_sample_every=False,
     background_colours="",
-    background_cfg=dict(mode="none"),
+    background_cfg=dict(mode="colour", colour="black"),
 
     object_shape=(14, 14),
 
@@ -314,7 +314,7 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
             backgrounds="",
             backgrounds_sample_every=False,
             background_colours="",
-            background_cfg=dict(mode="none"),
+            background_cfg=dict(mode="colour", colour="black"),
 
             eval_step=1000,
             display_step=1000,

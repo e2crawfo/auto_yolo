@@ -708,10 +708,10 @@ struct RenderSprites2DFunctor<GPUDevice, T>{
     const int total_n_pixels = batch_size * img_height * img_width;
 
     TensorShape counts_shape = {batch_size, img_height, img_width};
-    Tensor* counts_tensor = nullptr;
-    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, counts_shape, counts_tensor));
+    Tensor counts_tensor;
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, counts_shape, &counts_tensor));
 
-    int* counts = counts_tensor->flat<int>().data();
+    int* counts = counts_tensor.flat<int>().data();
 
     // --- set counts to zero ---
 
@@ -728,31 +728,31 @@ struct RenderSprites2DFunctor<GPUDevice, T>{
             batch_size, max_sprites, sprite_height, sprite_width,
             img_height, img_width);
 
-    // --- set counts to zero again ---
-
-    config = ::tensorflow::GetCudaLaunchConfig(total_n_pixels, d);
-    ::tensorflow::SetZero
-        <<<config.block_count, config.thread_per_block, 0, d.stream()>>>(total_n_pixels, counts);
-
     // --- get max of counts so we know how much space to allocate for array `affecting` ---
 
     const int maxBlocks = 64;
     const int maxThreads = 256;
 
     TensorShape temp_shape = {maxBlocks};
-    Tensor* temp_tensor = nullptr;
-    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, temp_shape, temp_tensor));
-    int* temp = temp_tensor->flat<int>().data();
+    Tensor temp_tensor;
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, temp_shape, &temp_tensor));
+    int* temp = temp_tensor.flat<int>().data();
 
-    const int max_affecting = reduce_max(d, total_n_sprites, maxThreads, maxBlocks, counts, temp);
+    const int max_affecting = reduce_max(d, total_n_pixels, maxThreads, maxBlocks, counts, temp);
+
+    // --- set counts to zero again ---
+
+    config = ::tensorflow::GetCudaLaunchConfig(total_n_pixels, d);
+    ::tensorflow::SetZero
+        <<<config.block_count, config.thread_per_block, 0, d.stream()>>>(total_n_pixels, counts);
 
     // --- for each pixel, find the indices of the of sprites that affect it ---
 
     TensorShape affecting_shape = {batch_size, img_height, img_width, max_affecting};
-    Tensor* affecting_tensor = nullptr;
-    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, affecting_shape, affecting_tensor));
+    Tensor affecting_tensor;
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, affecting_shape, &affecting_tensor));
 
-    int* affecting = affecting_tensor->flat<int>().data();
+    int* affecting = affecting_tensor.flat<int>().data();
 
     config = ::tensorflow::GetCudaLaunchConfig(total_n_sprites, d);
     index_affecting_sprites<T>
@@ -1238,10 +1238,10 @@ struct RenderSpritesGrad2DFunctor<GPUDevice, T>{
     const int total_n_pixels = batch_size * img_height * img_width;
 
     TensorShape counts_shape = {batch_size, img_height, img_width};
-    Tensor* counts_tensor = nullptr;
-    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, counts_shape, counts_tensor));
+    Tensor counts_tensor;
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, counts_shape, &counts_tensor));
 
-    int* counts = counts_tensor->flat<int>().data();
+    int* counts = counts_tensor.flat<int>().data();
 
     // --- set counts to zero ---
 
@@ -1258,31 +1258,31 @@ struct RenderSpritesGrad2DFunctor<GPUDevice, T>{
             batch_size, max_sprites, sprite_height, sprite_width,
             img_height, img_width);
 
-    // --- set counts to zero again ---
-
-    config = ::tensorflow::GetCudaLaunchConfig(total_n_pixels, d);
-    ::tensorflow::SetZero
-        <<<config.block_count, config.thread_per_block, 0, d.stream()>>>(total_n_pixels, counts);
-
     // --- get max of counts so we know how much space to allocate for array `affecting` ---
 
     const int maxBlocks = 64;
     const int maxThreads = 256;
 
     TensorShape temp_shape = {maxBlocks};
-    Tensor* temp_tensor = nullptr;
-    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, temp_shape, temp_tensor));
-    int* temp = temp_tensor->flat<int>().data();
+    Tensor temp_tensor;
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, temp_shape, &temp_tensor));
+    int* temp = temp_tensor.flat<int>().data();
 
-    const int max_affecting = reduce_max(d, total_n_sprites, maxThreads, maxBlocks, counts, temp);
+    const int max_affecting = reduce_max(d, total_n_pixels, maxThreads, maxBlocks, counts, temp);
+
+    // --- set counts to zero again ---
+
+    config = ::tensorflow::GetCudaLaunchConfig(total_n_pixels, d);
+    ::tensorflow::SetZero
+        <<<config.block_count, config.thread_per_block, 0, d.stream()>>>(total_n_pixels, counts);
 
     // --- for each pixel, find the indices of the of sprites that affect it ---
 
     TensorShape affecting_shape = {batch_size, img_height, img_width, max_affecting};
-    Tensor* affecting_tensor = nullptr;
-    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, affecting_shape, affecting_tensor));
+    Tensor affecting_tensor;
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, affecting_shape, &affecting_tensor));
 
-    int* affecting = affecting_tensor->flat<int>().data();
+    int* affecting = affecting_tensor.flat<int>().data();
 
     config = ::tensorflow::GetCudaLaunchConfig(total_n_sprites, d);
     index_affecting_sprites<T>
