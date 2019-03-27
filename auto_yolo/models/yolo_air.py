@@ -197,9 +197,7 @@ class YoloAir_Network(VariationalAutoencoder):
         )
 
     def _build_attr_from_image(self, boxes, h, w, b, is_training):
-
         # --- Compute sprite locations from box parameters ---
-
         cell_y, cell_x, height, width = tf.split(boxes, 4, axis=-1)
 
         # box height and width normalized to image height and width

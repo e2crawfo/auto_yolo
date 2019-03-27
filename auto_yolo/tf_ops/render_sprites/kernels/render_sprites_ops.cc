@@ -111,6 +111,46 @@ struct RenderSprites2DFunctor<CPUDevice, T>{
       std::vector<T> last_value(n_channels, zero);
 
       for (int batch_id = start; batch_id < limit; ++batch_id) {
+
+        // --- for each sprite, compute which pixels it affects ---
+
+        std::vector< std::vector<T> > affecting(img_width * img_height);
+
+        const T _left = static_cast<T>(-1.0);
+        const T _right = sprite_width_T;
+        const T _top = static_cast<T>(-1.0);
+        const T _bottom = sprite_height_T;
+
+        for (int sprite_id = 0; sprite_id < n_sprites[batch_id]; ++sprite_id) {
+          const T scale_y = scales[batch_id * scales_batch_stride + sprite_id * 2];
+          const T scale_x = scales[batch_id * scales_batch_stride + sprite_id * 2 + 1];
+
+          const T offset_y = offsets[batch_id * offsets_batch_stride + sprite_id * 2];
+          const T offset_x = offsets[batch_id * offsets_batch_stride + sprite_id * 2 + 1];
+
+          const T left = -0.5 + img_width_T * ((_left + 0.5) * scale_x / sprite_width_T + offset_x);
+          const T right = -0.5 + img_width_T * ((_right + 0.5) * scale_x / sprite_width_T + offset_x);
+
+          const T top = -0.5 + img_height_T * ((_top + 0.5) * scale_y / sprite_height_T + offset_y);
+          const T bottom = -0.5 + img_height_T * ((_bottom + 0.5) * scale_y / sprite_height_T + offset_y);
+
+          const int left_i = static_cast<int>(fmax(0.0, ceil(left)));
+          const int right_i = static_cast<int>(fmin(img_width_T-1, floor(right)));
+
+          const int top_i = static_cast<int>(fmax(0.0, ceil(top)));
+          const int bottom_i = static_cast<int>(fmin(img_height_T-1, floor(bottom)));
+
+          if (left_i <= right_i && top_i <= bottom_i) {
+            for (int i = top_i; i <= bottom_i; i++) {
+              for (int j = left_i; j <= right_i; j++) {
+                affecting[i * img_width + j].push_back(sprite_id);
+              }
+            }
+          }
+        }
+
+        // --- for each pixel, iterate over all affecting sprites ---
+
         for (int img_y = 0; img_y < img_height; ++img_y) {
           const T img_y_T = static_cast<T>(img_y);
 
@@ -125,9 +165,9 @@ struct RenderSprites2DFunctor<CPUDevice, T>{
             }
 
             T importance_sum = 0.0;
-            int n_writes = 0;
+            int n_writes = affecting[img_y * img_width + img_x].size();
 
-            for (int sprite_id = 0; sprite_id < n_sprites[batch_id]; ++sprite_id) {
+            for (int sprite_id : affecting[img_y * img_width + img_x]) {
               const T scale_y = scales[batch_id * scales_batch_stride + sprite_id * 2];
               const T scale_x = scales[batch_id * scales_batch_stride + sprite_id * 2 + 1];
 
@@ -137,25 +177,6 @@ struct RenderSprites2DFunctor<CPUDevice, T>{
               // The pixel location represented in the sprites's co-ordinate frame
               const T y = -0.5 + sprite_height_T * ((img_y_T + 0.5) / img_height_T - offset_y) / scale_y;
               const T x = -0.5 + sprite_width_T * ((img_x_T + 0.5) / img_width_T - offset_x) / scale_x;
-
-              // The bilinear interpolation function:
-              //
-              // a) implicitly pads the input data with 0s (hence the unusual checks with {x,y} > -1.0)
-              //
-              // b) returns 0 when sampling outside the (padded) image.
-              //
-              // The effect is that the sampled signal smoothly goes to 0 outside the original
-              // input domain, rather than presenting a jump discontinuity at the image boundaries.
-              //
-              const bool within_bounds = x > static_cast<T>(-1.0) &&
-                                         y > static_cast<T>(-1.0) &&
-                                         x < sprite_width_T &&
-                                         y < sprite_height_T;
-
-              if(!within_bounds){
-                  continue;
-              }
-              n_writes++;
 
               const int fx = std::floor(static_cast<float>(x));
               const int fy = std::floor(static_cast<float>(y));
@@ -526,9 +547,47 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
       std::vector<T> weighted_sum(n_channels, zero);
       std::vector<T> bg(n_channels, zero);
       std::vector<T> last_value(n_channels, zero);
-      std::vector<T> write_indices(max_sprites, zero);
 
       for (int batch_id = start; batch_id < limit; ++batch_id) {
+
+        // --- for each sprite, compute which pixels it affects ---
+
+        std::vector< std::vector<T> > affecting(img_width * img_height);
+
+        const T _left = static_cast<T>(-1.0);
+        const T _right = sprite_width_T;
+        const T _top = static_cast<T>(-1.0);
+        const T _bottom = sprite_height_T;
+
+        for (int sprite_id = 0; sprite_id < n_sprites[batch_id]; ++sprite_id) {
+          const T scale_y = scales[batch_id * scales_batch_stride + sprite_id * 2];
+          const T scale_x = scales[batch_id * scales_batch_stride + sprite_id * 2 + 1];
+
+          const T offset_y = offsets[batch_id * offsets_batch_stride + sprite_id * 2];
+          const T offset_x = offsets[batch_id * offsets_batch_stride + sprite_id * 2 + 1];
+
+          const T left = -0.5 + img_width_T * ((_left + 0.5) * scale_x / sprite_width_T + offset_x);
+          const T right = -0.5 + img_width_T * ((_right + 0.5) * scale_x / sprite_width_T + offset_x);
+
+          const T top = -0.5 + img_height_T * ((_top + 0.5) * scale_y / sprite_height_T + offset_y);
+          const T bottom = -0.5 + img_height_T * ((_bottom + 0.5) * scale_y / sprite_height_T + offset_y);
+
+          const int left_i = static_cast<int>(fmax(0.0, ceil(left)));
+          const int right_i = static_cast<int>(fmin(img_width_T-1, floor(right)));
+
+          const int top_i = static_cast<int>(fmax(0.0, ceil(top)));
+          const int bottom_i = static_cast<int>(fmin(img_height_T-1, floor(bottom)));
+
+          if (left_i <= right_i && top_i <= bottom_i) {
+            for (int i = top_i; i <= bottom_i; i++) {
+              for (int j = left_i; j <= right_i; j++) {
+                affecting[i * img_width + j].push_back(sprite_id);
+              }
+            }
+          }
+        }
+
+        // --- for each pixel, iterate over all affecting sprites ---
 
         for (int img_y = 0; img_y < img_height; ++img_y) {
           const T img_y_T = static_cast<T>(img_y);
@@ -544,9 +603,9 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
             }
 
             T importance_sum = 0.0;
-            int n_writes = 0;
+            int n_writes = affecting[img_y * img_width + img_x].size();
 
-            for (int sprite_id = 0; sprite_id < n_sprites[batch_id]; ++sprite_id) {
+            for (int sprite_id : affecting[img_y * img_width + img_x]) {
               const T scale_y = scales[batch_id * scales_batch_stride + sprite_id * 2];
               const T scale_x = scales[batch_id * scales_batch_stride + sprite_id * 2 + 1];
 
@@ -556,26 +615,6 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
               // The pixel location represented in the sprites's co-ordinate frame
               const T y = -0.5 + sprite_height_T * ((img_y_T + 0.5) / img_height_T - offset_y) / scale_y;
               const T x = -0.5 + sprite_width_T * ((img_x_T + 0.5) / img_width_T - offset_x) / scale_x;
-
-              // The bilinear interpolation function:
-              //
-              // a) implicitly pads the input data with 0s (hence the unusual checks with {x,y} > -1.0)
-              //
-              // b) returns 0 when sampling outside the (padded) image.
-              //
-              // The effect is that the sampled signal smoothly goes to 0 outside the original
-              // input domain, rather than presenting a jump discontinuity at the image boundaries.
-              //
-              const bool within_bounds = x > static_cast<T>(-1.0) &&
-                                         y > static_cast<T>(-1.0) &&
-                                         x < sprite_width_T &&
-                                         y < sprite_height_T;
-
-              if(!within_bounds){
-                  continue;
-              }
-              write_indices[n_writes] = sprite_id;
-              n_writes++;
 
               const int fx = std::floor(static_cast<float>(x));
               const int fy = std::floor(static_cast<float>(y));
@@ -632,7 +671,7 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
                                  img_x * n_channels + chan] = go;
               }
             }else if(n_writes == 1){
-              const int sprite_id = write_indices[0];
+              const int sprite_id = affecting[img_y * img_width + img_x][0];
               const T scale_y = scales[batch_id * scales_batch_stride + sprite_id * 2];
               const T scale_x = scales[batch_id * scales_batch_stride + sprite_id * 2 + 1];
 
@@ -724,9 +763,7 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
               }
             }else{ // n_writes > 1
                 T bg_sum = 0.0;
-                for (int write_id = 0; write_id < n_writes; ++write_id) {
-                  const int sprite_id = write_indices[write_id];
-
+                for (const int sprite_id : affecting[img_y * img_width + img_x]) {
                   const T scale_y = scales[batch_id * scales_batch_stride + sprite_id * 2];
                   const T scale_x = scales[batch_id * scales_batch_stride + sprite_id * 2 + 1];
 
