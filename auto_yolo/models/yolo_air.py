@@ -16,9 +16,10 @@ from auto_yolo.models.core import (
     concrete_binary_sample_kl, VariationalAutoencoder)
 
 
-def tf_safe_log(value, nan_value=100.0):
+def tf_safe_log(value, replacement_value=-100.0):
     log_value = tf.log(value)
-    log_value = tf.where(tf.is_nan(log_value), -100.0 * tf.ones_like(log_value), log_value)
+    replace = tf.logical_or(tf.is_nan(log_value), tf.is_inf(log_value))
+    log_value = tf.where(replace, replacement_value * tf.ones_like(log_value), log_value)
     return log_value
 
 
