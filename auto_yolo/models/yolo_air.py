@@ -590,7 +590,7 @@ class YoloAir_Network(VariationalAutoencoder):
         for h in range(self.H):
             for w in range(self.W):
                 for b in range(self.B):
-                    p_z_given_Cz = (count_support[None, :] - count_so_far) / (self.HWB - i)
+                    p_z_given_Cz = tf.maximum(count_support[None, :] - count_so_far, 0) / (self.HWB - i)
 
                     # Reshape for batch matmul
                     _count_distribution = count_distribution[:, None, :]
@@ -599,7 +599,7 @@ class YoloAir_Network(VariationalAutoencoder):
                     p_z = tf.matmul(_count_distribution, _p_z_given_Cz)[:, :, 0]
 
                     if self.use_concrete_kl:
-                        prior_log_odds = tf.log(p_z / (1-p_z))
+                        prior_log_odds = tf_safe_log(p_z) - tf_safe_log(1-p_z)
                         _obj_kl = concrete_binary_sample_kl(
                             self._tensors["obj_pre_sigmoid"][:, h, w, b, :],
                             prior_log_odds, self.obj_concrete_temp,
