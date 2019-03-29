@@ -275,8 +275,6 @@ grid_config = env_config.copy(
 
     object_shape=(14, 14),
 
-    xent_loss=True,
-
     postprocessing="",
     preserve_env=False,
 

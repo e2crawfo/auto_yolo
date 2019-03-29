@@ -39,7 +39,6 @@ alg_config = Config(
     fixed_weights="",
     fixed_values=dict(),
     no_gradient="",
-    xent_loss=True,
     attr_prior_mean=0.0,
     attr_prior_std=1.0,
     z_prior_mean=0.0,

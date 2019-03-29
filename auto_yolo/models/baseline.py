@@ -13,7 +13,7 @@ from dps.utils.tf import RNNCell, tf_mean_sum
 
 from auto_yolo.tf_ops import render_sprites
 from auto_yolo.models import yolo_air
-from auto_yolo.models.core import loss_builders, AP, VariationalAutoencoder, normal_vae
+from auto_yolo.models.core import xent_loss, AP, VariationalAutoencoder, normal_vae
 
 
 class BboxCell(RNNCell):
@@ -216,22 +216,20 @@ class Baseline_Network(VariationalAutoencoder):
 
         # --- specify values to record ---
 
-        self.recorded_tensors.update(
-            n_objects=tf.reduce_mean(self._tensors["n_objects"]),
-            attr=tf.reduce_mean(self._tensors["attr"])
+        self.record_tensors(
+            n_objects=self._tensors["n_objects"],
+            attr=self._tensors["attr"]
         )
 
         # --- losses ---
 
         if self.train_reconstruction:
-            loss_key = 'xent' if self.xent_loss else 'squared'
-
             output = self._tensors['output']
             inp = self._tensors['inp']
-            self._tensors['per_pixel_reconstruction_loss'] = loss_builders[loss_key](output, inp)
+            self._tensors['per_pixel_reconstruction_loss'] = xent_loss(pred=output, label=inp)
             self.losses['reconstruction'] = (
-                self.reconstruction_weight *
-                tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
+                self.reconstruction_weight
+                * tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
             )
 
         if self.train_kl:
@@ -243,8 +241,10 @@ class Baseline_Network(VariationalAutoencoder):
         if "n_annotations" in self._tensors:
             count_1norm = tf.to_float(
                 tf.abs(tf.to_int32(self._tensors["n_objects"]) - self._tensors["n_annotations"]))
-            self.recorded_tensors["count_1norm"] = tf.reduce_mean(count_1norm)
-            self.recorded_tensors["count_error"] = tf.reduce_mean(tf.to_float(count_1norm > 0.5))
+            self.record_tensors(
+                count_1norm=count_1norm,
+                count_error=count_1norm > 0.5
+            )
 
 
 class Baseline_RenderHook(yolo_air.YoloAir_RenderHook):

@@ -12,15 +12,8 @@ from dps.utils.tf import tf_mean_sum, build_scheduled_value, FIXED_COLLECTION, R
 
 from auto_yolo.tf_ops import render_sprites, resampler_edge
 from auto_yolo.models.core import (
-    AP, loss_builders, normal_vae, concrete_binary_pre_sigmoid_sample,
-    concrete_binary_sample_kl, VariationalAutoencoder)
-
-
-def tf_safe_log(value, replacement_value=-100.0):
-    log_value = tf.log(value)
-    replace = tf.logical_or(tf.is_nan(log_value), tf.is_inf(log_value))
-    log_value = tf.where(replace, replacement_value * tf.ones_like(log_value), log_value)
-    return log_value
+    AP, xent_loss, normal_vae, concrete_binary_pre_sigmoid_sample,
+    concrete_binary_sample_kl, VariationalAutoencoder, tf_safe_log)
 
 
 class YoloAir_Network(VariationalAutoencoder):
@@ -645,79 +638,72 @@ class YoloAir_Network(VariationalAutoencoder):
 
         # --- specify values to record ---
 
-        recorded_tensors = self.recorded_tensors
-
-        recorded_tensors['batch_size'] = tf.to_float(self.batch_size)
-        recorded_tensors['float_is_training'] = self.float_is_training
-
-        recorded_tensors['cell_y'] = tf.reduce_mean(self._tensors["cell_y"])
-        recorded_tensors['cell_x'] = tf.reduce_mean(self._tensors["cell_x"])
-        recorded_tensors['h'] = tf.reduce_mean(self._tensors["h"])
-        recorded_tensors['w'] = tf.reduce_mean(self._tensors["w"])
-        recorded_tensors['z'] = tf.reduce_mean(self._tensors["z"])
-        recorded_tensors['area'] = tf.reduce_mean(self._tensors["area"])
-
-        recorded_tensors['cell_y_std'] = tf.reduce_mean(self._tensors["cell_y_std"])
-        recorded_tensors['cell_x_std'] = tf.reduce_mean(self._tensors["cell_x_std"])
-        recorded_tensors['h_std'] = tf.reduce_mean(self._tensors["h_std"])
-        recorded_tensors['w_std'] = tf.reduce_mean(self._tensors["w_std"])
-        recorded_tensors['z_std'] = tf.reduce_mean(self._tensors["z_std"])
-
         obj = self._tensors["obj"]
         pred_n_objects = self._tensors["pred_n_objects"]
 
-        recorded_tensors['n_objects'] = tf.reduce_mean(pred_n_objects)
-        recorded_tensors['on_cell_y_avg'] = tf.reduce_mean(
-            tf.reduce_sum(self._tensors["cell_y"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects)
-        recorded_tensors['on_cell_x_avg'] = tf.reduce_mean(
-            tf.reduce_sum(self._tensors["cell_x"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects)
-        recorded_tensors['on_h_avg'] = tf.reduce_mean(
-            tf.reduce_sum(self._tensors["h"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects)
-        recorded_tensors['on_w_avg'] = tf.reduce_mean(
-            tf.reduce_sum(self._tensors["w"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects)
-        recorded_tensors['on_z_avg'] = tf.reduce_mean(
-            tf.reduce_sum(self._tensors["z"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects)
-        recorded_tensors['on_area_avg'] = tf.reduce_mean(
-            tf.reduce_sum(self._tensors["area"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects)
-        recorded_tensors['obj'] = tf.reduce_mean(obj)
+        self.record_tensors(
+            batch_size=self.batch_size,
+            float_is_training=self.float_is_training,
 
-        recorded_tensors['latent_area'] = tf.reduce_mean(self._tensors["latent_area"])
-        recorded_tensors['latent_hw'] = tf.reduce_mean(self._tensors["latent_hw"])
+            cell_y=self._tensors["cell_y"],
+            cell_x=self._tensors["cell_x"],
+            h=self._tensors["h"],
+            w=self._tensors["w"],
+            z=self._tensors["z"],
+            area=self._tensors["area"],
 
-        recorded_tensors['attr'] = tf.reduce_mean(self._tensors["attr"])
+            cell_y_std=self._tensors["cell_y_std"],
+            cell_x_std=self._tensors["cell_x_std"],
+            h_std=self._tensors["h_std"],
+            w_std=self._tensors["w_std"],
+            z_std=self._tensors["z_std"],
+
+            n_objects=pred_n_objects,
+            obj=obj,
+            on_cell_y_avg=tf.reduce_sum(self._tensors["cell_y"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
+            on_cell_x_avg=tf.reduce_sum(self._tensors["cell_x"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
+            on_h_avg=tf.reduce_sum(self._tensors["h"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
+            on_w_avg=tf.reduce_sum(self._tensors["w"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
+            on_z_avg=tf.reduce_sum(self._tensors["z"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
+            on_area_avg=tf.reduce_sum(self._tensors["area"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
+
+            latent_area=self._tensors["latent_area"],
+            latent_hw=self._tensors["latent_hw"],
+
+            attr=self._tensors["attr"],
+        )
 
         # --- losses ---
 
         if self.train_reconstruction:
-            loss_key = 'xent' if self.xent_loss else 'squared'
-
             output = self._tensors['output']
             inp = self._tensors['inp']
-            self._tensors['per_pixel_reconstruction_loss'] = loss_builders[loss_key](output, inp)
+            self._tensors['per_pixel_reconstruction_loss'] = xent_loss(pred=output, label=inp)
             self.losses['reconstruction'] = (
-                self.reconstruction_weight
-                * tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
+                self.reconstruction_weight * tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
             )
 
         if self.train_kl:
-            self.losses['obj_kl'] = self.kl_weight * tf_mean_sum(self._tensors["obj_kl"])
-
-            obj = self._tensors["obj"]
-
-            self.losses['cell_y_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["cell_y_kl"])
-            self.losses['cell_x_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["cell_x_kl"])
-            self.losses['h_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["h_kl"])
-            self.losses['w_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["w_kl"])
-            self.losses['z_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["z_kl"])
-            self.losses['attr_kl'] = self.kl_weight * tf_mean_sum(obj * self._tensors["attr_kl"])
+            self.losses.update(
+                obj_kl=self.kl_weight * tf_mean_sum(self._tensors["obj_kl"]),
+                cell_y_kl=self.kl_weight * tf_mean_sum(obj * self._tensors["cell_y_kl"]),
+                cell_x_kl=self.kl_weight * tf_mean_sum(obj * self._tensors["cell_x_kl"]),
+                h_kl=self.kl_weight * tf_mean_sum(obj * self._tensors["h_kl"]),
+                w_kl=self.kl_weight * tf_mean_sum(obj * self._tensors["w_kl"]),
+                z_kl=self.kl_weight * tf_mean_sum(obj * self._tensors["z_kl"]),
+                attr_kl=self.kl_weight * tf_mean_sum(obj * self._tensors["attr_kl"]),
+            )
 
         # --- other evaluation metrics ---
 
         if "n_annotations" in self._tensors:
             count_1norm = tf.to_float(
                 tf.abs(tf.to_int32(self._tensors["pred_n_objects_hard"]) - self._tensors["n_annotations"]))
-            recorded_tensors["count_1norm"] = tf.reduce_mean(count_1norm)
-            recorded_tensors["count_error"] = tf.reduce_mean(tf.to_float(count_1norm > 0.5))
+
+            self.record_tensors(
+                count_1norm=count_1norm,
+                count_error=count_1norm > 0.5,
+            )
 
 
 class YoloAir_RenderHook(RenderHook):

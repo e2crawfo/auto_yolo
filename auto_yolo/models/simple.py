@@ -4,9 +4,8 @@ import matplotlib.pyplot as plt
 
 from dps import cfg
 from dps.utils.tf import tf_mean_sum, RenderHook
-from dps.utils import Param
 
-from auto_yolo.models.core import loss_builders, normal_vae, VariationalAutoencoder
+from auto_yolo.models.core import xent_loss, normal_vae, VariationalAutoencoder
 
 
 class SimpleVAE(VariationalAutoencoder):
@@ -63,8 +62,7 @@ class SimpleVAE(VariationalAutoencoder):
             self.losses['attr_kl'] = tf_mean_sum(self._tensors["attr_kl"])
 
         if self.train_reconstruction:
-            loss_key = 'xent' if self.xent_loss else 'squared'
-            self._tensors['per_pixel_reconstruction_loss'] = loss_builders[loss_key](reconstruction, self.inp)
+            self._tensors['per_pixel_reconstruction_loss'] = xent_loss(pred=reconstruction, label=self.inp)
             self.losses['reconstruction'] = tf_mean_sum(self._tensors['per_pixel_reconstruction_loss'])
 
 

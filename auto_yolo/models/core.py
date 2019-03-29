@@ -9,7 +9,7 @@ from dps import cfg
 from dps.updater import Updater as _Updater
 from dps.utils import Param, square_subplots
 from dps.utils.tf import (
-    build_gradient_train_op, tf_mean_sum, apply_mask_and_group_at_front,
+    build_gradient_train_op, apply_mask_and_group_at_front,
     ScopedFunction, build_scheduled_value, FIXED_COLLECTION)
 from dps.updater import DataManager
 from dps.train import Hook
@@ -55,28 +55,28 @@ def concrete_binary_sample_kl(pre_sigmoid_sample,
     return log_posterior - log_prior
 
 
-def build_xent_loss(predictions, targets):
-    return -(
-        targets * tf.log(predictions + 1e-9)
-        + (1. - targets) * tf.log(1. - predictions + 1e-9))
+def tf_safe_log(value, replacement_value=-100.0):
+    log_value = tf.log(value + 1e-9)
+    replace = tf.logical_or(tf.is_nan(log_value), tf.is_inf(log_value))
+    log_value = tf.where(replace, replacement_value * tf.ones_like(log_value), log_value)
+    return log_value
 
 
-def build_squared_loss(predictions, targets):
-    return (predictions - targets)**2
-
-
-def build_1norm_loss(predictions, targets):
-    return tf.abs(predictions - targets)
-
-
-loss_builders = {
-    'xent': build_xent_loss,
-    'squared': build_squared_loss,
-    '1norm': build_1norm_loss,
-}
+def xent_loss(*, pred, label):
+    return -(label * tf_safe_log(pred) + (1. - label) * tf_safe_log(1. - pred))
 
 
 class Evaluator(object):
+    """ A helper object for running a list of functions on a collection of evaluated tensors.
+
+    Parameters
+    ----------
+    functions: a list of functions, each with an attribute `keys_accessed`
+               listing the keys required by that function
+    tensors: a (posibly nested) dictionary of tensors which will provide the input to the functions
+    updater: the updater object, passed into the functions at eval time
+
+    """
     def __init__(self, functions, tensors, updater):
         self.functions = functions
         self.updater = updater
@@ -108,6 +108,8 @@ class Evaluator(object):
         self.fetches = fetches
 
     def eval(self, fetched):
+        """ fetched should be a dictionary containing numpy arrays derived by fetching the tensors
+            in self.fetches """
         record = {}
         for name, func in self.functions.items():
             record[name] = np.mean(func(fetched, self.updater))
@@ -355,11 +357,11 @@ class Updater(_Updater):
 
         # --- loss ---
 
-        recorded_tensors['loss'] = 0
+        self.loss = 0.0
         for name, tensor in network_losses.items():
-            recorded_tensors['loss'] += tensor
+            self.loss += tensor
             recorded_tensors['loss_' + name] = tensor
-        self.loss = recorded_tensors['loss']
+        recorded_tensors['loss'] = self.loss
 
         # --- train op ---
 
@@ -370,12 +372,6 @@ class Updater(_Updater):
             self.max_grad_norm, self.noise_schedule)
 
         # --- recorded values ---
-
-        output = network_tensors["output"]
-        recorded_tensors.update({
-            "loss_" + name: tf_mean_sum(builder(output, self.inp))
-            for name, builder in loss_builders.items()
-        })
 
         intersection = recorded_tensors.keys() & network_recorded_tensors.keys()
         assert not intersection, "Key sets have non-zero intersection: {}".format(intersection)
@@ -425,14 +421,6 @@ class EvalHook(Hook):
             recorded_tensors['loss'] += tensor
             recorded_tensors['loss_' + name] = tensor
         self.loss = recorded_tensors['loss']
-
-        # --- recorded values ---
-
-        output = network_tensors["output"]
-        recorded_tensors.update({
-            "loss_" + name: tf_mean_sum(builder(output, self.inp))
-            for name, builder in loss_builders.items()
-        })
 
         intersection = recorded_tensors.keys() & network_recorded_tensors.keys()
         assert not intersection, "Key sets have non-zero intersection: {}".format(intersection)
@@ -500,12 +488,24 @@ class EvalHook(Hook):
         plt.close(fig)
 
 
-class VariationalAutoencoder(ScopedFunction):
+class TensorRecorder(ScopedFunction):
+    _recorded_tensors = None
+
+    def record_tensors(self, **kwargs):
+        for k, v in kwargs.items():
+            self.recorded_tensors[k] = tf.reduce_mean(tf.to_float(v))
+
+    @property
+    def recorded_tensors(self):
+        if self._recorded_tensors is None:
+            self._recorded_tensors = {}
+        return self._recorded_tensors
+
+
+class VariationalAutoencoder(TensorRecorder):
     fixed_weights = Param()
     fixed_values = Param()
     no_gradient = Param()
-
-    xent_loss = Param()
 
     attr_prior_mean = Param()
     attr_prior_std = Param()
@@ -541,9 +541,6 @@ class VariationalAutoencoder(ScopedFunction):
 
         self.obs_shape = env.datasets['train'].obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
-
-        if isinstance(self.fixed_weights, str):
-            self.fixed_weights = self.fixed_weights.split()
 
         self.attr_prior_mean = build_scheduled_value(self.attr_prior_mean, "attr_prior_mean")
         self.attr_prior_std = build_scheduled_value(self.attr_prior_std, "attr_prior_std")
@@ -617,8 +614,8 @@ class VariationalAutoencoder(ScopedFunction):
                 background=data["background"],
             )
 
-        self.recorded_tensors = dict(
-            batch_size=tf.to_float(self.batch_size),
+        self.record_tensors(
+            batch_size=self.batch_size,
             float_is_training=self.float_is_training
         )
 
@@ -747,8 +744,8 @@ class VariationalAutoencoder(ScopedFunction):
         recorded_tensors = self.recorded_tensors
 
         if self.math_weight is not None:
-            recorded_tensors["raw_loss_math"] = tf.reduce_mean(
-                tf.nn.softmax_cross_entropy_with_logits_v2(
+            self.record_tensors(
+                raw_loss_math=tf.nn.softmax_cross_entropy_with_logits_v2(
                     labels=self._tensors["targets"],
                     logits=logits
                 )
@@ -756,21 +753,11 @@ class VariationalAutoencoder(ScopedFunction):
 
             self.losses["math"] = self.math_weight * recorded_tensors["raw_loss_math"]
 
-        recorded_tensors["math_accuracy"] = tf.reduce_mean(
-            tf.to_float(
-                tf.equal(
-                    tf.argmax(logits, axis=1),
-                    tf.argmax(self._tensors['targets'], axis=1)
-                )
-            )
-        )
-
-        recorded_tensors["math_1norm"] = tf.reduce_mean(
-            tf.to_float(
-                tf.abs(tf.argmax(logits, axis=1) - tf.argmax(self._tensors['targets'], axis=1))
-            )
-        )
-
-        recorded_tensors["math_correct_prob"] = tf.reduce_mean(
-            tf.reduce_sum(tf.nn.softmax(logits) * self._tensors['targets'], axis=1)
+        self.record_tensors(
+            math_accuracy=tf.equal(
+                tf.argmax(logits, axis=1),
+                tf.argmax(self._tensors['targets'], axis=1)
+            ),
+            math_1norm=tf.abs(tf.argmax(logits, axis=1) - tf.argmax(self._tensors['targets'], axis=1)),
+            math_correct_prob=tf.reduce_sum(tf.nn.softmax(logits) * self._tensors['targets'], axis=1)
         )

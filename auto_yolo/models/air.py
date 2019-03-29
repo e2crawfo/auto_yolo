@@ -19,10 +19,10 @@ import matplotlib.patches as patches
 
 from dps import cfg
 from dps.utils import Param
-from dps.utils.tf import build_scheduled_value, RenderHook
+from dps.utils.tf import build_scheduled_value, RenderHook, tf_mean_sum
 
 from auto_yolo.models.core import (
-    VariationalAutoencoder, normal_vae, mAP,
+    VariationalAutoencoder, normal_vae, mAP, xent_loss,
     concrete_binary_pre_sigmoid_sample, concrete_binary_sample_kl)
 
 
@@ -290,8 +290,8 @@ class AIR_Network(VariationalAutoencoder):
 
     def apply_training_wheel(self, signal):
         return (
-            self.training_wheels * tf.stop_gradient(signal) +
-            (1-self.training_wheels) * signal)
+            self.training_wheels * tf.stop_gradient(signal)
+            + (1-self.training_wheels) * signal)
 
     def apply_fixed_value(self, key, signal):
         value = self.fixed_values.get(key, None)
@@ -356,8 +356,8 @@ class AIR_Network(VariationalAutoencoder):
 
             if self.difference_air:
                 inp = (
-                    self._tensors["inp"] -
-                    tf.reshape(running_recon, (self.batch_size, *self.obs_shape))
+                    self._tensors["inp"]
+                    - tf.reshape(running_recon, (self.batch_size, *self.obs_shape))
                 )
                 encoded_inp = self.image_encoder(inp, 0, self.is_training)
                 encoded_inp = tf.layers.flatten(encoded_inp)
@@ -452,8 +452,8 @@ class AIR_Network(VariationalAutoencoder):
                 )
                 z_pres = tf.nn.sigmoid(z_pres_pre_sigmoid)
                 z_pres = (
-                    self.float_is_training * z_pres +
-                    (1 - self.float_is_training) * tf.round(z_pres)
+                    self.float_is_training * z_pres
+                    + (1 - self.float_is_training) * tf.round(z_pres)
                 )
                 z_pres_prob = tf.nn.sigmoid(z_pres_log_odds)
                 z_pres_kl = concrete_binary_sample_kl(
@@ -600,43 +600,36 @@ class AIR_Network(VariationalAutoencoder):
 
         flat_inp = tf.layers.flatten(self._tensors["inp"])
 
-        reconstruction_loss = -tf.reduce_sum(
-            flat_inp * tf.log(reconstruction + 1e-9) +
-            (1.0 - flat_inp) * tf.log(1.0 - reconstruction + 1e-9),
-            axis=1, name="reconstruction_loss"
+        self._tensors['per_pixel_reconstruction_loss'] = xent_loss(pred=reconstruction, label=flat_inp)
+        self.losses.update(
+            reconstruction=tf_mean_sum(self._tensors['per_pixel_reconstruction_loss']),
+            running=self.kl_weight * tf.reduce_mean(kl_loss),
         )
 
         self._tensors['output'] = tf.reshape(reconstruction, (self.batch_size,) + self.obs_shape)
 
-        self.losses.update(
-            reconstruction=tf.reduce_mean(reconstruction_loss),
-            running=self.kl_weight * tf.reduce_mean(kl_loss),
-        )
-
-        recorded_tensors = self.recorded_tensors
-
-        # accuracy of inferred number of digits
         count_error = 1 - tf.to_float(tf.equal(self.target_n_digits, self.predicted_n_digits))
-        count_1norm = tf.to_float(tf.abs(self.target_n_digits - self.predicted_n_digits))
+        count_1norm = tf.abs(self.target_n_digits - self.predicted_n_digits)
 
-        recorded_tensors["predicted_n_digits"] = tf.reduce_mean(self.predicted_n_digits)
-        recorded_tensors["count_error"] = tf.reduce_mean(count_error)
-        recorded_tensors["count_1norm"] = tf.reduce_mean(count_1norm)
-        recorded_tensors["predicted_n_digits"] = tf.reduce_mean(self.predicted_n_digits)
+        self.record_tensors(
+            predicted_n_digits=self.predicted_n_digits,
+            count_error=count_error,
+            count_1norm=count_1norm,
 
-        recorded_tensors["scale"] = tf.reduce_mean(self._tensors["scale"])
-        recorded_tensors["x"] = tf.reduce_mean(self._tensors["shift"][:, :, 0])
-        recorded_tensors["y"] = tf.reduce_mean(self._tensors["shift"][:, :, 1])
-        recorded_tensors["z_pres_prob"] = tf.reduce_mean(self._tensors["z_pres_probs"])
-        recorded_tensors["z_pres_kl"] = tf.reduce_mean(self._tensors["z_pres_kl"])
+            scale=self._tensors["scale"],
+            x=self._tensors["shift"][:, :, 0],
+            y=self._tensors["shift"][:, :, 1],
+            z_pres_prob=self._tensors["z_pres_probs"],
+            z_pres_kl=self._tensors["z_pres_kl"],
 
-        recorded_tensors["scale_kl"] = tf.reduce_mean(self._tensors["scale_kl"])
-        recorded_tensors["shift_kl"] = tf.reduce_mean(self._tensors["shift_kl"])
-        recorded_tensors["attr_kl"] = tf.reduce_mean(self._tensors["attr_kl"])
+            scale_kl=self._tensors["scale_kl"],
+            shift_kl=self._tensors["shift_kl"],
+            attr_kl=self._tensors["attr_kl"],
 
-        recorded_tensors["scale_std"] = tf.reduce_mean(self._tensors["scale_std"])
-        recorded_tensors["shift_std"] = tf.reduce_mean(self._tensors["shift_std"])
-        recorded_tensors["attr_std"] = tf.reduce_mean(self._tensors["attr_std"])
+            scale_std=self._tensors["scale_std"],
+            shift_std=self._tensors["shift_std"],
+            attr_std=self._tensors["attr_std"],
+        )
 
 
 class AIR_RenderHook(RenderHook):
