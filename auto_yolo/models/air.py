@@ -223,7 +223,11 @@ class AIR_AP(object):
         predicted_boxes = []
 
         for idx in range(batch_size):
-            _a = [[0, *rest] for (cls, *rest), _ in zip(annotations[idx], range(n_annotations[idx]))]
+            _a = [
+                [0, *rest]
+                for (valid, cls, *rest), _
+                in zip(annotations[idx], range(n_annotations[idx]))
+                if valid]
             ground_truth_boxes.append(_a)
 
             _predicted_boxes = []
@@ -328,7 +332,7 @@ class AIR_Network(VariationalAutoencoder):
             if "object_decoder" in self.fixed_weights:
                 self.object_decoder.fix_variables()
 
-        self.target_n_digits = self._tensors["n_annotations"]
+        self.target_n_digits = self._tensors["n_valid_annotations"]
 
         if not self.difference_air:
             encoded_inp = self.image_encoder(
@@ -682,7 +686,10 @@ class AIR_RenderHook(RenderHook):
 
             # Plot true bounding boxes
             for j in range(n_annotations[i]):
-                _, t, b, l, r = annotations[i][j]
+                valid, _, t, b, l, r = annotations[i][j]
+                if not valid:
+                    continue
+
                 h = b - t
                 w = r - l
 

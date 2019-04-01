@@ -62,8 +62,18 @@ def tf_safe_log(value, replacement_value=-100.0):
     return log_value
 
 
-def xent_loss(*, pred, label):
-    return -(label * tf_safe_log(pred) + (1. - label) * tf_safe_log(1. - pred))
+def np_safe_log(value, replacement_value=-100.0):
+    log_value = np.log(value + 1e-9)
+    replace = np.logical_or(np.isnan(log_value), np.isinf(log_value))
+    log_value = np.where(replace, replacement_value * tf.ones_like(log_value), log_value)
+    return log_value.astype(value.dtype)
+
+
+def xent_loss(*, pred, label, tf=True):
+    if tf:
+        return -(label * tf_safe_log(pred) + (1. - label) * tf_safe_log(1. - pred))
+    else:
+        return -(label * np_safe_log(pred) + (1. - label) * np_safe_log(1. - pred))
 
 
 class Evaluator(object):
@@ -247,8 +257,9 @@ class AP(object):
         for idx in range(batch_size):
             _a = [
                 [0, *rest]
-                for (cls, *rest), _
+                for (valid, cls, *rest), _
                 in zip(annotations[idx], range(n_annotations[idx]))
+                if valid
             ]
 
             ground_truth_boxes.append(_a)
@@ -282,7 +293,8 @@ class Updater(_Updater):
 
     def __init__(self, env, scope=None, **kwargs):
         self.obs_shape = env.datasets['train'].obs_shape
-        self.image_height, self.image_width, self.image_depth = self.obs_shape
+        *other, self.image_height, self.image_width, self.image_depth = self.obs_shape
+        self.n_frames = other[0] if other else 0
         self.network = cfg.build_network(env, self, scope="network")
 
         super(Updater, self).__init__(env, scope=scope, **kwargs)
@@ -588,7 +600,6 @@ class VariationalAutoencoder(TensorRecorder):
         return self._tensors["float_is_training"]
 
     def _call(self, data, is_training):
-
         inp = data["image"]
 
         self._tensors = dict(
@@ -600,8 +611,13 @@ class VariationalAutoencoder(TensorRecorder):
 
         if "annotations" in data:
             self._tensors.update(
-                annotations=data["annotations"][0],
-                n_annotations=data["annotations"][1],
+                annotations=data["annotations"]["data"],
+                n_annotations=data["annotations"]["shapes"][:, 0],
+                n_valid_annotations=tf.reduce_sum(
+                    data["annotations"]["data"][:, :, 0]
+                    * tf.to_float(data["annotations"]["mask"][:, :, 0]),
+                    axis=1
+                )
             )
 
         if "label" in data:

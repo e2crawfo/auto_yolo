@@ -698,7 +698,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
         if "n_annotations" in self._tensors:
             count_1norm = tf.to_float(
-                tf.abs(tf.to_int32(self._tensors["pred_n_objects_hard"]) - self._tensors["n_annotations"]))
+                tf.abs(tf.to_int32(self._tensors["pred_n_objects_hard"]) - self._tensors["n_valid_annotations"]))
 
             self.record_tensors(
                 count_1norm=count_1norm,
@@ -795,7 +795,10 @@ class YoloAir_RenderHook(RenderHook):
 
             # Plot true bounding boxes
             for k in range(n_annotations[n]):
-                _, top, bottom, left, right = annotations[n][k]
+                valid, _, top, bottom, left, right = annotations[n][k]
+
+                if not valid:
+                    continue
 
                 height = bottom - top
                 width = right - left
@@ -987,7 +990,10 @@ class YoloAir_PaperSetRenderHook(RenderHook):
             if self.do_annotations:
                 # Plot true bounding boxes
                 for k in range(n_annotations[n]):
-                    _, top, bottom, left, right = annotations[n][k]
+                    valid, _, top, bottom, left, right = annotations[n][k]
+
+                    if not valid:
+                        continue
 
                     height = bottom - top
                     width = right - left

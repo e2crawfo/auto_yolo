@@ -245,6 +245,7 @@ env_config = Config(
     train_episode_range=(0.0, 0.8),
     val_episode_range=(0.8, 0.9),
     test_episode_range=(0.9, 1.0),
+    n_frames=1,
 )
 
 
