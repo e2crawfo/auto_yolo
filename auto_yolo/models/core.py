@@ -65,7 +65,7 @@ def tf_safe_log(value, replacement_value=-100.0):
 def np_safe_log(value, replacement_value=-100.0):
     log_value = np.log(value + 1e-9)
     replace = np.logical_or(np.isnan(log_value), np.isinf(log_value))
-    log_value = np.where(replace, replacement_value * tf.ones_like(log_value), log_value)
+    log_value = np.where(replace, replacement_value * np.ones_like(log_value), log_value)
     return log_value.astype(value.dtype)
 
 

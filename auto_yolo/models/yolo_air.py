@@ -202,17 +202,13 @@ class YoloAir_Network(VariationalAutoencoder):
         yt = (self.pixels_per_cell[0] / self.image_height) * (cell_y + h)
         xt = (self.pixels_per_cell[1] / self.image_width) * (cell_x + w)
 
-        # `render_sprites` requires box top-left, whereas y and x give box center
-        yt -= ys / 2
-        xt -= xs / 2
-
         # --- Get object attributes using object encoder ---
 
         transform_constraints = snt.AffineWarpConstraints.no_shear_2d()
         warper = snt.AffineGridWarper(
             (self.image_height, self.image_width), self.object_shape, transform_constraints)
 
-        _boxes = tf.concat([xs, 2*(xt + xs/2) - 1, ys, 2*(yt + ys/2) - 1], axis=-1)
+        _boxes = tf.concat([xs, 2*xt - 1, ys, 2*yt - 1], axis=-1)
 
         grid_coords = warper(_boxes)
         grid_coords = tf.reshape(grid_coords, (self.batch_size, 1, *self.object_shape, 2,))
@@ -597,7 +593,8 @@ class YoloAir_Network(VariationalAutoencoder):
                         _obj_kl = concrete_binary_sample_kl(
                             self._tensors["obj_pre_sigmoid"][:, h, w, b, :],
                             prior_log_odds, self.obj_concrete_temp,
-                            self._tensors["obj_log_odds"][:, h, w, b, :], self.obj_concrete_temp
+                            self._tensors["obj_log_odds"][:, h, w, b, :],
+                            self.obj_concrete_temp
                         )
                     else:
                         prob = self._tensors["obj_prob"][:, h, w, b, :]

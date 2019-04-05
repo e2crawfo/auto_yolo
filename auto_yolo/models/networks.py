@@ -161,7 +161,6 @@ class ObjectDecoder28x28(ConvNet):
         super(ObjectDecoder28x28, self).__init__(layout, check_output_shape=True, **kwargs)
 
 
-
 class SimpleRecurrentRegressionNetwork(ScopedFunction):
     use_mask = Param()
 

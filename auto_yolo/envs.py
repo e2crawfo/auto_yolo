@@ -9,7 +9,7 @@ from dps.env.basic import collect
 from dps.datasets.shapes import ShapesDataset, BlueXAboveRedCircle, SetThreeAttr
 from dps.datasets.clevr import ClevrDataset
 from dps.datasets.atari import StaticAtariDataset
-from dps.utils import Config, pdb_postmortem
+from dps.utils import Config
 from dps.train import training_loop
 from dps.hyper import build_and_submit
 from dps.config import DEFAULT_CONFIG
@@ -31,8 +31,6 @@ def run_experiment(
 
     parser = argparse.ArgumentParser()
     parser.add_argument("duration", choices=list(durations.keys()) + ["local"])
-    parser.add_argument('--pdb', action='store_true',
-                        help="If supplied, enter post-mortem debugging on error.")
 
     args, _ = parser.parse_known_args()
 
@@ -59,11 +57,7 @@ def run_experiment(
     if args.duration == "local":
         _config.exp_name = "alg={}".format(alg_name)
         with _config:
-            if args.pdb:
-                with pdb_postmortem():
-                    return training_loop()
-            else:
-                return training_loop()
+            return training_loop()
     else:
         run_kwargs = Config(
             kind="slurm",
@@ -245,7 +239,7 @@ env_config = Config(
     train_episode_range=(0.0, 0.8),
     val_episode_range=(0.8, 0.9),
     test_episode_range=(0.9, 1.0),
-    n_frames=1,
+    n_frames=0,
 )
 
 
