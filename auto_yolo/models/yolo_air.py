@@ -8,7 +8,7 @@ import sonnet as snt
 
 from dps import cfg
 from dps.utils import Param
-from dps.utils.tf import tf_mean_sum, build_scheduled_value, FIXED_COLLECTION, RenderHook
+from dps.utils.tf import tf_mean_sum, build_scheduled_value, FIXED_COLLECTION, RenderHook, GridConvNet
 
 from auto_yolo.tf_ops import render_sprites, resampler_edge
 from auto_yolo.models.core import (
@@ -17,7 +17,6 @@ from auto_yolo.models.core import (
 
 
 class YoloAir_Network(VariationalAutoencoder):
-    pixels_per_cell = Param()
     object_shape = Param()
     anchor_boxes = Param()
 
@@ -66,16 +65,10 @@ class YoloAir_Network(VariationalAutoencoder):
     def __init__(self, env, updater, scope=None, **kwargs):
         super(YoloAir_Network, self).__init__(env, updater, scope=scope, **kwargs)
 
-        self.H = int(np.ceil(self.image_height / self.pixels_per_cell[0]))
-        self.W = int(np.ceil(self.image_width / self.pixels_per_cell[1]))
         self.B = len(self.anchor_boxes)
-        self.HWB = self.H * self.W * self.B
 
         if isinstance(self.count_prior_dist, str):
             self.count_prior_dist = eval(self.count_prior_dist)
-
-        if self.count_prior_dist is not None:
-            assert len(self.count_prior_dist) == (self.HWB + 1)
 
         self.count_prior_log_odds = build_scheduled_value(
             self.count_prior_log_odds, "count_prior_log_odds")
@@ -287,17 +280,22 @@ class YoloAir_Network(VariationalAutoencoder):
         return np.array([{} for i in range(self.H * self.W * self.B)]).reshape(self.H, self.W, self.B)
 
     def _build_program_generator(self):
-        H, W, B = self.H, self.W, self.B
-
         if self.backbone is None:
             self.backbone = cfg.build_backbone(scope="backbone")
-            self.backbone.layout[-1]['filters'] = B * self.n_backbone_features
-
+            assert isinstance(self.backbone, GridConvNet)
             if "backbone" in self.fixed_weights:
                 self.backbone.fix_variables()
 
         inp = self._tensors["inp"]
-        backbone_output = self.backbone(inp, (H, W, B*self.n_backbone_features), self.is_training)
+        backbone_output, n_grid_cells, grid_cell_size = self.backbone(
+            inp, self.B*self.n_backbone_features, self.is_training)
+
+        self.H, self.W = [int(i) for i in n_grid_cells]
+        self.pixels_per_cell = tuple(int(i) for i in grid_cell_size)
+        self.HWB = self.H * self.W * self.B
+
+        H, W, B = self.H, self.W, self.B
+
         backbone_output = tf.reshape(backbone_output, (-1, H, W, B, self.n_backbone_features))
 
         # --- set-up the edge element ---
@@ -485,8 +483,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
         self._tensors["normalized_box"] = tf.concat([yt, xt, ys, xs], axis=-1)
 
-        attr = self._tensors["attr"]
-        object_decoder_in = tf.reshape(attr, (self.batch_size * self.HWB, 1, 1, self.A))
+        object_decoder_in = tf.reshape(self._tensors["attr"], (self.batch_size * self.HWB, 1, 1, self.A))
 
         # --- Compute sprites from attr using object decoder ---
 
@@ -563,6 +560,8 @@ class YoloAir_Network(VariationalAutoencoder):
         count_support = tf.range(self.HWB+1, dtype=tf.float32)
 
         if self.count_prior_dist is not None:
+            if self.count_prior_dist is not None:
+                assert len(self.count_prior_dist) == (self.HWB + 1)
             count_distribution = tf.constant(self.count_prior_dist, dtype=tf.float32)
         else:
             count_prior_prob = tf.nn.sigmoid(self.count_prior_log_odds)

@@ -4,7 +4,9 @@ import tensorflow as tf
 from dps import cfg
 from dps.utils import Config
 from dps.utils.tf import (
-    MLP, IdentityFunction, FeedforwardCell, ScopedCellWrapper, AttentionalRelationNetwork, ObjectNetwork)
+    MLP, IdentityFunction, FeedforwardCell, ScopedCellWrapper, AttentionalRelationNetwork, ObjectNetwork,
+    GridConvNet
+)
 
 from auto_yolo.models import core, simple, baseline, ground_truth, yolo_air, air, nem, networks
 
@@ -121,15 +123,23 @@ yolo_air_config = alg_config.copy(
 
     render_hook=yolo_air.YoloAir_RenderHook(),
 
-    build_backbone=networks.Backbone,
+    build_backbone=lambda scope: GridConvNet(
+        layers=[
+            dict(filters=128, kernel_size=4, strides=3),
+            dict(filters=128, kernel_size=4, strides=2),
+            dict(filters=128, kernel_size=4, strides=2),
+            dict(filters=128, kernel_size=1, strides=1),
+            dict(filters=128, kernel_size=1, strides=1),
+            dict(filters=128, kernel_size=1, strides=1),
+        ],
+        scope=scope,
+    ),
     build_next_step=networks.NextStep,
     build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
     build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
 
     n_backbone_features=100,
     n_passthrough_features=100,
-
-    pixels_per_cell=(12, 12),
 
     n_channels=128,
     n_final_layers=3,

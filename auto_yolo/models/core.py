@@ -613,10 +613,12 @@ class VariationalAutoencoder(TensorRecorder):
             self._tensors.update(
                 annotations=data["annotations"]["data"],
                 n_annotations=data["annotations"]["shapes"][:, 0],
-                n_valid_annotations=tf.reduce_sum(
-                    data["annotations"]["data"][:, :, 0]
-                    * tf.to_float(data["annotations"]["mask"][:, :, 0]),
-                    axis=1
+                n_valid_annotations=tf.to_int32(
+                    tf.reduce_sum(
+                        data["annotations"]["data"][:, :, 0]
+                        * tf.to_float(data["annotations"]["mask"][:, :, 0]),
+                        axis=1
+                    )
                 )
             )
 
