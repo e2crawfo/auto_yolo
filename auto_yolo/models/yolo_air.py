@@ -441,17 +441,14 @@ class YoloAir_Network(VariationalAutoencoder):
                     program[h, w, b] = partial_program
                     assert program[h, w, b].shape[1] == total_sample_size
 
-        def form_tensor(pieces):
+        for k, v in _tensors.items():
             t1 = []
             for h in range(H):
                 t2 = []
                 for w in range(W):
-                    t2.append(tf.stack([pieces[h, w, b] for b in range(B)], axis=1))
+                    t2.append(tf.stack([v[h, w, b] for b in range(B)], axis=1))
                 t1.append(tf.stack(t2, axis=1))
-            return tf.stack(t1, axis=1)
-
-        for key, value in _tensors.items():
-            self._tensors[key] = form_tensor(value)
+            self._tensors[k] = tf.stack(t1, axis=1)
 
     def _build_program_interpreter(self):
 
