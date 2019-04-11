@@ -110,7 +110,6 @@ def yolo_air_prepare_func():
         "decay_steps={}, log=True)".format(
             cfg.final_count_prior_log_odds, cfg.count_prior_decay_steps)
     )
-    cfg.kernel_size = (cfg.kernel_size, cfg.kernel_size)
 
 
 yolo_air_config = alg_config.copy(
@@ -134,22 +133,14 @@ yolo_air_config = alg_config.copy(
         ],
         scope=scope,
     ),
-    build_next_step=networks.NextStep,
+    build_lateral=lambda scope: MLP([100, 100], scope=scope),
     build_object_encoder=lambda scope: MLP([256, 128], scope=scope),
     build_object_decoder=lambda scope: MLP([128, 256], scope=scope),
 
     n_backbone_features=100,
     n_passthrough_features=100,
 
-    n_channels=128,
-    n_final_layers=3,
-    n_decoder_channels=128,
-
-    sequential_cfg=dict(
-        on=True,
-        n_lookback=1,
-        build_next_step=lambda scope: MLP([100, 100], scope=scope),
-    ),
+    n_lookback=1,
 
     use_concrete_kl=False,
     obj_concrete_temp=1.0,
@@ -178,7 +169,6 @@ yolo_air_config = alg_config.copy(
     hw_prior_std=0.5,
     count_prior_decay_steps=1000,
     final_count_prior_log_odds=0.0125,
-    kernel_size=1,
 )
 
 yolo_air_transfer_config = yolo_air_config.copy(

@@ -64,7 +64,7 @@ parser.add_argument("--no-lookback", action="store_true")
 args, _ = parser.parse_known_args()
 
 if args.no_lookback:
-    config["sequential_cfg:n_lookback"] = 0
+    config["n_lookback"] = 0
 
 envs.run_experiment(
     "yolo_air_transfer", config, readme,

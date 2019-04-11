@@ -216,8 +216,8 @@ def mAP(pred_boxes, gt_boxes, n_classes, recall_values=None, iou_threshold=None)
     return np.mean(ap)
 
 
-class AP(object):
-    keys_accessed = "normalized_box obj annotations n_annotations"
+class AP:
+    keys_accessed = "box normalized_box obj annotations n_annotations"
 
     def __init__(self, iou_threshold=None):
         if iou_threshold is not None:
@@ -233,36 +233,33 @@ class AP(object):
         obj = _tensors['obj']
         top, left, height, width = np.split(_tensors['normalized_box'], 4, axis=-1)
         annotations = _tensors["annotations"]
-        n_annotations = _tensors["n_annotations"]
 
         batch_size = obj.shape[0]
 
-        top = network.image_height * top
-        height = network.image_height * height
+        n_frames = getattr(network, 'n_frames', 0)
+        if n_frames > 0:
+            shape = (batch_size*n_frames, -1)
+            annotations = annotations.reshape(batch_size*n_frames, *annotations.shape[2:])
+        else:
+            shape = (batch_size, -1)
+            annotations = annotations.reshape(batch_size, *annotations.shape[1:])
+
+        obj = obj.reshape(*shape)
+        top = network.image_height * top.reshape(*shape)
+        left = network.image_width * left.reshape(*shape)
+        height = network.image_height * height.reshape(*shape)
+        width = network.image_width * width.reshape(*shape)
+
         bottom = top + height
-
-        left = network.image_width * left
-        width = network.image_width * width
         right = left + width
-
-        obj = obj.reshape(batch_size, -1)
-        top = top.reshape(batch_size, -1)
-        bottom = bottom.reshape(batch_size, -1)
-        left = left.reshape(batch_size, -1)
-        right = right.reshape(batch_size, -1)
 
         ground_truth_boxes = []
         predicted_boxes = []
 
-        for idx in range(batch_size):
-            _a = [
-                [0, *rest]
-                for (valid, cls, *rest), _
-                in zip(annotations[idx], range(n_annotations[idx]))
-                if valid
-            ]
+        for idx, a in enumerate(annotations):
+            _ground_truth_boxes = [(0, *rest) for valid, cls, *rest in a if valid]
 
-            ground_truth_boxes.append(_a)
+            ground_truth_boxes.append(_ground_truth_boxes)
 
             _predicted_boxes = []
 
@@ -515,10 +512,6 @@ class TensorRecorder(ScopedFunction):
 
 
 class VariationalAutoencoder(TensorRecorder):
-    fixed_weights = Param()
-    fixed_values = Param()
-    no_gradient = Param()
-
     attr_prior_mean = Param()
     attr_prior_std = Param()
 
@@ -564,12 +557,6 @@ class VariationalAutoencoder(TensorRecorder):
 
         if not self.noisy and self.train_kl:
             raise Exception("If `noisy` is False, `train_kl` must also be False.")
-
-        if isinstance(self.fixed_weights, str):
-            self.fixed_weights = self.fixed_weights.split()
-
-        if isinstance(self.no_gradient, str):
-            self.no_gradient = self.no_gradient.split()
 
         super(VariationalAutoencoder, self).__init__(scope=scope, **kwargs)
 

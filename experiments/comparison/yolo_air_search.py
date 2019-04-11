@@ -47,7 +47,7 @@ config = dict(
     val_example_range=(0.7, 0.8),
     test_example_range=(0.8, 0.9),
 )
-config["sequential_cfg:n_lookback"] = args.n_lookback
+config["n_lookback"] = args.n_lookback
 
 
 envs.run_experiment(

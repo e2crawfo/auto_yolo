@@ -80,7 +80,7 @@ extra_config = {
         'kernel_size': 2},
 }
 config.update(extra_config[args.n_lookback])
-config["sequential_cfg:n_lookback"] = args.n_lookback
+config["n_lookback"] = args.n_lookback
 
 envs.run_experiment(
     "yolo_air_ablation_n_lookback={}".format(args.n_lookback), config, readme,
