@@ -33,7 +33,7 @@ def render_sprites_so():
     global _render_sprites_so
     if _render_sprites_so is None:
         loc = os.path.join(os.path.split(__file__)[0], "_render_sprites.so")
-        print("Loading render_sprites library at {}.".format(loc))
+        print("\nLoading render_sprites library at {}.".format(loc))
         _render_sprites_so = tf.load_op_library(loc)
         print("Success.\n")
 

@@ -21,16 +21,10 @@ class SimpleVAE(VariationalAutoencoder):
             if "encoder" in self.fixed_weights:
                 self.encoder.fix_variables()
 
-            if hasattr(self.encoder, "layout"):
-                self.encoder.layout[-1]['filters'] = 2 * self.A
-
         if self.decoder is None:
             self.decoder = cfg.build_decoder(scope="decoder")
             if "decoder" in self.fixed_weights:
                 self.decoder.fix_variables()
-
-            if hasattr(self.decoder, "layout"):
-                self.decoder.layout[-1]['filters'] = 3
 
         # --- encode ---
 
@@ -50,7 +44,7 @@ class SimpleVAE(VariationalAutoencoder):
 
         # --- decode ---
 
-        reconstruction = self.decoder(attr, self.inp.shape[1:], self.is_training)
+        reconstruction = self.decoder(attr, 3, self.is_training)
         reconstruction = reconstruction[:, :self.inp.shape[1], :self.inp.shape[2], :]
 
         reconstruction = tf.nn.sigmoid(tf.clip_by_value(reconstruction, -10, 10))
