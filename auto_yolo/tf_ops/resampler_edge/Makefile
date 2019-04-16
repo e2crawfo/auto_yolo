@@ -7,7 +7,7 @@ TF_LFLAGS=$(shell python -c 'import tensorflow as tf; print(" ".join(tf.sysconfi
 # and tensorflow is thus unable to find cuda.h. To get around this, we make a symbolic link called "cuda"
 # in the home directory which points to the <version> directory. Create the link by doing:
 # "cd ~ && ln -s $CUDA_HOME cuda". Then invoke the make command as: "make CUDA_INC_HACK=$HOME"
-CUDA_INC_HACK="/usr/local/"
+CUDA_INC_HACK=/usr/local/
 
 all: _resampler_edge.so
 
