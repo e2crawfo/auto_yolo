@@ -33,7 +33,7 @@ config = dict(
             "exp_alg=yolo-air-math_seed=174419635_2018_07_18_16_20_00/weights/best_of_stage_0",
     },
     curriculum=[dict()],
-    build_math_input=lambda scope: MLP([512, 256, 100, 100], scope=scope),
+    build_math_input=lambda scope: MLP(n_units=[512, 256, 100, 100], scope=scope),
     build_network=yolo_air.YoloAir_AlternateNetwork,
     fixed_weights="object_encoder object_decoder box obj backbone",
 )

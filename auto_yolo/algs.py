@@ -59,7 +59,7 @@ alg_config = Config(
 
     noisy=True,
 
-    build_background_encoder=lambda scope: MLP([10, 10], scope=scope),
+    build_background_encoder=lambda scope: MLP(n_units=[10, 10], scope=scope),
     build_background_decoder=IdentityFunction,
     max_possible_objects=None
 )
@@ -82,8 +82,8 @@ baseline_config = alg_config.copy(
     alg_name="baseline",
     build_network=baseline.Baseline_Network,
     render_hook=baseline.Baseline_RenderHook(),
-    build_object_encoder=lambda scope: MLP([512, 256], scope=scope),
-    build_object_decoder=lambda scope: MLP([256, 512], scope=scope),
+    build_object_encoder=lambda scope: MLP(n_units=[512, 256], scope=scope),
+    build_object_decoder=lambda scope: MLP(n_units=[256, 512], scope=scope),
     cc_threshold=1e-3,
     object_shape=(21, 21),
 )
@@ -133,9 +133,9 @@ yolo_air_config = alg_config.copy(
         ],
         scope=scope,
     ),
-    build_lateral=lambda scope: MLP([100, 100], scope=scope),
-    build_object_encoder=lambda scope: MLP([256, 128], scope=scope),
-    build_object_decoder=lambda scope: MLP([128, 256], scope=scope),
+    build_lateral=lambda scope: MLP(n_units=[100, 100], scope=scope),
+    build_object_encoder=lambda scope: MLP(n_units=[256, 128], scope=scope),
+    build_object_decoder=lambda scope: MLP(n_units=[128, 256], scope=scope),
 
     n_backbone_features=100,
     n_passthrough_features=100,
@@ -209,9 +209,9 @@ air_config = alg_config.copy(
     build_cell=lambda scope: ScopedCellWrapper(
         tf.contrib.rnn.LSTMBlockCell(cfg.rnn_n_units)),
     rnn_n_units=256,
-    build_output_network=lambda scope: MLP([128], scope=scope),
-    build_object_encoder=lambda scope: MLP([512, 256], scope=scope, activation_fn=tf.nn.softplus),
-    build_object_decoder=lambda scope: MLP([256, 512], scope=scope, activation_fn=tf.nn.softplus),
+    build_output_network=lambda scope: MLP(n_units=[128], scope=scope),
+    build_object_encoder=lambda scope: MLP(n_units=[512, 256], scope=scope, fc_kwargs=dict(activation_fn=tf.nn.softplus)),
+    build_object_decoder=lambda scope: MLP(n_units=[256, 512], scope=scope, fc_kwargs=dict(activation_fn=tf.nn.softplus)),
 
     stopping_criteria="AP,max",
     threshold=1.0,
@@ -235,7 +235,7 @@ air_config = alg_config.copy(
 
 dair_config = air_config.copy(
     difference_air=True,
-    build_cell=lambda scope: FeedforwardCell(MLP([256, 256, 256, 256]), cfg.rnn_n_units),
+    build_cell=lambda scope: FeedforwardCell(MLP(n_units=[256, 256, 256, 256]), cfg.rnn_n_units),
 )
 
 nem_config = alg_config.copy(
@@ -319,7 +319,7 @@ def math_prepare_func():
 
     decoder_kind = cfg.decoder_kind
     if decoder_kind == "mlp":
-        cfg.build_math_network = lambda scope: MLP([256, 256, 256, 128], scope=scope)
+        cfg.build_math_network = lambda scope: MLP(n_units=[256, 256, 256, 128], scope=scope)
     elif decoder_kind == "recurrent":
         cfg.build_math_network = networks.SimpleRecurrentRegressionNetwork
         cfg.build_math_cell = lambda scope: tf.contrib.rnn.LSTMBlockCell(cfg.n_recurrent_units)
@@ -357,8 +357,8 @@ def math_prepare_func():
 
 math_config = Config(
     prepare_func=math_prepare_func,
-    build_math_input=lambda scope: MLP([100, 100], scope=scope),
-    build_math_output=lambda scope: MLP([100, 100], scope=scope),
+    build_math_input=lambda scope: MLP(n_units=[100, 100], scope=scope),
+    build_math_output=lambda scope: MLP(n_units=[100, 100], scope=scope),
     train_math=True,
     math_weight=1.0,
     stopping_criteria="math_accuracy,max",
@@ -379,16 +379,16 @@ math_config = Config(
     use_mask=True,
 
     # For obj
-    # build_on_input_network=lambda scope: MLP([128, 128], scope=scope),
-    # build_on_object_network=lambda scope: MLP([128, 128], scope=scope),
-    # build_on_output_network=lambda scope: MLP([128, 128, 128], scope=scope),
-    build_on_input_network=lambda scope: MLP([128], scope=scope),
-    build_on_object_network=lambda scope: MLP([128], scope=scope),
-    build_on_output_network=lambda scope: MLP([128, 128], scope=scope),
+    # build_on_input_network=lambda scope: MLP(n_units=[128, 128], scope=scope),
+    # build_on_object_network=lambda scope: MLP(n_units=[128, 128], scope=scope),
+    # build_on_output_network=lambda scope: MLP(n_units=[128, 128, 128], scope=scope),
+    build_on_input_network=lambda scope: MLP(n_units=[128], scope=scope),
+    build_on_object_network=lambda scope: MLP(n_units=[128], scope=scope),
+    build_on_output_network=lambda scope: MLP(n_units=[128, 128], scope=scope),
 
     # For arn
-    build_arn_network=lambda scope: MLP([128, 128], scope=scope),
-    build_arn_object_network=lambda scope: MLP([128, 128], scope=scope),
+    build_arn_network=lambda scope: MLP(n_units=[128, 128], scope=scope),
+    build_arn_object_network=lambda scope: MLP(n_units=[128, 128], scope=scope),
     n_heads=1,
 )
 

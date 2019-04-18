@@ -14,42 +14,37 @@ from auto_yolo.models.core import (
 
 class ObjectLayer(ScopedFunction):
     object_shape = Param()
+    n_passthrough_features = Param()
+    training_wheels = Param()
+    n_lookback = Param()
+
+    yx_prior_mean = Param()
+    yx_prior_std = Param()
+    min_yx = Param()
+    max_yx = Param()
+
+    hw_prior_mean = Param()
+    hw_prior_std = Param()
+    min_hw = Param()
+    max_hw = Param()
     anchor_boxes = Param()
+
+    z_prior_mean = Param()
+    z_prior_std = Param()
 
     attr_prior_mean = Param()
     attr_prior_std = Param()
     A = Param()
     noisy = Param()
 
-    min_hw = Param()
-    max_hw = Param()
-
-    min_yx = Param()
-    max_yx = Param()
-
-    n_passthrough_features = Param()
-
     use_concrete_kl = Param()
     count_prior_log_odds = Param()
     count_prior_dist = Param()
     obj_concrete_temp = Param(help="Higher values -> smoother")
     obj_temp = Param(help="Higher values -> more uniform")
-
-    yx_prior_mean = Param()
-    yx_prior_std = Param()
-
-    hw_prior_mean = Param()
-    hw_prior_std = Param()
-
-    z_prior_mean = Param()
-    z_prior_std = Param()
-
     obj_logit_scale = Param()
     alpha_logit_scale = Param()
     alpha_logit_bias = Param()
-
-    training_wheels = Param()
-    n_lookback = Param()
 
     box_network = None
     z_network = None
@@ -83,17 +78,17 @@ class ObjectLayer(ScopedFunction):
 
         self.anchor_boxes = np.array(self.anchor_boxes)
 
-    @staticmethod
-    def std_nonlinearity(std_logit):
+    def std_nonlinearity(self, std_logit):
         # return tf.exp(std)
-        return 2 * tf.nn.sigmoid(tf.clip_by_value(std_logit, -10, 10))
+        std = 2 * tf.nn.sigmoid(tf.clip_by_value(std_logit, -10, 10))
+        if not self.noisy:
+            std = tf.zeros_like(std)
+        return std
 
     def _build_box(self, box_params, is_training):
         mean, log_std = tf.split(box_params, 2, axis=-1)
 
         std = self.std_nonlinearity(log_std)
-        if not self.noisy:
-            std = tf.zeros_like(std)
 
         mean = self.training_wheels * tf.stop_gradient(mean) + (1-self.training_wheels) * mean
         std = self.training_wheels * tf.stop_gradient(std) + (1-self.training_wheels) * std
@@ -298,7 +293,8 @@ class ObjectLayer(ScopedFunction):
         W = int(W)
 
         if not self.initialized:
-            # Note this limits the re-usability of this module within
+            # Note this limits the re-usability of this module to images
+            # with a fixed shape (the shape of the first image it is used on)
             self.image_height = int(inp.shape[-3])
             self.image_width = int(inp.shape[-2])
             self.image_depth = int(inp.shape[-1])
@@ -363,9 +359,6 @@ class ObjectLayer(ScopedFunction):
                     attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
                     attr_std = self.std_nonlinearity(attr_log_std)
 
-                    if not self.noisy:
-                        attr_std = tf.zeros_like(attr_std)
-
                     attr, attr_kl = normal_vae(attr_mean, attr_std, self.attr_prior_mean, self.attr_prior_std)
 
                     if "attr" in self.no_gradient:
@@ -387,8 +380,6 @@ class ObjectLayer(ScopedFunction):
                     network_output = self.z_network(layer_inp, 2 + n_features, self.is_training)
                     z_mean, z_log_std, features = tf.split(network_output, (1, 1, n_features), axis=1)
                     z_std = self.std_nonlinearity(z_log_std)
-                    if not self.noisy:
-                        z_std = tf.zeros_like(z_std)
 
                     z_mean = self.training_wheels * tf.stop_gradient(z_mean) + (1-self.training_wheels) * z_mean
                     z_std = self.training_wheels * tf.stop_gradient(z_std) + (1-self.training_wheels) * z_std

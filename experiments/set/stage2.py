@@ -40,16 +40,16 @@ def prepare_func():
 
     decoder_kind = cfg.decoder_kind
     if decoder_kind == "mlp":
-        cfg.build_math_network = lambda scope: MLP([256, 256, 256, 256, 256], scope=scope)
+        cfg.build_math_network = lambda scope: MLP(n_units=[256, 256, 256, 256, 256], scope=scope)
         cfg.max_possible_objects = 7
     elif decoder_kind == "recurrent":
         cfg.build_math_network = networks.SimpleRecurrentRegressionNetwork
         cfg.build_math_cell = lambda scope: tf.contrib.rnn.LSTMBlockCell(cfg.n_recurrent_units)
     elif decoder_kind == "obj":
         cfg.build_math_network = ObjectNetwork
-        cfg.build_on_input_network = lambda scope: MLP([256, 256], scope=scope)
-        cfg.build_on_object_network = lambda scope: MLP([256, 256, 256], scope=scope)
-        cfg.build_on_output_network = lambda scope: MLP([256, 256, 256], scope=scope)
+        cfg.build_on_input_network = lambda scope: MLP(n_units=[256, 256], scope=scope)
+        cfg.build_on_object_network = lambda scope: MLP(n_units=[256, 256, 256], scope=scope)
+        cfg.build_on_output_network = lambda scope: MLP(n_units=[256, 256, 256], scope=scope)
     elif decoder_kind == "arn1":
         cfg.n_repeats = 1
     elif decoder_kind == "arn3":
@@ -59,8 +59,8 @@ def prepare_func():
 
     if decoder_kind.startswith("arn"):
         cfg.build_math_network = AttentionalRelationNetwork
-        cfg.build_arn_network = lambda scope: MLP([256, 256], scope=scope)
-        cfg.build_arn_object_network = lambda scope: MLP([256, 256, 256], scope=scope)
+        cfg.build_arn_network = lambda scope: MLP(n_units=[256, 256], scope=scope)
+        cfg.build_arn_object_network = lambda scope: MLP(n_units=[256, 256, 256], scope=scope)
 
     if "stage1_path" in cfg:
         import os, glob  # noqa

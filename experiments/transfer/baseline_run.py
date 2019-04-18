@@ -4,9 +4,10 @@ import argparse
 
 readme = "Running baseline for transfer experiment."
 
+
 def build_net(scope):
     from dps.utils.tf import MLP
-    return MLP([10, 10], scope=scope)
+    return MLP(n_units=[10, 10], scope=scope)
 
 
 durations = dict(

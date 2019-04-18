@@ -37,8 +37,8 @@ config = dict(
     tile_shape=(48, 48),
     A=1,
     attr_prior_std=10.0,
-    build_encoder=lambda scope: MLP([100, 100], scope=scope),
-    build_decoder=lambda scope: MLP([100, 100], scope=scope),
+    build_encoder=lambda scope: MLP(n_units=[100, 100], scope=scope),
+    build_decoder=lambda scope: MLP(n_units=[100, 100], scope=scope),
 )
 
 envs.run_experiment(
