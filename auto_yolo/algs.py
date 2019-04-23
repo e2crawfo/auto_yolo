@@ -124,7 +124,7 @@ yolo_air_config = alg_config.copy(
 
     build_backbone=lambda scope: GridConvNet(
         layers=[
-            dict(filters=128, kernel_size=4, strides=3),
+            dict(filters=128, kernel_size=4, strides=2),
             dict(filters=128, kernel_size=4, strides=2),
             dict(filters=128, kernel_size=4, strides=2),
             dict(filters=128, kernel_size=1, strides=1),

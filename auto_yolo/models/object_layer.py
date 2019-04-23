@@ -1,4 +1,5 @@
 import tensorflow as tf
+import tensorflow_probability as tfp
 import numpy as np
 import collections
 import sonnet as snt
@@ -9,10 +10,28 @@ from dps.utils.tf import build_scheduled_value, FIXED_COLLECTION, ScopedFunction
 
 from auto_yolo.tf_ops import render_sprites, resampler_edge
 from auto_yolo.models.core import (
-    normal_vae, concrete_binary_pre_sigmoid_sample, concrete_binary_sample_kl, tf_safe_log)
+    concrete_binary_pre_sigmoid_sample, concrete_binary_sample_kl, tf_safe_log)
+
+Normal = tfp.distributions.Normal
 
 
 class ObjectLayer(ScopedFunction):
+    def std_nonlinearity(self, std_logit):
+        # return tf.exp(std)
+        std = 2 * tf.nn.sigmoid(tf.clip_by_value(std_logit, -10, 10))
+        if not self.noisy:
+            std = tf.zeros_like(std)
+        return std
+
+    def z_nonlinearity(self, z_logits):
+        return 4 * tf.nn.sigmoid(tf.clip_by_value(z_logits, -10, 10))
+
+    def z_nonlinearity_inverse(self, z):
+        p = tf.clip_by_value(z / 4., 1e-6, 1-1e-6)
+        return -tf.log(1. / p - 1.)
+
+
+class GridObjectLayer(ObjectLayer):
     object_shape = Param()
     n_passthrough_features = Param()
     training_wheels = Param()
@@ -46,15 +65,10 @@ class ObjectLayer(ScopedFunction):
     alpha_logit_scale = Param()
     alpha_logit_bias = Param()
 
-    box_network = None
-    z_network = None
-    obj_network = None
-    object_encoder = None
-    object_decoder = None
     edge_weights = None
 
     def __init__(self, pixels_per_cell, scope=None, **kwargs):
-        super(ObjectLayer, self).__init__(scope=scope, **kwargs)
+        super(GridObjectLayer, self).__init__(scope=scope, **kwargs)
 
         self.pixels_per_cell = pixels_per_cell
 
@@ -78,12 +92,71 @@ class ObjectLayer(ScopedFunction):
 
         self.anchor_boxes = np.array(self.anchor_boxes)
 
-    def std_nonlinearity(self, std_logit):
-        # return tf.exp(std)
-        std = 2 * tf.nn.sigmoid(tf.clip_by_value(std_logit, -10, 10))
-        if not self.noisy:
-            std = tf.zeros_like(std)
-        return std
+    def _independent_prior(self):
+        return dict(
+            cell_y_logit=Normal(loc=self.yx_prior_mean, scale=self.yx_prior_std),
+            cell_x_logit=Normal(loc=self.yx_prior_mean, scale=self.yx_prior_std),
+            h_logit=Normal(loc=self.hw_prior_mean, scale=self.hw_prior_std),
+            w_logit=Normal(loc=self.hw_prior_mean, scale=self.hw_prior_std),
+            attr=Normal(loc=self.attr_prior_mean, scale=self.attr_prior_std),
+            z_logit=Normal(loc=self.z_prior_mean, scale=self.z_prior_std),
+        )
+
+    def _compute_kl(self, tensors, prior):
+        # --- box ---
+
+        cell_y_kl = tensors["cell_y_logit_dist"].kl_divergence(prior["cell_y_logit"])
+        cell_x_kl = tensors["cell_x_logit_dist"].kl_divergence(prior["cell_x_logit"])
+        h_kl = tensors["h_logit_dist"].kl_divergence(prior["h_logit"])
+        w_kl = tensors["w_logit_dist"].kl_divergence(prior["w_logit"])
+
+        if "cell_y" in self.no_gradient:
+            cell_y_kl = tf.stop_gradient(cell_y_kl)
+
+        if "cell_x" in self.no_gradient:
+            cell_x_kl = tf.stop_gradient(cell_x_kl)
+
+        if "h" in self.no_gradient:
+            h_kl = tf.stop_gradient(h_kl)
+
+        if "w" in self.no_gradient:
+            w_kl = tf.stop_gradient(w_kl)
+
+        box_kl = tf.concat([cell_y_kl, cell_x_kl, h_kl, w_kl], axis=-1)
+
+        # --- attr ---
+
+        attr_kl = tensors["attr_dist"].kl_divergence(prior["attr"])
+
+        if "attr" in self.no_gradient:
+            attr_kl = tf.stop_gradient(attr_kl)
+
+        # --- z ---
+
+        z_kl = tensors["z_logit_dist"].kl_divergence(prior["z_logit"])
+
+        if "z" in self.no_gradient:
+            z_kl = tf.stop_gradient(z_kl)
+
+        if "z" in self.fixed_values:
+            z_kl = tf.zeros_like(z_kl)
+
+        # --- obj ---
+
+        # TODO: allow a choice about which prior to use in _compute_obj_kl
+
+        obj_kl_tensors = self._compute_obj_kl(tensors)
+
+        return dict(
+            cell_y_kl=cell_y_kl,
+            cell_x_kl=cell_x_kl,
+            h_kl=h_kl,
+            w_kl=w_kl,
+            box_kl=box_kl,
+            z_kl=z_kl,
+            attr_kl=attr_kl,
+            **obj_kl_tensors,
+        )
 
     def _build_box(self, box_params, is_training):
         mean, log_std = tf.split(box_params, 2, axis=-1)
@@ -96,11 +169,17 @@ class ObjectLayer(ScopedFunction):
         cy_mean, cx_mean, h_mean, w_mean = tf.split(mean, 4, axis=-1)
         cy_std, cx_std, h_std, w_std = tf.split(std, 4, axis=-1)
 
-        cy_logits, cy_kl = normal_vae(cy_mean, cy_std, self.yx_prior_mean, self.yx_prior_std)
-        cx_logits, cx_kl = normal_vae(cx_mean, cx_std, self.yx_prior_mean, self.yx_prior_std)
+        cy_logit_dist = Normal(loc=cy_mean, scale=cy_std)
+        cy_logits = cy_logit_dist.sample()
 
-        h_logits, h_kl = normal_vae(h_mean, h_std, self.hw_prior_mean, self.hw_prior_std)
-        w_logits, w_kl = normal_vae(w_mean, w_std, self.hw_prior_mean, self.hw_prior_std)
+        cx_logit_dist = Normal(loc=cx_mean, scale=cx_std)
+        cx_logits = cx_logit_dist.sample()
+
+        h_logit_dist = Normal(loc=h_mean, scale=h_std)
+        h_logits = h_logit_dist.sample()
+
+        w_logit_dist = Normal(loc=w_mean, scale=w_std)
+        w_logits = w_logit_dist.sample()
 
         cell_y = tf.nn.sigmoid(tf.clip_by_value(cy_logits, -10, 10))
         cell_x = tf.nn.sigmoid(tf.clip_by_value(cx_logits, -10, 10))
@@ -119,45 +198,29 @@ class ObjectLayer(ScopedFunction):
 
         if "cell_y" in self.no_gradient:
             cell_y = tf.stop_gradient(cell_y)
-            cy_kl = tf.stop_gradient(cy_kl)
 
         if "cell_x" in self.no_gradient:
             cell_x = tf.stop_gradient(cell_x)
-            cx_kl = tf.stop_gradient(cx_kl)
 
         if "h" in self.no_gradient:
             h = tf.stop_gradient(h)
-            h_kl = tf.stop_gradient(h_kl)
 
         if "w" in self.no_gradient:
             w = tf.stop_gradient(w)
-            w_kl = tf.stop_gradient(w_kl)
 
         box = tf.concat([cell_y, cell_x, h, w], axis=-1)
-        box_kl = tf.concat([cy_kl, cx_kl, h_kl, w_kl], axis=-1)
 
         return dict(
-            cell_y_mean=cy_mean,
-            cell_x_mean=cx_mean,
-            h_mean=h_mean,
-            w_mean=w_mean,
-
-            cell_y_std=cy_std,
-            cell_x_std=cx_std,
-            h_std=h_std,
-            w_std=w_std,
-
             cell_y=cell_y,
             cell_x=cell_x,
             h=h,
             w=w,
 
-            cell_y_kl=cy_kl,
-            cell_x_kl=cx_kl,
-            h_kl=h_kl,
-            w_kl=w_kl,
+            cell_y_logit_dist=cy_logit_dist,
+            cell_x_logit_dist=cx_logit_dist,
+            h_logit_dist=h_logit_dist,
+            w_logit_dist=w_logit_dist,
 
-            box_kl=box_kl,
             box=box,
         )
 
@@ -261,32 +324,14 @@ class ObjectLayer(ScopedFunction):
 
     def _call(self, inp, inp_features, background, is_training):
 
-        # --- set up sub networks ---
+        # --- set up sub networks and attributes ---
 
-        if self.box_network is None:
-            self.box_network = cfg.build_lateral(scope="box_lateral_network")
-            if "box" in self.fixed_weights:
-                self.box_network.fix_variables()
+        self.maybe_build_subnet("box_network", builder=cfg.build_lateral, key="box")
+        self.maybe_build_subnet("z_network", builder=cfg.build_lateral, key="z")
+        self.maybe_build_subnet("obj_network", builder=cfg.build_lateral, key="obj")
 
-        if self.object_encoder is None:
-            self.object_encoder = cfg.build_object_encoder(scope="object_encoder")
-            if "object_encoder" in self.fixed_weights:
-                self.object_encoder.fix_variables()
-
-        if self.object_decoder is None:
-            self.object_decoder = cfg.build_object_decoder(scope="object_decoder")
-            if "object_decoder" in self.fixed_weights:
-                self.object_decoder.fix_variables()
-
-        if self.z_network is None:
-            self.z_network = cfg.build_lateral(scope="z_lateral_network")
-            if "z" in self.fixed_weights:
-                self.z_network.fix_variables()
-
-        if self.obj_network is None:
-            self.obj_network = cfg.build_lateral(scope="obj_lateral_network")
-            if "obj" in self.fixed_weights:
-                self.obj_network.fix_variables()
+        self.maybe_build_subnet("object_encoder")
+        self.maybe_build_subnet("object_decoder")
 
         _, H, W, _, _ = inp_features.shape
         H = int(H)
@@ -305,7 +350,7 @@ class ObjectLayer(ScopedFunction):
             self.is_training = is_training
             self.float_is_training = tf.to_float(is_training)
 
-        # --- set-up the edge element ---
+        # --- set up the edge element ---
 
         sizes = [4, self.A, 1, 1]
         sigmoids = [True, False, False, True]
@@ -359,14 +404,13 @@ class ObjectLayer(ScopedFunction):
                     attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
                     attr_std = self.std_nonlinearity(attr_log_std)
 
-                    attr, attr_kl = normal_vae(attr_mean, attr_std, self.attr_prior_mean, self.attr_prior_std)
+                    attr_dist = Normal(loc=attr_mean, scale=attr_std)
+                    attr = attr_dist.sample()
 
                     if "attr" in self.no_gradient:
                         attr = tf.stop_gradient(attr)
-                        attr_kl = tf.stop_gradient(attr_kl)
 
-                    built = dict(attr_mean=attr_mean, attr_std=attr_std, attr=attr,
-                                 attr_kl=attr_kl, input_glimpses=input_glimpses)
+                    built = dict(attr_dist=attr_dist, attr=attr, input_glimpses=input_glimpses)
 
                     for key, value in built.items():
                         _tensors[key][h, w, b] = value
@@ -383,18 +427,17 @@ class ObjectLayer(ScopedFunction):
 
                     z_mean = self.training_wheels * tf.stop_gradient(z_mean) + (1-self.training_wheels) * z_mean
                     z_std = self.training_wheels * tf.stop_gradient(z_std) + (1-self.training_wheels) * z_std
-                    z_logits, z_kl = normal_vae(z_mean, z_std, self.z_prior_mean, self.z_prior_std)
-                    z = 4 * tf.nn.sigmoid(tf.clip_by_value(z_logits, -10, 10))
+                    z_logit_dist = Normal(loc=z_mean, scale=z_std)
+                    z_logits = z_logit_dist.sample()
+                    z = self.z_nonlinearity(z_logits)
 
                     if "z" in self.no_gradient:
                         z = tf.stop_gradient(z)
-                        z_kl = tf.stop_gradient(z_kl)
 
                     if "z" in self.fixed_values:
                         z = self.fixed_values['z'] * tf.ones_like(z)
-                        z_kl = tf.zeros_like(z_kl)
 
-                    built = dict(z_mean=z_mean, z_std=z_std, z=z, z_kl=z_kl,)
+                    built = dict(z_logit_dist=z_logit_dist, z=z)
 
                     for key, value in built.items():
                         _tensors[key][h, w, b] = value
@@ -416,29 +459,51 @@ class ObjectLayer(ScopedFunction):
                     program[h, w, b] = partial_program
                     assert program[h, w, b].shape[1] == total_sample_size
 
+        # --- merge tensors from different grid cells ---
+
         tensors = dict(background=background)
         for k, v in _tensors.items():
-            t1 = []
-            for h in range(H):
-                t2 = []
-                for w in range(W):
-                    t2.append(tf.stack([v[h, w, b] for b in range(self.B)], axis=1))
-                t1.append(tf.stack(t2, axis=1))
-            tensors[k] = tf.stack(t1, axis=1)
+            if k.endswith('_dist'):
+                dist = v[0, 0, 0]
+                dist_class = type(dist)
+                params = dist.parameters.copy()
+                tensor_keys = sorted(key for key, t in params.items() if isinstance(t, tf.Tensor))
+                tensor_params = {}
+
+                for key in tensor_keys:
+                    t1 = []
+                    for h in range(H):
+                        t2 = []
+                        for w in range(W):
+                            t2.append(tf.stack([v[h, w, b].parameters[key] for b in range(self.B)], axis=1))
+                        t1.append(tf.stack(t2, axis=1))
+                    tensor_params[key] = tf.stack(t1, axis=1)
+
+                params.update(tensor_params)
+                tensors[k] = dist_class(**params)
+            else:
+                t1 = []
+                for h in range(H):
+                    t2 = []
+                    for w in range(W):
+                        t2.append(tf.stack([v[h, w, b] for b in range(self.B)], axis=1))
+                    t1.append(tf.stack(t2, axis=1))
+                tensors[k] = tf.stack(t1, axis=1)
 
         tensors["all"] = tf.concat(
             [tensors["box"], tensors["attr"], tensors["z"], tensors["obj"]], axis=-1)
 
-        # --- get obj kl ---
+        # --- kl ---
 
-        obj_kl_tensors = self.obj_kl(tensors)
-        tensors.update(obj_kl_tensors)
+        prior = self._independent_prior()
+        kl_tensors = self._compute_kl(tensors, prior)
+        tensors.update(kl_tensors)
 
         tensors["n_objects"] = tf.fill((self.batch_size,), self.HWB)
         tensors["pred_n_objects"] = tf.reduce_sum(tensors['obj'], axis=(1, 2, 3, 4))
         tensors["pred_n_objects_hard"] = tf.reduce_sum(tf.round(tensors['obj']), axis=(1, 2, 3, 4))
 
-        # --- Compute sprite appearances from attr using object decoder ---
+        # --- compute sprite appearances from attr using object decoder ---
 
         object_decoder_in = tf.reshape(tensors["attr"], (self.batch_size * self.HWB, 1, 1, self.A))
 
@@ -453,6 +518,42 @@ class ObjectLayer(ScopedFunction):
                          *self.object_shape, self.image_depth+1,)
         tensors["objects"] = tf.reshape(objects, objects_shape)
 
+        # --- image-normalized box coordinates ---
+
+        # All in cell-local co-ordinates, should be invariant to image size.
+        cell_y, cell_x, h, w = tf.split(tensors['box'], 4, axis=-1)
+
+        anchor_box_h = self.anchor_boxes[:, 0].reshape(1, 1, 1, self.B, 1)
+        anchor_box_w = self.anchor_boxes[:, 1].reshape(1, 1, 1, self.B, 1)
+
+        # box height and width normalized to image height and width
+        ys = h * anchor_box_h / self.image_height
+        xs = w * anchor_box_w / self.image_width
+
+        # box centre normalized to image height and width
+        yt = (
+            (self.pixels_per_cell[0] / self.image_height)
+            * (cell_y + tf.range(self.H, dtype=tf.float32)[None, :, None, None, None])
+        )
+        xt = (
+            (self.pixels_per_cell[1] / self.image_width)
+            * (cell_x + tf.range(self.W, dtype=tf.float32)[None, None, :, None, None])
+        )
+
+        # `render_sprites` requires box top-left, whereas y and x give box center
+        yt -= ys / 2
+        xt -= xs / 2
+
+        normalized_box = tf.concat([yt, xt, ys, xs], axis=-1)
+
+        tensors.update(
+            yt=yt,
+            xt=xt,
+            ys=ys,
+            xs=xs,
+            normalized_box=normalized_box
+        )
+
         # --- render ---
 
         render_tensors = self.render(tensors)
@@ -460,7 +561,7 @@ class ObjectLayer(ScopedFunction):
 
         return tensors
 
-    def obj_kl(self, tensors):
+    def _compute_obj_kl(self, tensors):
         obj_kl_tensors = {}
 
         # --- compute obj_kl ---
@@ -538,32 +639,6 @@ class ObjectLayer(ScopedFunction):
 
         # --- Compute sprite locations from box parameters ---
 
-        # All in cell-local co-ordinates, should be invariant to image size.
-        cell_y, cell_x, h, w = tf.split(tensors['box'], 4, axis=-1)
-
-        anchor_box_h = self.anchor_boxes[:, 0].reshape(1, 1, 1, self.B, 1)
-        anchor_box_w = self.anchor_boxes[:, 1].reshape(1, 1, 1, self.B, 1)
-
-        # box height and width normalized to image height and width
-        ys = h * anchor_box_h / self.image_height
-        xs = w * anchor_box_w / self.image_width
-
-        # box centre normalized to image height and width
-        yt = (
-            (self.pixels_per_cell[0] / self.image_height)
-            * (cell_y + tf.range(self.H, dtype=tf.float32)[None, :, None, None, None])
-        )
-        xt = (
-            (self.pixels_per_cell[1] / self.image_width)
-            * (cell_x + tf.range(self.W, dtype=tf.float32)[None, None, :, None, None])
-        )
-
-        # `render_sprites` requires box top-left, whereas y and x give box center
-        yt -= ys / 2
-        xt -= xs / 2
-
-        render_tensors["normalized_box"] = tf.concat([yt, xt, ys, xs], axis=-1)
-
         objects = tf.reshape(
             tensors["objects"],
             (self.batch_size, self.HWB, *self.object_shape, self.image_depth+1,))
@@ -585,6 +660,8 @@ class ObjectLayer(ScopedFunction):
 
         # --- Compose images ---
 
+        ys, xs, yt, xt = tensors["ys"], tensors["xs"], tensors["yt"], tensors["xt"]
+
         scales = tf.concat([ys, xs], axis=-1)
         scales = tf.reshape(scales, (self.batch_size, self.HWB, 2))
 
@@ -601,8 +678,6 @@ class ObjectLayer(ScopedFunction):
 
         # --- Store values ---
 
-        render_tensors['latent_hw'] = tensors['box'][..., 2:]
-        render_tensors['latent_area'] = h * w
         render_tensors['area'] = (ys * float(self.image_height)) * (xs * float(self.image_width))
         render_tensors['output'] = output
 

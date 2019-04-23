@@ -4,12 +4,11 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.colors import to_rgb
 
-from dps import cfg
 from dps.utils import Param
 from dps.utils.tf import tf_mean_sum, RenderHook, GridConvNet
 
 from auto_yolo.models.core import AP, xent_loss, VariationalAutoencoder
-from auto_yolo.models.object_layer import ObjectLayer
+from auto_yolo.models.object_layer import GridObjectLayer
 
 
 class YoloAir_Network(VariationalAutoencoder):
@@ -40,11 +39,8 @@ class YoloAir_Network(VariationalAutoencoder):
     def build_representation(self):
         # --- build graph ---
 
-        if self.backbone is None:
-            self.backbone = cfg.build_backbone(scope="backbone")
-            assert isinstance(self.backbone, GridConvNet)
-            if "backbone" in self.fixed_weights:
-                self.backbone.fix_variables()
+        self.maybe_build_subnet("backbone")
+        assert isinstance(self.backbone, GridConvNet)
 
         inp = self._tensors["inp"]
         backbone_output, n_grid_cells, grid_cell_size = self.backbone(
@@ -59,7 +55,7 @@ class YoloAir_Network(VariationalAutoencoder):
             (-1, self.H, self.W, self.B, self.n_backbone_features))
 
         if self.object_layer is None:
-            self.object_layer = ObjectLayer(self.pixels_per_cell, scope="objects")
+            self.object_layer = GridObjectLayer(self.pixels_per_cell, scope="objects")
 
         object_rep_tensors = self.object_layer(
             self.inp, backbone_output, self._tensors["background"], self.is_training)
@@ -81,11 +77,11 @@ class YoloAir_Network(VariationalAutoencoder):
             z=self._tensors["z"],
             area=self._tensors["area"],
 
-            cell_y_std=self._tensors["cell_y_std"],
-            cell_x_std=self._tensors["cell_x_std"],
-            h_std=self._tensors["h_std"],
-            w_std=self._tensors["w_std"],
-            z_std=self._tensors["z_std"],
+            cell_y_std=self._tensors["cell_y_logit_dist"].scale,
+            cell_x_std=self._tensors["cell_x_logit_dist"].scale,
+            h_std=self._tensors["h_logit_dist"].scale,
+            w_std=self._tensors["w_logit_dist"].scale,
+            z_std=self._tensors["z_logit_dist"].scale,
 
             n_objects=pred_n_objects,
             obj=obj,
@@ -95,9 +91,6 @@ class YoloAir_Network(VariationalAutoencoder):
             on_w_avg=tf.reduce_sum(self._tensors["w"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
             on_z_avg=tf.reduce_sum(self._tensors["z"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
             on_area_avg=tf.reduce_sum(self._tensors["area"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
-
-            latent_area=self._tensors["latent_area"],
-            latent_hw=self._tensors["latent_hw"],
 
             attr=self._tensors["attr"],
         )
