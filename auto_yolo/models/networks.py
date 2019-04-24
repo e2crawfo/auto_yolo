@@ -4,7 +4,7 @@ import numpy as np
 from dps import cfg
 from dps.utils import Param, prime_factors
 from dps.utils.tf import (
-    ConvNet, ScopedFunction, MLP, apply_mask_and_group_at_front)
+    ConvNet, ScopedFunction, MLP, apply_mask_and_group_at_front, tf_shape)
 
 
 class Backbone(ConvNet):
@@ -359,7 +359,7 @@ class RelationNetwork(ScopedFunction):
     f_dim = Param(100)
 
     def _call(self, inp, output_size, is_training):
-        # Assumes objects range of all but the first and last dimensions
+        # Assumes objects range over all but the first and last dimensions
         batch_size = tf.shape(inp)[0]
         spatial_shape = inp.shape[1:-1]
         n_objects = np.prod(spatial_shape)
@@ -449,3 +449,181 @@ class AdditionNetwork(ScopedFunction):
 
         assert running_sum.shape[1] == output_size
         return running_sum
+
+
+def apply_object_wise(func, signal, output_size, is_training, restore_shape=True, n_trailing_dims=1):
+    """ Treat `signal` as a batch of objects. Apply function `func` separately to each object.
+        The final `n_trailing_dims`-many dimensions are treated as "within-object" dimensions.
+        By default, objects are assumed to be vectors, but this can be changed by increasing
+        `n_trailing_dims`. e.g. n_trailing_dims==2 means each object is a matrix, i.e. the
+        last 2 dimensions  of signal are dimensions of the object.
+
+    """
+    shape = tf_shape(signal)
+    leading_dim = tf.reduce_prod(shape[:-n_trailing_dims])
+    signal = tf.reshape(signal, (leading_dim, *shape[-n_trailing_dims:]))
+    output = func(signal, output_size, is_training)
+
+    if restore_shape:
+        if not isinstance(output_size, tuple):
+            output_size = [output_size]
+        output = tf.reshape(output, (*shape[:-n_trailing_dims], *output_size))
+
+    return output
+
+
+class AttentionLayer(ScopedFunction):
+    key_dim = Param()
+    value_dim = Param()
+    n_heads = Param()
+    p_dropout = Param()
+    build_mlp = Param()
+    build_object_wise = Param()
+    n_hidden = Param()
+
+    is_built = False
+
+    def __init__(self, n_hidden, do_object_wise=True, memory=None, scope=None, **kwargs):
+        self.n_hidden = n_hidden
+        self.do_object_wise = do_object_wise
+        self.memory = memory
+
+        super().__init__(scope=scope)
+
+    def _call(self, signal, is_training, memory=None):
+        if not self.is_built:
+            self.query_funcs = [self.build_mlp(scope="query_head_{}".format(j)) for j in range(self.n_heads)]
+            self.key_funcs = [self.build_mlp(scope="key_head_{}".format(j)) for j in range(self.n_heads)]
+            self.value_funcs = [self.build_mlp(scope="value_head_{}".format(j)) for j in range(self.n_heads)]
+            self.after_func = self.build_mlp(scope="after")
+
+            if self.do_object_wise:
+                self.object_wise_func = self.build_object_wise(scope="object_wise")
+
+            if self.memory is not None:
+                self.K = [apply_object_wise(self.key_funcs[j], memory, self.key_dim, is_training, True)
+                          for j in range(self.n_heads)]
+                self.V = [apply_object_wise(self.value_funcs[j], memory, self.value_dim, is_training, True)
+                          for j in range(self.n_heads)]
+
+            self.is_built = True
+
+        n_signal_dim = len(signal.shape)
+        assert n_signal_dim in [2, 3]
+
+        if isinstance(memory, tuple):
+            # keys and values passed in directly
+            K, V = memory
+        elif memory is not None:
+            # memory is a value that we apply key_funcs and value_funcs to to obtain keys and values
+            K = [apply_object_wise(self.key_funcs[j], memory, self.key_dim, is_training, True)
+                 for j in range(self.n_heads)]
+            V = [apply_object_wise(self.value_funcs[j], memory, self.value_dim, is_training, True)
+                 for j in range(self.n_heads)]
+        elif self.K is not None:
+            K = self.K
+            V = self.V
+        else:
+            # self-attention - `signal` used for queries, keys and values.
+            K = [apply_object_wise(self.key_funcs[j], signal, self.key_dim, is_training, True)
+                 for j in range(self.n_heads)]
+            V = [apply_object_wise(self.value_funcs[j], signal, self.value_dim, is_training, True)
+                 for j in range(self.n_heads)]
+
+        head_outputs = []
+        for j in range(self.n_heads):
+            Q = apply_object_wise(self.query_funcs[j], signal, self.key_dim, is_training, True)
+
+            if n_signal_dim == 2:
+                Q = Q[:, None, :]
+
+            attention_logits = tf.matmul(Q, K[j], transpose_b=True) / tf.sqrt(tf.to_float(self.key_dim))
+            attention = tf.nn.softmax(attention_logits)
+            attended = tf.matmul(attention, V[j])  # (..., n_queries, value_dim)
+
+            if n_signal_dim == 2:
+                attended = attended[:, 0, :]
+
+            head_outputs.append(attended)
+
+        head_outputs = tf.concat(head_outputs, axis=-1)
+
+        # `after_func` is applied to the concatenation of the head outputs, and the result is added to the original
+        # signal. Next, if `object_wise_func` is not None and `do_object_wise` is True, object_wise_func is
+        # applied object wise and in a ResNet-style manner.
+
+        output = apply_object_wise(self.after_func, head_outputs, self.n_hidden, is_training, True)
+        output = tf.layers.dropout(output, self.p_dropout, training=is_training)
+        signal = tf.contrib.layers.layer_norm(signal + output)
+
+        if self.do_object_wise:
+            output = apply_object_wise(self.object_wise_func, signal, self.n_hidden, is_training, True)
+            output = tf.layers.dropout(output, self.p_dropout, training=is_training)
+            signal = tf.contrib.layers.layer_norm(signal + output)
+
+        return signal
+
+
+class SpatialAttentionLayer(ScopedFunction):
+    """ Now there are no keys and queries.
+
+    For the input we are given data and an array of locations. For the output we are just given
+    an array of locations.
+
+    Kind of interesting: this can be viewed as a differentiable way of converting a sparse matrix representation
+    of an image to a dense representation of an image, assuming the output locations are the locations of image pixels.
+    Input data is a list of locations paired with data, conceptually similar to sparse matrix representations.
+
+    """
+    kernel_std = Param()
+    p_dropout = Param()
+    build_mlp = Param()
+    build_object_wise = Param()
+    n_hidden = Param()
+
+    is_built = False
+
+    def __init__(self, n_hidden, do_object_wise=True, scope=None, **kwargs):
+        self.n_hidden = n_hidden
+        self.do_object_wise = do_object_wise
+
+        super().__init__(scope=scope)
+
+    def _call(self, input_signal, input_locs, output_locs, is_training):
+        if not self.is_built:
+            self.value_func = self.build_mlp(scope="value_func")
+            self.after_func = self.build_mlp(scope="after")
+
+            if self.do_object_wise:
+                self.object_wise_func = self.build_object_wise(scope="object_wise")
+
+            self.is_built = True
+
+        batch_size, n_inp, _ = tf_shape(input_signal)
+        loc_dim = tf_shape(input_locs)[-1]
+        n_outp = tf_shape(output_locs)[-2]
+        input_locs = tf.broadcast_to(input_locs, (batch_size, n_inp, loc_dim))
+        output_locs = tf.broadcast_to(output_locs, (batch_size, n_outp, loc_dim))
+
+        dist = output_locs[:, :, None, :] - input_locs[:, None, :, :]
+        kernel = tf.exp(-0.5 * tf.reduce_sum((dist / self.kernel_std)**2, axis=3))
+        kernel = kernel / (2 * np.pi)**(0.5 * loc_dim) / self.kernel_std**loc_dim
+
+        proximity = self.kernel(output_locs, input_locs, self.kernel_std)  # (batch_size, n_outp, n_inp)
+        V = apply_object_wise(self.value_func, input_signal, self.n_hidden, is_training)  # (batch_size, n_inp, value_dim)
+        result = tf.matmul(proximity, V)  # (batch_size, n_outp, value_dim)
+
+        # `after_func` is applied to the concatenation of the head outputs, and the result is added to the original
+        # signal. Next, if `object_wise_func` is not None and `do_object_wise` is True, object_wise_func is
+        # applied object wise and in a ResNet-style manner.
+
+        output = apply_object_wise(self.after_func, result, self.n_hidden, is_training, True)
+        output = tf.layers.dropout(output, self.p_dropout, training=is_training)
+        signal = tf.contrib.layers.layer_norm(input_signal + output)
+
+        if self.do_object_wise:
+            output = apply_object_wise(self.object_wise_func, signal, self.n_hidden, is_training, True)
+            output = tf.layers.dropout(output, self.p_dropout, training=is_training)
+            signal = tf.contrib.layers.layer_norm(signal + output)
+
+        return signal
