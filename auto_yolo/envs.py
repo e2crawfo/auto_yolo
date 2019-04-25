@@ -86,7 +86,16 @@ def run_experiment(
         name=exp_name, config=_config, distributions=distributions, **run_kwargs)
 
 
-class Nips2018Grid(object):
+class Environment:
+    @property
+    def obs_shape(self):
+        return self.datasets["train"].obs_shape
+
+    def close(self):
+        pass
+
+
+class Nips2018Grid(Environment):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
         train = GridEmnistObjectDetectionDataset(
@@ -103,11 +112,8 @@ class Nips2018Grid(object):
 
         self.datasets = dict(train=train, val=val, test=test)
 
-    def close(self):
-        pass
 
-
-class Nips2018Scatter(object):
+class Nips2018Scatter(Environment):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
         train = EmnistObjectDetectionDataset(
@@ -124,11 +130,8 @@ class Nips2018Scatter(object):
 
         self.datasets = dict(train=train, val=val, test=test)
 
-    def close(self):
-        pass
 
-
-class Nips2018Arithmetic(object):
+class Nips2018Arithmetic(Environment):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
 
@@ -146,11 +149,8 @@ class Nips2018Arithmetic(object):
 
         self.datasets = dict(train=train, val=val, test=test)
 
-    def close(self):
-        pass
 
-
-class Nips2018Shapes(object):
+class Nips2018Shapes(Environment):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
 
@@ -160,11 +160,8 @@ class Nips2018Shapes(object):
 
         self.datasets = dict(train=train, val=val, test=test)
 
-    def close(self):
-        pass
 
-
-class Nips2018ShapesQA(object):
+class Nips2018ShapesQA(Environment):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
 
@@ -174,11 +171,8 @@ class Nips2018ShapesQA(object):
 
         self.datasets = dict(train=train, val=val, test=test)
 
-    def close(self):
-        pass
 
-
-class Nips2018Set(object):
+class Nips2018Set(Environment):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
 
@@ -188,11 +182,8 @@ class Nips2018Set(object):
 
         self.datasets = dict(train=train, val=val, test=test)
 
-    def close(self):
-        pass
 
-
-class Nips2018Clevr(object):
+class Nips2018Clevr(Environment):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
 
@@ -202,11 +193,8 @@ class Nips2018Clevr(object):
 
         self.datasets = dict(train=train, val=val, test=test)
 
-    def close(self):
-        pass
 
-
-class Nips2018Atari(object):
+class Nips2018Atari(Environment):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
 
@@ -216,11 +204,8 @@ class Nips2018Atari(object):
 
         self.datasets = dict(train=train, val=val, test=test)
 
-    def close(self):
-        pass
 
-
-class Nips2018Collect(object):
+class Nips2018Collect(Environment):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
 
@@ -230,9 +215,6 @@ class Nips2018Collect(object):
         test = GameDataset(env=env, n_examples=cfg.n_val, seed=test_seed)
 
         self.datasets = dict(train=train, val=val, test=test)
-
-    def close(self):
-        pass
 
 
 env_config = Config(

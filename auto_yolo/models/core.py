@@ -289,16 +289,12 @@ class Updater(_Updater):
     max_grad_norm = Param()
 
     def __init__(self, env, scope=None, **kwargs):
-        self.obs_shape = env.datasets['train'].obs_shape
+        self.obs_shape = env.obs_shape
         *other, self.image_height, self.image_width, self.image_depth = self.obs_shape
         self.n_frames = other[0] if other else 0
         self.network = cfg.build_network(env, self, scope="network")
 
         super(Updater, self).__init__(env, scope=scope, **kwargs)
-
-    @property
-    def completion(self):
-        return self.env.datasets['train'].completion
 
     def trainable_variables(self, for_opt):
         return self.network.trainable_variables(for_opt)
@@ -544,7 +540,7 @@ class VariationalAutoencoder(TensorRecorder):
     def __init__(self, env, updater, scope=None, **kwargs):
         self.updater = updater
 
-        self.obs_shape = env.datasets['train'].obs_shape
+        self.obs_shape = env.obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
 
         self.attr_prior_mean = build_scheduled_value(self.attr_prior_mean, "attr_prior_mean")
