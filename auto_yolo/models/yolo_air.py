@@ -57,9 +57,15 @@ class YoloAir_Network(VariationalAutoencoder):
         if self.object_layer is None:
             self.object_layer = GridObjectLayer(self.pixels_per_cell, scope="objects")
 
-        object_rep_tensors = self.object_layer(
+        objects = self.object_layer(
             self.inp, backbone_output, self._tensors["background"], self.is_training)
-        self._tensors.update(object_rep_tensors)
+        self._tensors.update(objects)
+
+        kl_tensors = self.object_layer.compute_kl(objects)
+        self._tensors.update(kl_tensors)
+
+        render_tensors = self.object_layer.render(objects, self._tensors["background"])
+        self._tensors.update(render_tensors)
 
         # --- specify values to record ---
 

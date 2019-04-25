@@ -95,21 +95,24 @@ class GridObjectLayer(ObjectLayer):
 
     def _independent_prior(self):
         return dict(
-            cell_y_logit=Normal(loc=self.yx_prior_mean, scale=self.yx_prior_std),
-            cell_x_logit=Normal(loc=self.yx_prior_mean, scale=self.yx_prior_std),
-            height_logit=Normal(loc=self.hw_prior_mean, scale=self.hw_prior_std),
-            width_logit=Normal(loc=self.hw_prior_mean, scale=self.hw_prior_std),
-            attr=Normal(loc=self.attr_prior_mean, scale=self.attr_prior_std),
-            z_logit=Normal(loc=self.z_prior_mean, scale=self.z_prior_std),
+            cell_y_logit_dist=Normal(loc=self.yx_prior_mean, scale=self.yx_prior_std),
+            cell_x_logit_dist=Normal(loc=self.yx_prior_mean, scale=self.yx_prior_std),
+            height_logit_dist=Normal(loc=self.hw_prior_mean, scale=self.hw_prior_std),
+            width_logit_dist=Normal(loc=self.hw_prior_mean, scale=self.hw_prior_std),
+            attr_dist=Normal(loc=self.attr_prior_mean, scale=self.attr_prior_std),
+            z_logit_dist=Normal(loc=self.z_prior_mean, scale=self.z_prior_std),
         )
 
-    def _compute_kl(self, tensors, prior):
+    def compute_kl(self, tensors, prior=None):
+        if prior is None:
+            prior = self._independent_prior()
+
         # --- box ---
 
-        cell_y_kl = tensors["cell_y_logit_dist"].kl_divergence(prior["cell_y_logit"])
-        cell_x_kl = tensors["cell_x_logit_dist"].kl_divergence(prior["cell_x_logit"])
-        height_kl = tensors["height_logit_dist"].kl_divergence(prior["height_logit"])
-        width_kl = tensors["width_logit_dist"].kl_divergence(prior["width_logit"])
+        cell_y_kl = tensors["cell_y_logit_dist"].kl_divergence(prior["cell_y_logit_dist"])
+        cell_x_kl = tensors["cell_x_logit_dist"].kl_divergence(prior["cell_x_logit_dist"])
+        height_kl = tensors["height_logit_dist"].kl_divergence(prior["height_logit_dist"])
+        width_kl = tensors["width_logit_dist"].kl_divergence(prior["width_logit_dist"])
 
         if "cell_y" in self.no_gradient:
             cell_y_kl = tf.stop_gradient(cell_y_kl)
@@ -127,14 +130,14 @@ class GridObjectLayer(ObjectLayer):
 
         # --- attr ---
 
-        attr_kl = tensors["attr_dist"].kl_divergence(prior["attr"])
+        attr_kl = tensors["attr_dist"].kl_divergence(prior["attr_dist"])
 
         if "attr" in self.no_gradient:
             attr_kl = tf.stop_gradient(attr_kl)
 
         # --- z ---
 
-        z_kl = tensors["z_logit_dist"].kl_divergence(prior["z_logit"])
+        z_kl = tensors["z_logit_dist"].kl_divergence(prior["z_logit_dist"])
 
         if "z" in self.no_gradient:
             z_kl = tf.stop_gradient(z_kl)
@@ -252,31 +255,6 @@ class GridObjectLayer(ObjectLayer):
             normalized_box=normalized_box
         )
 
-    def _build_attr_from_image(self, inp, normalized_box, is_training):
-        # --- Get object attributes using object encoder ---
-
-        yt, xt, ys, xs = tf.split(normalized_box, 4, axis=-1)
-
-        # yt/xt give top/left but here we need center
-        yt += ys / 2
-        xt += xs / 2
-
-        transform_constraints = snt.AffineWarpConstraints.no_shear_2d()
-        warper = snt.AffineGridWarper(
-            (self.image_height, self.image_width), self.object_shape, transform_constraints)
-
-        _boxes = tf.concat([xs, 2*xt - 1, ys, 2*yt - 1], axis=-1)
-
-        grid_coords = warper(_boxes)
-        grid_coords = tf.reshape(grid_coords, (self.batch_size, 1, *self.object_shape, 2,))
-        input_glimpses = resampler_edge.resampler_edge(inp, grid_coords)
-        input_glimpses = tf.reshape(input_glimpses, (-1, *self.object_shape, self.image_depth))
-
-        attr = self.object_encoder(input_glimpses, (1, 1, 2*self.A), self.is_training)
-        attr = tf.reshape(attr, (-1, 2*self.A))
-
-        return input_glimpses, attr
-
     def _build_obj(self, obj_logits, is_training, **kwargs):
         obj_logits = self.training_wheels * tf.stop_gradient(obj_logits) + (1-self.training_wheels) * obj_logits
         obj_logits = obj_logits / self.obj_temp
@@ -343,11 +321,12 @@ class GridObjectLayer(ObjectLayer):
     def _make_empty(self):
         return np.array([{} for i in range(self.H * self.W * self.B)]).reshape(self.H, self.W, self.B)
 
-    def _call(self, inp, inp_features, background, is_training):
+    def _call(self, inp, inp_features, background, is_training, is_posterior=True):
 
         # --- set up sub networks and attributes ---
 
         self.maybe_build_subnet("box_network", builder=cfg.build_lateral, key="box")
+        self.maybe_build_subnet("attr_network", builder=cfg.build_lateral, key="attr")
         self.maybe_build_subnet("z_network", builder=cfg.build_lateral, key="z")
         self.maybe_build_subnet("obj_network", builder=cfg.build_lateral, key="obj")
 
@@ -396,14 +375,20 @@ class GridObjectLayer(ObjectLayer):
 
         # --- build the program ---
 
+        is_posterior_tf = tf.ones((self.batch_size, 2))
+        if is_posterior:
+            is_posterior_tf = is_posterior_tf * [1, 0]
+        else:
+            is_posterior_tf = is_posterior_tf * [0, 1]
+
         for h, w, b in itertools.product(range(H), range(W), range(self.B)):
             partial_program, features = None, None
-            _inp_features = inp_features[:, h, w, b, :]
             context = self._get_sequential_context(program, h, w, b, edge_element)
+            base_features = tf.concat([inp_features[:, h, w, b, :], context, is_posterior_tf], axis=1)
 
             # --- box ---
 
-            layer_inp = tf.concat([_inp_features, context], axis=1)
+            layer_inp = base_features
             n_features = self.n_passthrough_features
             output_size = 8
 
@@ -418,9 +403,37 @@ class GridObjectLayer(ObjectLayer):
 
             # --- attr ---
 
-            input_glimpses, attr = self._build_attr_from_image(inp, built['normalized_box'], self.is_training)
+            if is_posterior:
+                # --- Get object attributes using object encoder ---
 
-            attr_mean, attr_log_std = tf.split(attr, [self.A, self.A], axis=-1)
+                yt, xt, ys, xs = tf.split(built['normalized_box'], 4, axis=-1)
+
+                # yt/xt give top/left but here we need center
+                yt += ys / 2
+                xt += xs / 2
+
+                transform_constraints = snt.AffineWarpConstraints.no_shear_2d()
+                warper = snt.AffineGridWarper(
+                    (self.image_height, self.image_width), self.object_shape, transform_constraints)
+
+                _boxes = tf.concat([xs, 2*xt - 1, ys, 2*yt - 1], axis=-1)
+
+                grid_coords = warper(_boxes)
+                grid_coords = tf.reshape(grid_coords, (self.batch_size, 1, *self.object_shape, 2,))
+                input_glimpses = resampler_edge.resampler_edge(inp, grid_coords)
+                input_glimpses = tf.reshape(input_glimpses, (-1, *self.object_shape, self.image_depth))
+
+                encoded_glimpse = self.object_encoder(input_glimpses, (1, 1, self.A), self.is_training)
+                encoded_glimpse = tf.reshape(encoded_glimpse, (-1, self.A))
+
+            else:
+                encoded_glimpse = tf.zeros((self.batch_size, self.A))
+
+            layer_inp = tf.concat(
+                [base_features, features, encoded_glimpse, partial_program], axis=1)
+            network_output = self.attr_network(layer_inp, 2 * self.A + n_features, self. is_training)
+            attr_mean, attr_log_std, features = tf.split(network_output, (self.A, self.A, n_features), axis=1)
+
             attr_std = self.std_nonlinearity(attr_log_std)
 
             attr_dist = Normal(loc=attr_mean, scale=attr_std)
@@ -437,7 +450,7 @@ class GridObjectLayer(ObjectLayer):
 
             # --- z ---
 
-            layer_inp = tf.concat([_inp_features, context, features, partial_program], axis=1)
+            layer_inp = tf.concat([base_features, features, partial_program], axis=1)
             n_features = self.n_passthrough_features
 
             network_output = self.z_network(layer_inp, 2 + n_features, self.is_training)
@@ -464,7 +477,7 @@ class GridObjectLayer(ObjectLayer):
 
             # --- obj ---
 
-            layer_inp = tf.concat([_inp_features, context, features, partial_program], axis=1)
+            layer_inp = tf.concat([base_features, features, partial_program], axis=1)
             rep_input = self.obj_network(layer_inp, 1, self.is_training)
 
             built = self._build_obj(rep_input, self.is_training)
@@ -512,16 +525,6 @@ class GridObjectLayer(ObjectLayer):
         tensors["all"] = tf.concat(
             [tensors["box"], tensors["attr"], tensors["z"], tensors["obj"]], axis=-1)
 
-        # --- kl ---
-
-        prior = self._independent_prior()
-        kl_tensors = self._compute_kl(tensors, prior)
-        tensors.update(kl_tensors)
-
-        tensors["n_objects"] = tf.fill((self.batch_size,), self.HWB)
-        tensors["pred_n_objects"] = tf.reduce_sum(tensors['obj'], axis=(1, 2, 3, 4))
-        tensors["pred_n_objects_hard"] = tf.reduce_sum(tf.round(tensors['obj']), axis=(1, 2, 3, 4))
-
         # --- compute sprite appearances from attr using object decoder ---
 
         object_decoder_in = tf.reshape(tensors["attr"], (self.batch_size * self.HWB, 1, 1, self.A))
@@ -536,10 +539,11 @@ class GridObjectLayer(ObjectLayer):
         objects_shape = (self.batch_size, self.H, self.W, self.B, *self.object_shape, self.image_depth+1,)
         tensors["objects"] = tf.reshape(objects, objects_shape)
 
-        # --- render ---
+        # --- misc ---
 
-        render_tensors = self.render(tensors)
-        tensors.update(render_tensors)
+        tensors["n_objects"] = tf.fill((self.batch_size,), self.HWB)
+        tensors["pred_n_objects"] = tf.reduce_sum(tensors['obj'], axis=(1, 2, 3, 4))
+        tensors["pred_n_objects_hard"] = tf.reduce_sum(tf.round(tensors['obj']), axis=(1, 2, 3, 4))
 
         return tensors
 
@@ -614,7 +618,7 @@ class GridObjectLayer(ObjectLayer):
 
         return obj_kl_tensors
 
-    def render(self, tensors):
+    def render(self, tensors, background):
         render_tensors = {}
 
         # --- Compute sprite locations from box parameters ---
@@ -653,7 +657,7 @@ class GridObjectLayer(ObjectLayer):
             tensors["n_objects"],
             scales,
             offsets,
-            tensors["background"]
+            background
         )
 
         # --- Store values ---
