@@ -6,28 +6,30 @@ Eric Crawford and Joelle Pineau.
 
 This repository and the companion repository `dps` are both likely to undergo
 further development in the future. In general, we will attempt to keep the
-experiments from the paper runnable, but in case something happens, one
+experiments from the paper runnable, but in case something breaks, one
 can always check out the `aaai_2019` branches of both repositories to obtain
-the code in the state it was in for the paper.
+the code as it was for the paper. Also, branches for both repos
+named `aaai_2019_v2` preserve most of the behaviour of the original experiments,
+but with significant code improvements.
 
 ### Installation
 1. [Install TensorFlow](https://www.tensorflow.org/install/) with [GPU support](https://www.tensorflow.org/install/gpu). auto_yolo should work with any version of TensorFlow > 1.4, but has not been tested extensively with any version other than 1.8.
 
-2. Clone `dps`, optionally switch to `aaai_2019` branch, and install:
+2. Clone `dps`, optionally switch to `aaai_2019` or `aaai_2019_v2` branches, and install:
     ```
     git clone https://github.com/e2crawfo/dps.git
     cd dps
-    (optional: git checkout aaai_2019)
+    (optional: git checkout aaai_2019 or git checkout aaai_2019_v2)
     pip install -r requirements.txt
     pip install -e .
     cd ..
     ```
 
-3. Clone `auto_yolo`, optionally switch to `aaai_2019` branch, and install:
+3. Clone `auto_yolo`, optionally switch to `aaai_2019` or `aaai_2019_v2` branches, and install:
     ```
     git clone https://github.com/e2crawfo/auto_yolo.git
     cd auto_yolo
-    (optional: git checkout aaai_2019)
+    (optional: git checkout aaai_2019 or git checkout aaai_2019_v2)
     pip install -r requirements.txt
     pip install -e .
     cd ..
