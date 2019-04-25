@@ -622,7 +622,7 @@ class NEM_Network(ScopedFunction):
     use_NEM_formulation = Param()
 
     def __init__(self, env, scope=None, **kwargs):
-        self.obs_shape = env.datasets['train'].obs_shape
+        self.obs_shape = env.obs_shape
         self.image_height, self.image_width, self.image_depth = self.obs_shape
         # ap_iou_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
         # self.eval_funcs = {"AP_at_point_{}".format(int(10 * v)): AP(v) for v in ap_iou_values}
