@@ -4,23 +4,30 @@ Spatially Invariant Unsupervised Object Detection with Convolutional Neural Netw
 Eric Crawford and Joelle Pineau.  
 *AAAI (2019).*
 
+This repository and the companion repository `dps` are both likely to undergo
+further development in the future. In general, we will attempt to keep the
+experiments from the paper runnable, but in case something happens, one
+can always check out the `aaai_2019` branches of both repositories to obtain
+the code in the state it was in for the paper.
+
 ### Installation
 1. [Install TensorFlow](https://www.tensorflow.org/install/) with [GPU support](https://www.tensorflow.org/install/gpu). auto_yolo should work with any version of TensorFlow > 1.4, but has not been tested extensively with any version other than 1.8.
 
-2. Clone `dps`, switch to `auto_yolo` branch, and install:
+2. Clone `dps`, optionally switch to `aaai_2019` branch, and install:
     ```
     git clone https://github.com/e2crawfo/dps.git
     cd dps
-    git checkout auto_yolo
+    (optional: git checkout aaai_2019)
     pip install -r requirements.txt
     pip install -e .
     cd ..
     ```
 
-3. Clone `auto_yolo` and install:
+3. Clone `auto_yolo`, optionally switch to `aaai_2019` branch, and install:
     ```
     git clone https://github.com/e2crawfo/auto_yolo.git
     cd auto_yolo
+    (optional: git checkout aaai_2019)
     pip install -r requirements.txt
     pip install -e .
     cd ..
@@ -42,6 +49,7 @@ Eric Crawford and Joelle Pineau.
 
 
 ### Running Experiments
+To train SPAIR on a scattered MNIST dataset:
 ```
 cd auto_yolo/experiments/comparison
 python yolo_air_run.py
