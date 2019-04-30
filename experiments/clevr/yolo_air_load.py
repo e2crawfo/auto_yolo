@@ -37,7 +37,7 @@ config = dict(
     clevr_background_mode="mean",
     background_cfg=dict(mode="data"),
     # background_cfg=dict(mode="colour", colour="white"),
-    obj_logit_scale=1.0,
+    color_logit_scale=1.0,
     alpha_logit_scale=1.0,
     alpha_logit_bias=1.0,
     obj_temp=1.0,

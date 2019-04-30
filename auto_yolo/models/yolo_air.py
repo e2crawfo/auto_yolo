@@ -8,7 +8,7 @@ from dps.utils import Param
 from dps.utils.tf import tf_mean_sum, RenderHook, GridConvNet
 
 from auto_yolo.models.core import AP, xent_loss, VariationalAutoencoder
-from auto_yolo.models.object_layer import GridObjectLayer
+from auto_yolo.models.object_layer import GridObjectLayer, ObjectRenderer
 
 
 class YoloAir_Network(VariationalAutoencoder):
@@ -17,6 +17,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
     backbone = None
     object_layer = None
+    object_renderer = None
 
     _eval_funcs = None
 
@@ -57,14 +58,16 @@ class YoloAir_Network(VariationalAutoencoder):
         if self.object_layer is None:
             self.object_layer = GridObjectLayer(self.pixels_per_cell, scope="objects")
 
-        objects = self.object_layer(
-            self.inp, backbone_output, self._tensors["background"], self.is_training)
+        if self.object_renderer is None:
+            self.object_renderer = ObjectRenderer(scope="renderer")
+
+        objects = self.object_layer(self.inp, backbone_output, self.is_training)
         self._tensors.update(objects)
 
         kl_tensors = self.object_layer.compute_kl(objects)
         self._tensors.update(kl_tensors)
 
-        render_tensors = self.object_layer.render(objects, self._tensors["background"])
+        render_tensors = self.object_renderer(objects, self._tensors["background"], self.is_training)
         self._tensors.update(render_tensors)
 
         # --- specify values to record ---
@@ -81,7 +84,6 @@ class YoloAir_Network(VariationalAutoencoder):
             height=self._tensors["height"],
             width=self._tensors["width"],
             z=self._tensors["z"],
-            area=self._tensors["area"],
 
             cell_y_std=self._tensors["cell_y_logit_dist"].scale,
             cell_x_std=self._tensors["cell_x_logit_dist"].scale,
@@ -96,7 +98,6 @@ class YoloAir_Network(VariationalAutoencoder):
             on_height_avg=tf.reduce_sum(self._tensors["height"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
             on_width_avg=tf.reduce_sum(self._tensors["width"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
             on_z_avg=tf.reduce_sum(self._tensors["z"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
-            on_area_avg=tf.reduce_sum(self._tensors["area"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
 
             attr=self._tensors["attr"],
         )
@@ -135,7 +136,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
 
 class YoloAir_RenderHook(RenderHook):
-    fetches = "obj raw_obj z inp output objects n_objects normalized_box input_glimpses"
+    fetches = "obj raw_obj z inp output appearance n_objects normalized_box glimpse"
 
     def __call__(self, updater):
         network = updater.network
@@ -259,8 +260,8 @@ class YoloAir_RenderHook(RenderHook):
 
         H, W, B = updater.network.H, updater.network.W, updater.network.B
 
-        input_glimpses = fetched.get('input_glimpses', None)
-        objects = fetched['objects']
+        glimpse = fetched.get('glimpse', None)
+        appearance = fetched['appearance']
         obj = fetched['obj']
         raw_obj = fetched['raw_obj']
         z = fetched['z']
@@ -280,7 +281,7 @@ class YoloAir_RenderHook(RenderHook):
                         _z = z[idx, h, w, b, 0]
 
                         ax = axes[3*h, w * B + b]
-                        self.imshow(ax, objects[idx, h, w, b, :, :, :3])
+                        self.imshow(ax, appearance[idx, h, w, b, :, :, :3])
 
                         colour = _obj * on_colour + (1-_obj) * off_colour
                         obj_rect = patches.Rectangle(
@@ -293,14 +294,14 @@ class YoloAir_RenderHook(RenderHook):
                             ax.set_ylabel("h={}".format(h))
 
                         ax = axes[3*h+1, w * B + b]
-                        self.imshow(ax, objects[idx, h, w, b, :, :, 3], cmap="gray")
+                        self.imshow(ax, appearance[idx, h, w, b, :, :, 3], cmap="gray")
 
-                        ax.set_title("obj={}, raw_obj={}, z={}, b={}".format(_obj, _raw_obj, _z, b))
+                        ax.set_title("obj={:.2f}, raw_obj={:.2f}, z={:.2f}, b={}".format(_obj, _raw_obj, _z, b))
 
                         ax = axes[3*h+2, w * B + b]
                         ax.set_title("input glimpse")
 
-                        self.imshow(ax, input_glimpses[idx, h, w, b, :, :, :])
+                        self.imshow(ax, glimpse[idx, h, w, b, :, :, :])
 
             for ax in axes.flatten():
                 ax.set_axis_off()
@@ -311,7 +312,7 @@ class YoloAir_RenderHook(RenderHook):
 
 
 class YoloAir_ComparisonRenderHook(RenderHook):
-    fetches = "obj inp output objects n_objects normalized_box"
+    fetches = "obj inp output appearance n_objects normalized_box"
 
     show_zero_boxes = True
 
@@ -359,7 +360,7 @@ class YoloAir_ComparisonRenderHook(RenderHook):
 
 
 class YoloAir_PaperSetRenderHook(RenderHook):
-    fetches = "obj raw_obj z inp output objects n_objects normalized_box input_glimpses"
+    fetches = "obj raw_obj z inp output appearance n_objects normalized_box glimpse"
     do_annotations = True
 
     def __call__(self, updater):
@@ -442,8 +443,8 @@ class YoloAir_PaperSetRenderHook(RenderHook):
 
         H, W, B = updater.network.H, updater.network.W, updater.network.B
 
-        input_glimpses = fetched.get('input_glimpses', None)
-        objects = fetched['objects']
+        glimpse = fetched.get('glimpse', None)
+        appearance = fetched['appearance']
         obj = fetched['obj']
         raw_obj = fetched['raw_obj']
         z = fetched['z']
@@ -463,7 +464,7 @@ class YoloAir_PaperSetRenderHook(RenderHook):
                         _z = z[idx, h, w, b, 0]
 
                         ax = axes[3*h, w * B + b]
-                        self.imshow(ax, objects[idx, h, w, b, :, :, :3])
+                        self.imshow(ax, appearance[idx, h, w, b, :, :, :3])
 
                         colour = _obj * on_colour + (1-_obj) * off_colour
                         obj_rect = patches.Rectangle(
@@ -476,14 +477,14 @@ class YoloAir_PaperSetRenderHook(RenderHook):
                             ax.set_ylabel("h={}".format(h))
 
                         ax = axes[3*h+1, w * B + b]
-                        self.imshow(ax, objects[idx, h, w, b, :, :, 3], cmap="gray")
+                        self.imshow(ax, appearance[idx, h, w, b, :, :, 3], cmap="gray")
 
-                        ax.set_title("obj={}, raw_obj={}, z={}, b={}".format(_obj, _raw_obj, _z, b))
+                        ax.set_title("obj={:.2f}, raw_obj={:.2f}, z={:.2f}, b={}".format(_obj, _raw_obj, _z, b))
 
                         ax = axes[3*h+2, w * B + b]
                         ax.set_title("input glimpse")
 
-                        self.imshow(ax, input_glimpses[idx, h, w, b, :, :, :])
+                        self.imshow(ax, glimpse[idx, h, w, b, :, :, :])
 
             for ax in axes.flatten():
                 ax.set_axis_off()

@@ -7,7 +7,7 @@ distributions = None
 durations = dict()
 
 config = dict(
-    obj_logit_scale=1.0,
+    color_logit_scale=1.0,
     alpha_logit_scale=1.0,
     alpha_logit_bias=1.0,
     obj_temp=1.0,

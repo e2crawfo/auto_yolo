@@ -31,7 +31,7 @@ config = dict(
     curriculum=[dict()],
     stopping_criteria="AP,max", threshold=0.99, patience=50000, max_steps=2e5,
 
-    obj_logit_scale=1.0,
+    color_logit_scale=1.0,
     alpha_logit_scale=1.0,
     alpha_logit_bias=1.0,
     obj_temp=1.0,

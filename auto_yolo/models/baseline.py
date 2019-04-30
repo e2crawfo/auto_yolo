@@ -136,13 +136,13 @@ class Baseline_Network(VariationalAutoencoder):
         _boxes = tf.reshape(_boxes, (self.batch_size * max_objects, 4))
         grid_coords = warper(_boxes)
         grid_coords = tf.reshape(grid_coords, (self.batch_size, max_objects, *self.object_shape, 2,))
-        input_glimpses = tf.contrib.resampler.resampler(self.inp, grid_coords)
+        glimpse = tf.contrib.resampler.resampler(self.inp, grid_coords)
 
-        self._tensors["input_glimpses"] = tf.reshape(
-            input_glimpses, (self.batch_size, max_objects, *self.object_shape, self.image_depth))
+        self._tensors["glimpse"] = tf.reshape(
+            glimpse, (self.batch_size, max_objects, *self.object_shape, self.image_depth))
 
         object_encoder_in = tf.reshape(
-            input_glimpses, (self.batch_size * max_objects, *self.object_shape, self.image_depth))
+            glimpse, (self.batch_size * max_objects, *self.object_shape, self.image_depth))
 
         attr = self.object_encoder(object_encoder_in, (1, 1, 2*self.A), self.is_training)
         attr = tf.reshape(attr, (self.batch_size, max_objects, 2*self.A))
@@ -248,13 +248,13 @@ class Baseline_Network(VariationalAutoencoder):
 
 
 class Baseline_RenderHook(yolo_air.YoloAir_RenderHook):
-    fetches = "obj inp output objects n_objects normalized_box input_glimpses"
+    fetches = "obj inp output objects n_objects normalized_box glimpse"
 
     def _plot_patches(self, updater, fetched, N):
         # Create a plot showing what each object is generating
         import matplotlib.pyplot as plt
 
-        input_glimpses = fetched.get('input_glimpses', None)
+        glimpse = fetched.get('glimpse', None)
         objects = fetched['objects']
         obj = fetched['obj']
         n_objects = obj.sum(axis=(1, 2)).astype('i')
@@ -280,7 +280,7 @@ class Baseline_RenderHook(yolo_air.YoloAir_RenderHook):
                 ax = axes[1, i]
                 ax.set_title("input glimpse")
 
-                ax.imshow(input_glimpses[idx, i, :, :, :], vmin=0.0, vmax=1.0)
+                ax.imshow(glimpse[idx, i, :, :, :], vmin=0.0, vmax=1.0)
 
             plt.subplots_adjust(left=0.02, right=.98, top=.98, bottom=0.02, wspace=0.1, hspace=0.1)
 

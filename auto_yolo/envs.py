@@ -6,6 +6,7 @@ from dps.datasets import (
     GridEmnistObjectDetectionDataset, EmnistObjectDetectionDataset,
     VisualArithmeticDataset, GameDataset)
 from dps.env.basic import collect
+from dps.datasets.base import Environment
 from dps.datasets.shapes import ShapesDataset, BlueXAboveRedCircle, SetThreeAttr
 from dps.datasets.clevr import ClevrDataset
 from dps.datasets.atari import StaticAtariDataset
@@ -84,15 +85,6 @@ def run_experiment(
 
     build_and_submit(
         name=exp_name, config=_config, distributions=distributions, **run_kwargs)
-
-
-class Environment:
-    @property
-    def obs_shape(self):
-        return self.datasets["train"].obs_shape
-
-    def close(self):
-        pass
 
 
 class Nips2018Grid(Environment):

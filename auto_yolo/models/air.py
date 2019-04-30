@@ -462,8 +462,8 @@ class AIR_Network(VariationalAutoencoder):
                 z_pres_prob = tf.nn.sigmoid(z_pres_log_odds)
                 z_pres_kl = concrete_binary_sample_kl(
                     z_pres_pre_sigmoid,
+                    z_pres_log_odds, self.z_pres_temperature,
                     self.z_pres_prior_log_odds, self.z_pres_temperature,
-                    z_pres_log_odds, self.z_pres_temperature
                 )
 
             stopping_sum += (1.0 - z_pres)

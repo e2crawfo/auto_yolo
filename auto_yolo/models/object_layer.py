@@ -4,10 +4,11 @@ import numpy as np
 import collections
 import sonnet as snt
 import itertools
+from orderedattrdict import AttrDict
 
 from dps import cfg
 from dps.utils import Param
-from dps.utils.tf import build_scheduled_value, FIXED_COLLECTION, ScopedFunction
+from dps.utils.tf import build_scheduled_value, FIXED_COLLECTION, ScopedFunction, tf_shape, apply_object_wise
 
 from auto_yolo.tf_ops import render_sprites, resampler_edge
 from auto_yolo.models.core import (
@@ -17,6 +18,19 @@ Normal = tfp.distributions.Normal
 
 
 class ObjectLayer(ScopedFunction):
+    object_shape = Param()
+    A = Param()
+    training_wheels = Param()
+    noisy = Param()
+    obj_concrete_temp = Param(help="Higher values -> smoother")
+    obj_temp = Param(help="Higher values -> more uniform")
+
+    def __init__(self, scope=None, **kwargs):
+        super().__init__(scope=scope, **kwargs)
+        self.training_wheels = build_scheduled_value(self.training_wheels, "training_wheels")
+        self.obj_concrete_temp = build_scheduled_value(self.obj_concrete_temp, "obj_concrete_temp")
+        self.obj_temp = build_scheduled_value(self.obj_temp, "obj_temp")
+
     def std_nonlinearity(self, std_logit):
         # return tf.exp(std)
         std = 2 * tf.nn.sigmoid(tf.clip_by_value(std_logit, -10, 10))
@@ -32,10 +46,81 @@ class ObjectLayer(ScopedFunction):
         return -tf.log(1. / p - 1.)
 
 
-class GridObjectLayer(ObjectLayer):
+class ObjectRenderer(ScopedFunction):
     object_shape = Param()
+
+    color_logit_scale = Param()
+    alpha_logit_scale = Param()
+    alpha_logit_bias = Param()
+
+    def _call(self, objects, background, is_training, appearance_only=False):
+        if not self.initialized:
+            self.image_depth = tf_shape(background)[-1]
+
+        self.maybe_build_subnet("object_decoder")
+
+        # --- compute sprite appearance from attr using object decoder ---
+
+        appearance_logits = apply_object_wise(
+            self.object_decoder, objects.attr, self.object_shape + (self.image_depth+1,), is_training)
+
+        appearance_logits = appearance_logits * ([self.color_logit_scale] * 3 + [self.alpha_logit_scale])
+        appearance_logits = appearance_logits + ([0.] * 3 + [self.alpha_logit_bias])
+
+        appearance = tf.nn.sigmoid(tf.clip_by_value(appearance_logits, -10., 10.))
+
+        if appearance_only:
+            return dict(appearance=appearance)
+
+        appearance_for_output = appearance
+
+        batch_size, *obj_leading_shape, _, _, _ = tf_shape(appearance)
+        n_objects = np.prod(obj_leading_shape)
+        appearance = tf.reshape(
+            appearance, (batch_size, n_objects, *self.object_shape, self.image_depth+1))
+
+        obj_colors, obj_alpha = tf.split(appearance, [self.image_depth, 1], axis=-1)
+
+        if "alpha" in self.no_gradient:
+            obj_alpha = tf.stop_gradient(obj_alpha)
+
+        if "alpha" in self.fixed_values:
+            obj_alpha = float(self.fixed_values["alpha"]) * tf.ones_like(obj_alpha)
+
+        obj_alpha *= tf.reshape(objects.obj, (batch_size, n_objects, 1, 1, 1))
+
+        z = tf.reshape(objects.z, (batch_size, n_objects, 1, 1, 1))
+        obj_importance = tf.maximum(obj_alpha * z, 0.01)
+
+        object_maps = tf.concat([obj_colors, obj_alpha, obj_importance], axis=-1)
+
+        ys, xs, yt, xt = objects.ys, objects.xs, objects.yt, objects.xt
+
+        scales = tf.concat([ys, xs], axis=-1)
+        scales = tf.reshape(scales, (batch_size, n_objects, 2))
+
+        offsets = tf.concat([yt, xt], axis=-1)
+        offsets = tf.reshape(offsets, (batch_size, n_objects, 2))
+
+        # --- Compose images ---
+
+        n_objects_per_image = tf.fill((batch_size,), int(n_objects))
+
+        output = render_sprites.render_sprites(
+            object_maps,
+            n_objects_per_image,
+            scales,
+            offsets,
+            background
+        )
+
+        return dict(
+            appearance=appearance_for_output,
+            output=output)
+
+
+class GridObjectLayer(ObjectLayer):
     n_passthrough_features = Param()
-    training_wheels = Param()
     n_lookback = Param()
 
     yx_prior_mean = Param()
@@ -54,17 +139,10 @@ class GridObjectLayer(ObjectLayer):
 
     attr_prior_mean = Param()
     attr_prior_std = Param()
-    A = Param()
-    noisy = Param()
 
     use_concrete_kl = Param()
     count_prior_log_odds = Param()
     count_prior_dist = Param()
-    obj_concrete_temp = Param(help="Higher values -> smoother")
-    obj_temp = Param(help="Higher values -> more uniform")
-    obj_logit_scale = Param()
-    alpha_logit_scale = Param()
-    alpha_logit_bias = Param()
 
     edge_weights = None
 
@@ -78,18 +156,13 @@ class GridObjectLayer(ObjectLayer):
         if isinstance(self.count_prior_dist, str):
             self.count_prior_dist = eval(self.count_prior_dist)
 
-        self.count_prior_log_odds = build_scheduled_value(
-            self.count_prior_log_odds, "count_prior_log_odds")
-        self.obj_concrete_temp = build_scheduled_value(self.obj_concrete_temp, "obj_concrete_temp")
-        self.obj_temp = build_scheduled_value(self.obj_temp, "obj_temp")
+        self.count_prior_log_odds = build_scheduled_value(self.count_prior_log_odds, "count_prior_log_odds")
 
         self.yx_prior_mean = build_scheduled_value(self.yx_prior_mean, "yx_prior_mean")
         self.yx_prior_std = build_scheduled_value(self.yx_prior_std, "yx_prior_std")
 
         self.hw_prior_mean = build_scheduled_value(self.hw_prior_mean, "hw_prior_mean")
         self.hw_prior_std = build_scheduled_value(self.hw_prior_std, "hw_prior_std")
-
-        self.training_wheels = build_scheduled_value(self.training_wheels, "training_wheels")
 
         self.anchor_boxes = np.array(self.anchor_boxes)
 
@@ -104,6 +177,8 @@ class GridObjectLayer(ObjectLayer):
         )
 
     def compute_kl(self, tensors, prior=None):
+        simple_obj_kl = prior is not None
+
         if prior is None:
             prior = self._independent_prior()
 
@@ -147,9 +222,17 @@ class GridObjectLayer(ObjectLayer):
 
         # --- obj ---
 
-        # TODO: allow a choice about which prior to use in _compute_obj_kl
+        if simple_obj_kl:
+            obj_kl = concrete_binary_sample_kl(
+                tensors["obj_pre_sigmoid"],
+                tensors["obj_log_odds"], self.obj_concrete_temp,
+                prior["obj_log_odds"], self.obj_concrete_temp,
+            )
+        else:
+            obj_kl = self._compute_obj_kl(tensors)
 
-        obj_kl_tensors = self._compute_obj_kl(tensors)
+        if "obj" in self.no_gradient:
+            obj_kl = tf.stop_gradient(obj_kl)
 
         return dict(
             cell_y_kl=cell_y_kl,
@@ -159,8 +242,73 @@ class GridObjectLayer(ObjectLayer):
             box_kl=box_kl,
             z_kl=z_kl,
             attr_kl=attr_kl,
-            **obj_kl_tensors,
+            obj_kl=obj_kl,
         )
+
+    def _compute_obj_kl(self, tensors):
+        # --- compute obj_kl ---
+
+        count_support = tf.range(self.HWB+1, dtype=tf.float32)
+
+        if self.count_prior_dist is not None:
+            if self.count_prior_dist is not None:
+                assert len(self.count_prior_dist) == (self.HWB + 1)
+            count_distribution = tf.constant(self.count_prior_dist, dtype=tf.float32)
+        else:
+            count_prior_prob = tf.nn.sigmoid(self.count_prior_log_odds)
+            count_distribution = (1 - count_prior_prob) * (count_prior_prob ** count_support)
+
+        normalizer = tf.reduce_sum(count_distribution)
+        count_distribution = count_distribution / normalizer
+        count_distribution = tf.tile(count_distribution[None, :], (self.batch_size, 1))
+        count_so_far = tf.zeros((self.batch_size, 1), dtype=tf.float32)
+
+        i = 0
+
+        obj_kl = []
+
+        for h, w, b in itertools.product(range(self.H), range(self.W), range(self.B)):
+            p_z_given_Cz = tf.maximum(count_support[None, :] - count_so_far, 0) / (self.HWB - i)
+
+            # Reshape for batch matmul
+            _count_distribution = count_distribution[:, None, :]
+            _p_z_given_Cz = p_z_given_Cz[:, :, None]
+
+            p_z = tf.matmul(_count_distribution, _p_z_given_Cz)[:, :, 0]
+
+            if self.use_concrete_kl:
+                prior_log_odds = tf_safe_log(p_z) - tf_safe_log(1-p_z)
+                _obj_kl = concrete_binary_sample_kl(
+                    tensors["obj_pre_sigmoid"][:, h, w, b, :],
+                    tensors["obj_log_odds"][:, h, w, b, :], self.obj_concrete_temp,
+                    prior_log_odds, self.obj_concrete_temp,
+                )
+            else:
+                prob = tensors["obj_prob"][:, h, w, b, :]
+
+                _obj_kl = (
+                    prob * (tf_safe_log(prob) - tf_safe_log(p_z))
+                    + (1-prob) * (tf_safe_log(1-prob) - tf_safe_log(1-p_z))
+                )
+
+            obj_kl.append(_obj_kl)
+
+            sample = tf.to_float(tensors["obj"][:, h, w, b, :] > 0.5)
+            mult = sample * p_z_given_Cz + (1-sample) * (1-p_z_given_Cz)
+            count_distribution = mult * count_distribution
+            normalizer = tf.reduce_sum(count_distribution, axis=1, keepdims=True)
+            normalizer = tf.maximum(normalizer, 1e-6)
+            count_distribution = count_distribution / normalizer
+
+            count_so_far += sample
+
+            i += 1
+
+        obj_kl = tf.reshape(
+            tf.concat(obj_kl, axis=1),
+            (self.batch_size, self.H, self.W, self.B, 1))
+
+        return obj_kl
 
     def _build_box(self, box_params, h, w, b, is_training):
         mean, log_std = tf.split(box_params, 2, axis=-1)
@@ -261,9 +409,7 @@ class GridObjectLayer(ObjectLayer):
 
         obj_log_odds = tf.clip_by_value(obj_logits, -10., 10.)
 
-        obj_pre_sigmoid = concrete_binary_pre_sigmoid_sample(
-            obj_log_odds, self.obj_concrete_temp
-        )
+        obj_pre_sigmoid = concrete_binary_pre_sigmoid_sample(obj_log_odds, self.obj_concrete_temp)
         raw_obj = tf.nn.sigmoid(obj_pre_sigmoid)
 
         if self.noisy:
@@ -321,7 +467,8 @@ class GridObjectLayer(ObjectLayer):
     def _make_empty(self):
         return np.array([{} for i in range(self.H * self.W * self.B)]).reshape(self.H, self.W, self.B)
 
-    def _call(self, inp, inp_features, background, is_training, is_posterior=True):
+    def _call(self, inp, inp_features, is_training, is_posterior=True):
+        print("\n" + "-" * 10 + " GridObjectLayer(is_posterior={}) ".format(is_posterior) + "-" * 10)
 
         # --- set up sub networks and attributes ---
 
@@ -331,7 +478,6 @@ class GridObjectLayer(ObjectLayer):
         self.maybe_build_subnet("obj_network", builder=cfg.build_lateral, key="obj")
 
         self.maybe_build_subnet("object_encoder")
-        self.maybe_build_subnet("object_decoder")
 
         _, H, W, _, _ = inp_features.shape
         H = int(H)
@@ -420,14 +566,17 @@ class GridObjectLayer(ObjectLayer):
 
                 grid_coords = warper(_boxes)
                 grid_coords = tf.reshape(grid_coords, (self.batch_size, 1, *self.object_shape, 2,))
-                input_glimpses = resampler_edge.resampler_edge(inp, grid_coords)
-                input_glimpses = tf.reshape(input_glimpses, (-1, *self.object_shape, self.image_depth))
-
-                encoded_glimpse = self.object_encoder(input_glimpses, (1, 1, self.A), self.is_training)
-                encoded_glimpse = tf.reshape(encoded_glimpse, (-1, self.A))
-
+                glimpse = resampler_edge.resampler_edge(inp, grid_coords)
+                glimpse = tf.reshape(glimpse, (self.batch_size, *self.object_shape, self.image_depth))
             else:
-                encoded_glimpse = tf.zeros((self.batch_size, self.A))
+                glimpse = tf.zeros((self.batch_size, *self.object_shape, self.image_depth))
+
+            # Create the object encoder network regardless of is_posterior, otherwise messes with ScopedFunction
+            encoded_glimpse = self.object_encoder(glimpse, (1, 1, self.A), self.is_training)
+            encoded_glimpse = tf.reshape(encoded_glimpse, (self.batch_size, self.A))
+
+            if not is_posterior:
+                encoded_glimpse = tf.zeros_like(encoded_glimpse)
 
             layer_inp = tf.concat(
                 [base_features, features, encoded_glimpse, partial_program], axis=1)
@@ -442,7 +591,7 @@ class GridObjectLayer(ObjectLayer):
             if "attr" in self.no_gradient:
                 attr = tf.stop_gradient(attr)
 
-            built = dict(attr_dist=attr_dist, attr=attr, input_glimpses=input_glimpses)
+            built = dict(attr_dist=attr_dist, attr=attr, glimpse=glimpse)
 
             for key, value in built.items():
                 _tensors[key][h, w, b] = value
@@ -493,7 +642,7 @@ class GridObjectLayer(ObjectLayer):
 
         # --- merge tensors from different grid cells ---
 
-        tensors = dict(background=background)
+        objects = AttrDict()
         for k, v in _tensors.items():
             if k.endswith('_dist'):
                 dist = v[0, 0, 0]
@@ -512,7 +661,7 @@ class GridObjectLayer(ObjectLayer):
                     tensor_params[key] = tf.stack(t1, axis=1)
 
                 params.update(tensor_params)
-                tensors[k] = dist_class(**params)
+                objects[k] = dist_class(**params)
             else:
                 t1 = []
                 for h in range(H):
@@ -520,149 +669,15 @@ class GridObjectLayer(ObjectLayer):
                     for w in range(W):
                         t2.append(tf.stack([v[h, w, b] for b in range(self.B)], axis=1))
                     t1.append(tf.stack(t2, axis=1))
-                tensors[k] = tf.stack(t1, axis=1)
+                objects[k] = tf.stack(t1, axis=1)
 
-        tensors["all"] = tf.concat(
-            [tensors["box"], tensors["attr"], tensors["z"], tensors["obj"]], axis=-1)
-
-        # --- compute sprite appearances from attr using object decoder ---
-
-        object_decoder_in = tf.reshape(tensors["attr"], (self.batch_size * self.HWB, 1, 1, self.A))
-
-        object_logits = self.object_decoder(
-            object_decoder_in, self.object_shape + (self.image_depth+1,), self.is_training)
-
-        object_logits = object_logits * ([self.obj_logit_scale] * 3 + [self.alpha_logit_scale])
-        object_logits = object_logits + ([0.] * 3 + [self.alpha_logit_bias])
-
-        objects = tf.nn.sigmoid(tf.clip_by_value(object_logits, -10., 10.))
-        objects_shape = (self.batch_size, self.H, self.W, self.B, *self.object_shape, self.image_depth+1,)
-        tensors["objects"] = tf.reshape(objects, objects_shape)
+        objects.all = tf.concat(
+            [objects.box, objects.attr, objects.z, objects.obj], axis=-1)
 
         # --- misc ---
 
-        tensors["n_objects"] = tf.fill((self.batch_size,), self.HWB)
-        tensors["pred_n_objects"] = tf.reduce_sum(tensors['obj'], axis=(1, 2, 3, 4))
-        tensors["pred_n_objects_hard"] = tf.reduce_sum(tf.round(tensors['obj']), axis=(1, 2, 3, 4))
+        objects.n_objects = tf.fill((self.batch_size,), self.HWB)
+        objects.pred_n_objects = tf.reduce_sum(objects.obj, axis=(1, 2, 3, 4))
+        objects.pred_n_objects_hard = tf.reduce_sum(tf.round(objects.obj), axis=(1, 2, 3, 4))
 
-        return tensors
-
-    def _compute_obj_kl(self, tensors):
-        obj_kl_tensors = {}
-
-        # --- compute obj_kl ---
-
-        count_support = tf.range(self.HWB+1, dtype=tf.float32)
-
-        if self.count_prior_dist is not None:
-            if self.count_prior_dist is not None:
-                assert len(self.count_prior_dist) == (self.HWB + 1)
-            count_distribution = tf.constant(self.count_prior_dist, dtype=tf.float32)
-        else:
-            count_prior_prob = tf.nn.sigmoid(self.count_prior_log_odds)
-            count_distribution = (1 - count_prior_prob) * (count_prior_prob ** count_support)
-
-        normalizer = tf.reduce_sum(count_distribution)
-        count_distribution = count_distribution / normalizer
-        count_distribution = tf.tile(count_distribution[None, :], (self.batch_size, 1))
-        count_so_far = tf.zeros((self.batch_size, 1), dtype=tf.float32)
-
-        i = 0
-
-        obj_kl = []
-
-        for h, w, b in itertools.product(range(self.H), range(self.W), range(self.B)):
-            p_z_given_Cz = tf.maximum(count_support[None, :] - count_so_far, 0) / (self.HWB - i)
-
-            # Reshape for batch matmul
-            _count_distribution = count_distribution[:, None, :]
-            _p_z_given_Cz = p_z_given_Cz[:, :, None]
-
-            p_z = tf.matmul(_count_distribution, _p_z_given_Cz)[:, :, 0]
-
-            if self.use_concrete_kl:
-                prior_log_odds = tf_safe_log(p_z) - tf_safe_log(1-p_z)
-                _obj_kl = concrete_binary_sample_kl(
-                    tensors["obj_pre_sigmoid"][:, h, w, b, :],
-                    prior_log_odds, self.obj_concrete_temp,
-                    tensors["obj_log_odds"][:, h, w, b, :],
-                    self.obj_concrete_temp
-                )
-            else:
-                prob = tensors["obj_prob"][:, h, w, b, :]
-
-                _obj_kl = (
-                    prob * (tf_safe_log(prob) - tf_safe_log(p_z))
-                    + (1-prob) * (tf_safe_log(1-prob) - tf_safe_log(1-p_z))
-                )
-
-            obj_kl.append(_obj_kl)
-
-            sample = tf.to_float(tensors["obj"][:, h, w, b, :] > 0.5)
-            mult = sample * p_z_given_Cz + (1-sample) * (1-p_z_given_Cz)
-            count_distribution = mult * count_distribution
-            normalizer = tf.reduce_sum(count_distribution, axis=1, keepdims=True)
-            normalizer = tf.maximum(normalizer, 1e-6)
-            count_distribution = count_distribution / normalizer
-
-            count_so_far += sample
-
-            i += 1
-
-        if "obj" in self.no_gradient:
-            obj_kl = tf.stop_gradient(obj_kl)
-
-        obj_kl_tensors["obj_kl"] = tf.reshape(
-            tf.concat(obj_kl, axis=1),
-            (self.batch_size, self.H, self.W, self.B, 1))
-
-        return obj_kl_tensors
-
-    def render(self, tensors, background):
-        render_tensors = {}
-
-        # --- Compute sprite locations from box parameters ---
-
-        objects = tf.reshape(
-            tensors["objects"],
-            (self.batch_size, self.HWB, *self.object_shape, self.image_depth+1,))
-
-        obj_img, obj_alpha = tf.split(objects, [3, 1], axis=-1)
-
-        if "alpha" in self.no_gradient:
-            obj_alpha = tf.stop_gradient(obj_alpha)
-
-        if "alpha" in self.fixed_values:
-            obj_alpha = float(self.fixed_values["alpha"]) * tf.ones_like(obj_alpha)
-
-        obj_alpha *= tf.reshape(tensors['obj'], (self.batch_size, self.HWB, 1, 1, 1))
-
-        z = tf.reshape(tensors['z'], (self.batch_size, self.HWB, 1, 1, 1))
-        obj_importance = tf.maximum(obj_alpha * z, 0.01)
-
-        objects = tf.concat([obj_img, obj_alpha, obj_importance], axis=-1)
-
-        # --- Compose images ---
-
-        ys, xs, yt, xt = tensors["ys"], tensors["xs"], tensors["yt"], tensors["xt"]
-
-        scales = tf.concat([ys, xs], axis=-1)
-        scales = tf.reshape(scales, (self.batch_size, self.HWB, 2))
-
-        offsets = tf.concat([yt, xt], axis=-1)
-        offsets = tf.reshape(offsets, (self.batch_size, self.HWB, 2))
-
-        output = render_sprites.render_sprites(
-            objects,
-            tensors["n_objects"],
-            scales,
-            offsets,
-            background
-        )
-
-        # --- Store values ---
-
-        render_tensors['area'] = (ys * float(self.image_height)) * (xs * float(self.image_width))
-        render_tensors['output'] = output
-
-        return render_tensors
+        return objects

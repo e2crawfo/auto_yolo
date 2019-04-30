@@ -38,19 +38,37 @@ def concrete_binary_pre_sigmoid_sample(log_odds, temperature, eps=10e-10):
     return (log_odds + noise) / temperature
 
 
-def concrete_binary_sample_kl(pre_sigmoid_sample,
-                              prior_log_odds, prior_temperature,
+def concrete_binary_sample_kl(posterior_pre_sigmoid_sample,
                               posterior_log_odds, posterior_temperature,
+                              prior_log_odds, prior_temperature,
                               eps=10e-10):
-    y = pre_sigmoid_sample
+    """ Compute KL divergence between two RelaxedBernoulli distributions. Rather than compute it
+        directly, we compute the KL divergence between two Logistic distributions (just before the sigmoid),
+        as this is supposed to avoid numerical issues. `posterior_pre_sigmoid_samples` must be a sample from the posterior
+        Logistic distribution, used to form the sample-based estimate of the KL.
+
+        This computes KL(posterior || prior).
+
+    https://www.tensorflow.org/probability/api_docs/python/tfp/distributions/RelaxedBernoulli
+
+    """
+    y = posterior_pre_sigmoid_sample
 
     y_times_prior_temp = y * prior_temperature
-    log_prior = tf.log(prior_temperature + eps) - y_times_prior_temp + prior_log_odds - \
-        2.0 * tf.log(1.0 + tf.exp(-y_times_prior_temp + prior_log_odds) + eps)
+    log_prior = (
+        tf.log(prior_temperature + eps)
+        - y_times_prior_temp
+        + prior_log_odds
+        - 2.0 * tf.log(1.0 + tf.exp(-y_times_prior_temp + prior_log_odds) + eps)
+    )
 
     y_times_posterior_temp = y * posterior_temperature
-    log_posterior = tf.log(posterior_temperature + eps) - y_times_posterior_temp + posterior_log_odds - \
-        2.0 * tf.log(1.0 + tf.exp(-y_times_posterior_temp + posterior_log_odds) + eps)
+    log_posterior = (
+        tf.log(posterior_temperature + eps)
+        - y_times_posterior_temp
+        + posterior_log_odds
+        - 2.0 * tf.log(1.0 + tf.exp(-y_times_posterior_temp + posterior_log_odds) + eps)
+    )
 
     return log_posterior - log_prior
 
@@ -83,7 +101,7 @@ class Evaluator(object):
     ----------
     functions: a list of functions, each with an attribute `keys_accessed`
                listing the keys required by that function
-    tensors: a (posibly nested) dictionary of tensors which will provide the input to the functions
+    tensors: a (possibly nested) dictionary of tensors which will provide the input to the functions
     updater: the updater object, passed into the functions at eval time
 
     """
@@ -217,7 +235,7 @@ def mAP(pred_boxes, gt_boxes, n_classes, recall_values=None, iou_threshold=None)
 
 
 class AP:
-    keys_accessed = "box normalized_box obj annotations n_annotations"
+    keys_accessed = "normalized_box obj annotations n_annotations"
 
     def __init__(self, iou_threshold=None):
         if iou_threshold is not None:

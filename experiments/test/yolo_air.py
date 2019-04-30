@@ -25,7 +25,7 @@ durations = dict(
 config = dict(
     # training_wheels="Exp(1.0, 0.0, decay_rate=0.0, decay_steps=100, staircase=True)",
     n_train=16000, # obj_temp=100.0,
-    # obj_logit_scale=1.0,
+    # color_logit_scale=1.0,
     # alpha_logit_scale=1.0,
     # alpha_logit_bias=1.0,
     # use_concrete_kl=True,

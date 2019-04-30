@@ -4,7 +4,7 @@ import numpy as np
 from dps import cfg
 from dps.utils import Param, prime_factors
 from dps.utils.tf import (
-    ConvNet, ScopedFunction, MLP, apply_mask_and_group_at_front, tf_shape)
+    ConvNet, ScopedFunction, MLP, apply_mask_and_group_at_front, tf_shape, apply_object_wise)
 
 
 class Backbone(ConvNet):
@@ -451,27 +451,6 @@ class AdditionNetwork(ScopedFunction):
         return running_sum
 
 
-def apply_object_wise(func, signal, output_size, is_training, restore_shape=True, n_trailing_dims=1):
-    """ Treat `signal` as a batch of objects. Apply function `func` separately to each object.
-        The final `n_trailing_dims`-many dimensions are treated as "within-object" dimensions.
-        By default, objects are assumed to be vectors, but this can be changed by increasing
-        `n_trailing_dims`. e.g. n_trailing_dims==2 means each object is a matrix, i.e. the
-        last 2 dimensions  of signal are dimensions of the object.
-
-    """
-    shape = tf_shape(signal)
-    leading_dim = tf.reduce_prod(shape[:-n_trailing_dims])
-    signal = tf.reshape(signal, (leading_dim, *shape[-n_trailing_dims:]))
-    output = func(signal, output_size, is_training)
-
-    if restore_shape:
-        if not isinstance(output_size, tuple):
-            output_size = [output_size]
-        output = tf.reshape(output, (*shape[:-n_trailing_dims], *output_size))
-
-    return output
-
-
 class AttentionLayer(ScopedFunction):
     key_dim = Param()
     value_dim = Param()
@@ -483,8 +462,10 @@ class AttentionLayer(ScopedFunction):
 
     is_built = False
 
-    def __init__(self, n_hidden, do_object_wise=True, memory=None, scope=None, **kwargs):
-        self.n_hidden = n_hidden
+    K = None
+    V = None
+
+    def __init__(self, do_object_wise=True, memory=None, scope=None, **kwargs):
         self.do_object_wise = do_object_wise
         self.memory = memory
 
@@ -606,10 +587,9 @@ class SpatialAttentionLayer(ScopedFunction):
         output_locs = tf.broadcast_to(output_locs, (batch_size, n_outp, loc_dim))
 
         dist = output_locs[:, :, None, :] - input_locs[:, None, :, :]
-        kernel = tf.exp(-0.5 * tf.reduce_sum((dist / self.kernel_std)**2, axis=3))
-        kernel = kernel / (2 * np.pi)**(0.5 * loc_dim) / self.kernel_std**loc_dim
+        proximity = tf.exp(-0.5 * tf.reduce_sum((dist / self.kernel_std)**2, axis=3))
+        proximity = proximity / (2 * np.pi)**(0.5 * loc_dim) / self.kernel_std**loc_dim
 
-        proximity = self.kernel(output_locs, input_locs, self.kernel_std)  # (batch_size, n_outp, n_inp)
         V = apply_object_wise(self.value_func, input_signal, self.n_hidden, is_training)  # (batch_size, n_inp, value_dim)
         result = tf.matmul(proximity, V)  # (batch_size, n_outp, value_dim)
 
@@ -619,7 +599,7 @@ class SpatialAttentionLayer(ScopedFunction):
 
         output = apply_object_wise(self.after_func, result, self.n_hidden, is_training, True)
         output = tf.layers.dropout(output, self.p_dropout, training=is_training)
-        signal = tf.contrib.layers.layer_norm(input_signal + output)
+        signal = tf.contrib.layers.layer_norm(output)
 
         if self.do_object_wise:
             output = apply_object_wise(self.object_wise_func, signal, self.n_hidden, is_training, True)

@@ -156,7 +156,7 @@ yolo_air_config = alg_config.copy(
     yx_prior_mean=0.0,
     yx_prior_std=1.0,
 
-    obj_logit_scale=2.0,
+    color_logit_scale=2.0,
     alpha_logit_scale=0.1,
     alpha_logit_bias=5.0,
 

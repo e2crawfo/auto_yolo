@@ -41,7 +41,7 @@ durations = dict(
 
 config = dict(
     background_cfg=dict(mode="learn", A=1),
-    obj_logit_scale=1.0,
+    color_logit_scale=1.0,
     alpha_logit_scale=1.0,
     alpha_logit_bias=1.0,
     obj_temp=1.0,
