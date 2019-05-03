@@ -92,15 +92,15 @@ class Nips2018Grid(Environment):
         train_seed, val_seed, test_seed = 0, 1, 2
         train = GridEmnistObjectDetectionDataset(
             n_examples=int(cfg.n_train), shuffle=True,
-            episode_range=cfg.train_episode_range, seed=train_seed)
+            example_range=cfg.train_example_range, seed=train_seed)
 
         val = GridEmnistObjectDetectionDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            episode_range=cfg.val_episode_range, seed=val_seed)
+            example_range=cfg.val_example_range, seed=val_seed)
 
         test = GridEmnistObjectDetectionDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            episode_range=cfg.test_episode_range, seed=test_seed)
+            example_range=cfg.test_example_range, seed=test_seed)
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -110,15 +110,15 @@ class Nips2018Scatter(Environment):
         train_seed, val_seed, test_seed = 0, 1, 2
         train = EmnistObjectDetectionDataset(
             n_examples=int(cfg.n_train), shuffle=True,
-            episode_range=cfg.train_episode_range, seed=train_seed)
+            example_range=cfg.train_example_range, seed=train_seed)
 
         val = EmnistObjectDetectionDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            episode_range=cfg.val_episode_range, seed=val_seed)
+            example_range=cfg.val_example_range, seed=val_seed)
 
         test = EmnistObjectDetectionDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            episode_range=cfg.test_episode_range, seed=test_seed)
+            example_range=cfg.test_example_range, seed=test_seed)
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -129,15 +129,15 @@ class Nips2018Arithmetic(Environment):
 
         train = VisualArithmeticDataset(
             n_examples=int(cfg.n_train), shuffle=True,
-            episode_range=cfg.train_episode_range, seed=train_seed)
+            example_range=cfg.train_example_range, seed=train_seed)
 
         val = VisualArithmeticDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            episode_range=cfg.val_episode_range, seed=val_seed)
+            example_range=cfg.val_example_range, seed=val_seed)
 
         test = VisualArithmeticDataset(
             n_examples=int(cfg.n_val), shuffle=True,
-            episode_range=cfg.test_episode_range, seed=test_seed)
+            example_range=cfg.test_example_range, seed=test_seed)
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -179,9 +179,9 @@ class Nips2018Clevr(Environment):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
 
-        train = ClevrDataset(clevr_kind="train", n_examples=cfg.n_train, seed=train_seed, episode_range=None)
-        val = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=val_seed, episode_range=cfg.val_episode_range)
-        test = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=test_seed, episode_range=cfg.test_episode_range)
+        train = ClevrDataset(clevr_kind="train", n_examples=cfg.n_train, seed=train_seed, example_range=None)
+        val = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=val_seed, example_range=cfg.val_example_range)
+        test = ClevrDataset(clevr_kind="val", n_examples=cfg.n_val, seed=test_seed, example_range=cfg.test_example_range)
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -213,6 +213,9 @@ env_config = Config(
     train_episode_range=(0.0, 0.8),
     val_episode_range=(0.8, 0.9),
     test_episode_range=(0.9, 1.0),
+    train_example_range=(0.0, 0.8),
+    val_example_range=(0.8, 0.9),
+    test_example_range=(0.9, 1.0),
     n_frames=0,
 )
 
@@ -359,6 +362,7 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
             build_env=Nips2018Arithmetic,
             image_shape=(48, 48),
 
+            digits=list(range(10)),
             min_digits=1,
 
             max_digits=9,
@@ -377,6 +381,7 @@ def get_env_config(task, size=14, in_colour=False, ops="addition", image_size="n
             build_env=Nips2018Arithmetic,
             image_shape=(48, 48),
 
+            digits=list(range(10)),
             min_digits=5,
 
             max_digits=5,
