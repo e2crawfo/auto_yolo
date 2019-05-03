@@ -87,7 +87,7 @@ class ObjectRenderer(ScopedFunction):
         if "alpha" in self.fixed_values:
             obj_alpha = float(self.fixed_values["alpha"]) * tf.ones_like(obj_alpha)
 
-        obj_alpha *= tf.reshape(objects.obj, (batch_size, n_objects, 1, 1, 1))
+        obj_alpha *= tf.reshape(objects.render_obj, (batch_size, n_objects, 1, 1, 1))
 
         z = tf.reshape(objects.z, (batch_size, n_objects, 1, 1, 1))
         obj_importance = tf.maximum(obj_alpha * z, 0.01)
@@ -405,33 +405,26 @@ class GridObjectLayer(ObjectLayer):
 
     def _build_obj(self, obj_logits, is_training, **kwargs):
         obj_logits = self.training_wheels * tf.stop_gradient(obj_logits) + (1-self.training_wheels) * obj_logits
-        obj_logits = obj_logits / self.obj_temp
-
-        obj_log_odds = tf.clip_by_value(obj_logits, -10., 10.)
-
-        obj_pre_sigmoid = concrete_binary_pre_sigmoid_sample(obj_log_odds, self.obj_concrete_temp)
-        raw_obj = tf.nn.sigmoid(obj_pre_sigmoid)
+        obj_log_odds = tf.clip_by_value(obj_logits / self.obj_temp, -10., 10.)
 
         if self.noisy:
-            obj = (
-                self.float_is_training * raw_obj
-                + (1 - self.float_is_training) * tf.round(raw_obj)
-            )
+            obj_pre_sigmoid = concrete_binary_pre_sigmoid_sample(obj_log_odds, self.obj_concrete_temp)
         else:
-            obj = tf.round(raw_obj)
+            obj_pre_sigmoid = obj_log_odds
 
-        if "obj" in self.no_gradient:
-            obj = tf.stop_gradient(obj)
+        obj = tf.nn.sigmoid(obj_pre_sigmoid)
 
-        if "obj" in self.fixed_values:
-            obj = self.fixed_values['obj'] * tf.ones_like(obj)
+        render_obj = (
+            self.float_is_training * obj
+            + (1 - self.float_is_training) * tf.round(obj)
+        )
 
         return dict(
-            obj=obj,
-            raw_obj=raw_obj,
-            obj_pre_sigmoid=obj_pre_sigmoid,
             obj_log_odds=obj_log_odds,
             obj_prob=tf.nn.sigmoid(obj_log_odds),
+            obj_pre_sigmoid=obj_pre_sigmoid,
+            obj=obj,
+            render_obj=render_obj,
         )
 
     def _get_sequential_context(self, program, h, w, b, edge_element):

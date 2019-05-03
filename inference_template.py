@@ -64,7 +64,7 @@ with config:
 
         feed_dict = {inputs["image"]: np.zeros((10, *image_shape))}
 
-        fetches = "obj raw_obj z inp output objects n_objects normalized_box glimpse".split()
+        fetches = "obj render_obj z inp output objects n_objects normalized_box glimpse".split()
         to_fetch = {k: network_tensors[k] for k in fetches}
 
         fetched = sess.run(to_fetch, feed_dict=feed_dict)
