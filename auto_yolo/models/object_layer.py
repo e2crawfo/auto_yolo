@@ -8,7 +8,10 @@ from orderedattrdict import AttrDict
 
 from dps import cfg
 from dps.utils import Param
-from dps.utils.tf import build_scheduled_value, FIXED_COLLECTION, ScopedFunction, tf_shape, apply_object_wise
+from dps.utils.tf import (
+    build_scheduled_value, FIXED_COLLECTION, ScopedFunction,
+    tf_shape, apply_object_wise, tf_binomial_coefficient
+)
 
 from auto_yolo.tf_ops import render_sprites, resampler_edge
 from auto_yolo.models.core import (
@@ -176,7 +179,7 @@ class GridObjectLayer(ObjectLayer):
             z_logit_dist=Normal(loc=self.z_prior_mean, scale=self.z_prior_std),
         )
 
-    def compute_kl(self, tensors, prior=None):
+    def compute_kl(self, tensors, prior=None, existing_objects=None):
         simple_obj_kl = prior is not None
 
         if prior is None:
@@ -229,7 +232,7 @@ class GridObjectLayer(ObjectLayer):
                 prior["obj_log_odds"], self.obj_concrete_temp,
             )
         else:
-            obj_kl = self._compute_obj_kl(tensors)
+            obj_kl = self._compute_obj_kl(tensors, existing_objects=existing_objects)
 
         if "obj" in self.no_gradient:
             obj_kl = tf.stop_gradient(obj_kl)
@@ -245,30 +248,51 @@ class GridObjectLayer(ObjectLayer):
             obj_kl=obj_kl,
         )
 
-    def _compute_obj_kl(self, tensors):
+    def _compute_obj_kl(self, tensors, existing_objects=None):
         # --- compute obj_kl ---
 
-        count_support = tf.range(self.HWB+1, dtype=tf.float32)
+        max_n_objects = self.HWB
+
+        if existing_objects is not None:
+            batch_size, *other_shape, _ = tf_shape(existing_objects)
+            P = np.prod(other_shape)
+            existing_objects = tf.reshape(existing_objects, (batch_size, P))
+            max_n_objects += P
+
+        count_support = tf.range(max_n_objects+1, dtype=tf.float32)
 
         if self.count_prior_dist is not None:
             if self.count_prior_dist is not None:
-                assert len(self.count_prior_dist) == (self.HWB + 1)
+                assert len(self.count_prior_dist) == (max_n_objects + 1)
             count_distribution = tf.constant(self.count_prior_dist, dtype=tf.float32)
         else:
             count_prior_prob = tf.nn.sigmoid(self.count_prior_log_odds)
             count_distribution = (1 - count_prior_prob) * (count_prior_prob ** count_support)
 
         normalizer = tf.reduce_sum(count_distribution)
-        count_distribution = count_distribution / normalizer
+        count_distribution = count_distribution / tf.maximum(normalizer, 1e-6)
         count_distribution = tf.tile(count_distribution[None, :], (self.batch_size, 1))
-        count_so_far = tf.zeros((self.batch_size, 1), dtype=tf.float32)
+
+        if existing_objects is not None:
+            count_so_far = tf.reduce_sum(tf.round(existing_objects), axis=1, keepdims=True)
+
+            count_distribution = (
+                count_distribution
+                * tf_binomial_coefficient(count_support, count_so_far)
+                * tf_binomial_coefficient(max_n_objects - count_support, P - count_so_far)
+            )
+
+            normalizer = tf.reduce_sum(count_distribution, axis=1, keepdims=True)
+            count_distribution = count_distribution / tf.maximum(normalizer, 1e-6)
+        else:
+            count_so_far = tf.zeros((self.batch_size, 1), dtype=tf.float32)
 
         i = 0
 
         obj_kl = []
 
         for h, w, b in itertools.product(range(self.H), range(self.W), range(self.B)):
-            p_z_given_Cz = tf.maximum(count_support[None, :] - count_so_far, 0) / (self.HWB - i)
+            p_z_given_Cz = tf.maximum(count_support[None, :] - count_so_far, 0) / (max_n_objects - i)
 
             # Reshape for batch matmul
             _count_distribution = count_distribution[:, None, :]
