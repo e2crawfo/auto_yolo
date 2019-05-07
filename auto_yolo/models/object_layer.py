@@ -204,8 +204,6 @@ class GridObjectLayer(ObjectLayer):
         if "width" in self.no_gradient:
             width_kl = tf.stop_gradient(width_kl)
 
-        box_kl = tf.concat([cell_y_kl, cell_x_kl, height_kl, width_kl], axis=-1)
-
         # --- attr ---
 
         attr_kl = tensors["attr_dist"].kl_divergence(prior["attr_dist"])
@@ -242,7 +240,6 @@ class GridObjectLayer(ObjectLayer):
             cell_x_kl=cell_x_kl,
             height_kl=height_kl,
             width_kl=width_kl,
-            box_kl=box_kl,
             z_kl=z_kl,
             attr_kl=attr_kl,
             obj_kl=obj_kl,
