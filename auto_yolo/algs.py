@@ -25,7 +25,7 @@ alg_config = Config(
     stopping_criteria="loss_reconstruction,min",
     threshold=-np.inf,
     load_path=-1,
-    start_tensorboard=False,
+    start_tensorboard=5,
 
     max_steps=int(3e5),
     patience=50000,
