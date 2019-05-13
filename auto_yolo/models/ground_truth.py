@@ -8,8 +8,7 @@ class GroundTruth_Network(baseline.Baseline_Network):
 
     def _build_program_generator(self):
         n_objects = self._tensors["n_annotations"] + 0
-
-        _, top, bottom, left, right = tf.split(self._tensors["annotations"], 5, axis=2)
+        *_, top, bottom, left, right = tf.unstack(self._tensors["annotations"], axis=2)
         height = bottom - top
         width = right - left
 

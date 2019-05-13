@@ -115,7 +115,10 @@ class Evaluator(object):
 
         fetch_keys = set()
         for f in functions.values():
-            for key in f.keys_accessed.split():
+            keys_accessed = f.keys_accessed
+            if isinstance(keys_accessed, str):
+                keys_accessed = keys_accessed.split()
+            for key in keys_accessed:
                 fetch_keys.add(key)
 
         fetches = {}
@@ -140,7 +143,14 @@ class Evaluator(object):
             in self.fetches """
         record = {}
         for name, func in self.functions.items():
-            record[name] = np.mean(func(fetched, self.updater))
+            result = func(fetched, self.updater)
+
+            if isinstance(result, dict):
+                for k, v in result.items():
+                    record["{}:{}".format(name, k)] = np.mean(v)
+            else:
+                record[name] = np.mean(result)
+
         return record
 
 
@@ -231,7 +241,7 @@ def mAP(pred_boxes, gt_boxes, n_classes, recall_values=None, iou_threshold=None)
                 p = precision[recall >= r]
                 _ap.append(0. if p.size == 0 else p.max())
 
-        ap.append(np.mean(_ap))
+        ap.append(np.mean(_ap) if _ap else 0.0)
     return np.mean(ap)
 
 
@@ -246,59 +256,71 @@ class AP:
                 iou_threshold = [float(iou_threshold)]
         self.iou_threshold = iou_threshold
 
-    def __call__(self, _tensors, updater):
-        network = updater.network
-
-        obj = _tensors['obj']
-        top, left, height, width = np.split(_tensors['normalized_box'], 4, axis=-1)
-        annotations = _tensors["annotations"]
+    def _process_data(self, tensors, updater):
+        obj = tensors['obj']
+        top, left, height, width = np.split(tensors['normalized_box'], 4, axis=-1)
 
         batch_size = obj.shape[0]
+        n_frames = getattr(updater.network, 'n_frames', 0)
 
-        n_frames = getattr(network, 'n_frames', 0)
+        annotations = tensors["annotations"]
+        n_annotations = tensors["n_annotations"]
+
         if n_frames > 0:
-            shape = (batch_size*n_frames, -1)
-            annotations = annotations.reshape(batch_size*n_frames, *annotations.shape[2:])
+            n_objects = np.prod(obj.shape[2:-1])
         else:
-            shape = (batch_size, -1)
-            annotations = annotations.reshape(batch_size, *annotations.shape[1:])
+            n_objects = np.prod(obj.shape[1:-1])
+            annotations = annotations.reshape(batch_size, 1, *annotations.shape[1:])
+            n_frames = 1
+
+        shape = (batch_size, n_frames, n_objects)
 
         obj = obj.reshape(*shape)
-        top = network.image_height * top.reshape(*shape)
-        left = network.image_width * left.reshape(*shape)
-        height = network.image_height * height.reshape(*shape)
-        width = network.image_width * width.reshape(*shape)
+        n_digits = n_objects * np.ones((batch_size, n_frames), dtype=np.int32)
+        top = updater.network.image_height * top.reshape(*shape)
+        left = updater.network.image_width * left.reshape(*shape)
+        height = updater.network.image_height * height.reshape(*shape)
+        width = updater.network.image_width * width.reshape(*shape)
+
+        return obj, n_digits, top, left, height, width, annotations, n_annotations
+
+    def __call__(self, tensors, updater):
+        obj, n_digits, top, left, height, width, annotations, n_annotations = self._process_data(tensors, updater)
 
         bottom = top + height
         right = left + width
 
+        batch_size, n_frames = n_digits.shape[:2]
+
         ground_truth_boxes = []
         predicted_boxes = []
 
-        for idx, a in enumerate(annotations):
-            _ground_truth_boxes = [(0, *rest) for valid, cls, *rest in a if valid]
+        for b in range(batch_size):
+            for f in range(n_frames):
+                _ground_truth_boxes = [
+                    [0, *bbox]
+                    for (valid, _, _, *bbox), _
+                    in zip(annotations[b, f], range(n_annotations[b]))
+                    if valid > 0.5]
+                ground_truth_boxes.append(_ground_truth_boxes)
 
-            ground_truth_boxes.append(_ground_truth_boxes)
+                _predicted_boxes = []
+                for j in range(int(n_digits[b, f])):
+                    o = obj[b, f, j]
 
-            _predicted_boxes = []
+                    if o > 0.0:
+                        _predicted_boxes.append(
+                            [0, o,
+                             top[b, f, j],
+                             bottom[b, f, j],
+                             left[b, f, j],
+                             right[b, f, j]])
 
-            for i in range(obj.shape[1]):
-                o = obj[idx, i]
-
-                if o > 0.0:
-                    _predicted_boxes.append(
-                        [0, o,
-                         top[idx, i],
-                         bottom[idx, i],
-                         left[idx, i],
-                         right[idx, i]]
-                    )
-
-            predicted_boxes.append(_predicted_boxes)
+                predicted_boxes.append(_predicted_boxes)
 
         return mAP(
-            predicted_boxes, ground_truth_boxes,
-            n_classes=1, iou_threshold=self.iou_threshold)
+            predicted_boxes, ground_truth_boxes, n_classes=1,
+            iou_threshold=self.iou_threshold)
 
 
 class Updater(_Updater):

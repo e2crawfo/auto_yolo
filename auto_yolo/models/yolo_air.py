@@ -224,7 +224,7 @@ class YoloAir_RenderHook(RenderHook):
 
             # Plot true bounding boxes
             for k in range(n_annotations[n]):
-                valid, _, top, bottom, left, right = annotations[n][k]
+                valid, _, _, top, bottom, left, right = annotations[n][k]
 
                 if not valid:
                     continue
@@ -417,9 +417,8 @@ class YoloAir_PaperSetRenderHook(RenderHook):
                     ax3.add_patch(rect)
 
             if self.do_annotations:
-                # Plot true bounding boxes
                 for k in range(n_annotations[n]):
-                    valid, _, top, bottom, left, right = annotations[n][k]
+                    valid, _, _, top, bottom, left, right = annotations[n][k]
 
                     if not valid:
                         continue

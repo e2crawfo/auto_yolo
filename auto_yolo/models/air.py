@@ -225,7 +225,7 @@ class AIR_AP(object):
         for idx in range(batch_size):
             _a = [
                 [0, *rest]
-                for (valid, cls, *rest), _
+                for (valid, _, _, *rest), _
                 in zip(annotations[idx], range(n_annotations[idx]))
                 if valid]
             ground_truth_boxes.append(_a)
@@ -686,7 +686,7 @@ class AIR_RenderHook(RenderHook):
 
             # Plot true bounding boxes
             for j in range(n_annotations[i]):
-                valid, _, t, b, l, r = annotations[i][j]
+                valid, _, _, t, b, l, r = annotations[i][j]
                 if not valid:
                     continue
 
