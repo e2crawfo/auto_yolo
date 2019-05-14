@@ -268,6 +268,7 @@ class AP:
 
         if n_frames > 0:
             n_objects = np.prod(obj.shape[2:-1])
+            n_frames = obj.shape[1]
         else:
             n_objects = np.prod(obj.shape[1:-1])
             annotations = annotations.reshape(batch_size, 1, *annotations.shape[1:])
