@@ -47,6 +47,7 @@ alg_config = Config(
     z_prior_mean=0.0,
     z_prior_std=1.0,
     A=50,
+    n_objects_per_cell=1,
 
     train_reconstruction=True,
     train_kl=True,
@@ -105,7 +106,7 @@ ground_truth_config = baseline_config.copy(
 
 def yolo_air_prepare_func():
     from dps import cfg
-    cfg.anchor_boxes = [cfg.tile_shape]
+    cfg.anchor_box = cfg.tile_shape
     cfg.count_prior_log_odds = (
         "Exp(start=1000000.0, end={}, decay_rate=0.1, "
         "decay_steps={}, log=True)".format(

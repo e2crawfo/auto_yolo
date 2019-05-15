@@ -15,7 +15,8 @@ from dps.utils.tf import (
 
 from auto_yolo.tf_ops import render_sprites, resampler_edge
 from auto_yolo.models.core import (
-    concrete_binary_pre_sigmoid_sample, concrete_binary_sample_kl, tf_safe_log)
+    concrete_binary_pre_sigmoid_sample, concrete_binary_sample_kl, tf_safe_log,
+    coords_to_image_space)
 
 Normal = tfp.distributions.Normal
 
@@ -55,6 +56,11 @@ class ObjectRenderer(ScopedFunction):
     color_logit_scale = Param()
     alpha_logit_scale = Param()
     alpha_logit_bias = Param()
+    anchor_box = Param()
+
+    def __init__(self, scope=None, **kwargs):
+        self.anchor_box = np.array(self.anchor_box)
+        super().__init__(scope=scope, **kwargs)
 
     def _call(self, objects, background, is_training, appearance_only=False):
         if not self.initialized:
@@ -97,7 +103,11 @@ class ObjectRenderer(ScopedFunction):
 
         object_maps = tf.concat([obj_colors, obj_alpha, obj_importance], axis=-1)
 
-        ys, xs, yt, xt = objects.ys, objects.xs, objects.yt, objects.xt
+        *_, image_height, image_width, _ = tf_shape(background)
+
+        yt, xt, ys, xs = coords_to_image_space(
+            objects.yt, objects.xt, objects.ys, objects.xs,
+            (image_height, image_width), self.anchor_box, top_left=True)
 
         scales = tf.concat([ys, xs], axis=-1)
         scales = tf.reshape(scales, (batch_size, n_objects, 2))
@@ -135,7 +145,7 @@ class GridObjectLayer(ObjectLayer):
     hw_prior_std = Param()
     min_hw = Param()
     max_hw = Param()
-    anchor_boxes = Param()
+    anchor_box = Param()
 
     z_prior_mean = Param()
     z_prior_std = Param()
@@ -146,6 +156,7 @@ class GridObjectLayer(ObjectLayer):
     use_concrete_kl = Param()
     count_prior_log_odds = Param()
     count_prior_dist = Param()
+    n_objects_per_cell = Param()
 
     edge_weights = None
 
@@ -154,7 +165,7 @@ class GridObjectLayer(ObjectLayer):
 
         self.pixels_per_cell = pixels_per_cell
 
-        self.B = len(self.anchor_boxes)
+        self.B = self.n_objects_per_cell
 
         if isinstance(self.count_prior_dist, str):
             self.count_prior_dist = eval(self.count_prior_dist)
@@ -167,7 +178,7 @@ class GridObjectLayer(ObjectLayer):
         self.hw_prior_mean = build_scheduled_value(self.hw_prior_mean, "hw_prior_mean")
         self.hw_prior_std = build_scheduled_value(self.hw_prior_std, "hw_prior_std")
 
-        self.anchor_boxes = np.array(self.anchor_boxes)
+        self.anchor_box = np.array(self.anchor_box)
 
     def _independent_prior(self):
         return dict(
@@ -385,20 +396,16 @@ class GridObjectLayer(ObjectLayer):
         if "width" in self.no_gradient:
             width = tf.stop_gradient(width)
 
-        box = tf.concat([cell_y, cell_x, height, width], axis=-1)
+        local_box = tf.concat([cell_y, cell_x, height, width], axis=-1)
 
         # --- Compute image-normalized box parameters ---
 
-        # box height and width normalized to image height and width
-        ys = height * self.anchor_boxes[b, 0] / self.image_height
-        xs = width * self.anchor_boxes[b, 1] / self.image_width
+        ys = height
+        xs = width
 
-        # box centre normalized to image height and width
-        yt = (self.pixels_per_cell[0] / self.image_height) * (cell_y + h)
-        xt = (self.pixels_per_cell[1] / self.image_width) * (cell_x + w)
-
-        yt -= ys / 2
-        xt -= xs / 2
+        # box center normalized to anchor box
+        yt = (self.pixels_per_cell[0] / self.anchor_box[0]) * (cell_y + h)
+        xt = (self.pixels_per_cell[1] / self.anchor_box[1]) * (cell_x + w)
 
         normalized_box = tf.concat([yt, xt, ys, xs], axis=-1)
 
@@ -408,15 +415,17 @@ class GridObjectLayer(ObjectLayer):
             cell_x=cell_x,
             height=height,
             width=width,
-            box=box,
+            local_box=local_box,
 
             cell_y_logit_dist=cy_logit_dist,
             cell_x_logit_dist=cx_logit_dist,
             height_logit_dist=height_logit_dist,
             width_logit_dist=width_logit_dist,
 
-            # box top/left and height/width, in a coordinate frame where (0, 0) is image top-left
+            # box center and height/width, in a coordinate frame where (0, 0) is image top-left
             # and (1, 1) is image bottom-right
+
+            # box center and scale with respect to anchor_box
             yt=yt,
             xt=xt,
             ys=ys,
@@ -559,7 +568,7 @@ class GridObjectLayer(ObjectLayer):
 
             for key, value in built.items():
                 _tensors[key][h, w, b] = value
-            partial_program = built['box']
+            partial_program = built['local_box']
 
             # --- attr ---
 
@@ -568,9 +577,8 @@ class GridObjectLayer(ObjectLayer):
 
                 yt, xt, ys, xs = tf.split(built['normalized_box'], 4, axis=-1)
 
-                # yt/xt give top/left but here we need center
-                yt += ys / 2
-                xt += xs / 2
+                yt, xt, ys, xs = coords_to_image_space(
+                    yt, xt, ys, xs, (self.image_height, self.image_width), self.anchor_box, top_left=False)
 
                 transform_constraints = snt.AffineWarpConstraints.no_shear_2d()
                 warper = snt.AffineGridWarper(
@@ -686,7 +694,7 @@ class GridObjectLayer(ObjectLayer):
                 objects[k] = tf.stack(t1, axis=1)
 
         objects.all = tf.concat(
-            [objects.box, objects.attr, objects.z, objects.obj], axis=-1)
+            [objects.normalized_box, objects.attr, objects.z, objects.obj], axis=-1)
 
         # --- misc ---
 

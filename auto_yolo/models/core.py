@@ -94,6 +94,35 @@ def xent_loss(*, pred, label, tf=True):
         return -(label * np_safe_log(pred) + (1. - label) * np_safe_log(1. - pred))
 
 
+def coords_to_pixel_space(y, x, h, w, image_shape, anchor_box, top_left):
+    h = h * anchor_box[0]
+    w = w * anchor_box[1]
+
+    y = y * anchor_box[0]
+    x = x * anchor_box[1]
+
+    if top_left:
+        y -= h / 2
+        x -= w / 2
+
+    return y, x, h, w
+
+
+def coords_to_image_space(y, x, h, w, image_shape, anchor_box, top_left):
+    """ Map to a normalized space (0, 1) x (0, 1) """
+    h = h * anchor_box[0] / image_shape[0]
+    w = w * anchor_box[1] / image_shape[1]
+
+    y = y * anchor_box[0] / image_shape[0]
+    x = x * anchor_box[1] / image_shape[1]
+
+    if top_left:
+        y -= h / 2
+        x -= w / 2
+
+    return y, x, h, w
+
+
 class Evaluator(object):
     """ A helper object for running a list of functions on a collection of evaluated tensors.
 
@@ -258,7 +287,11 @@ class AP:
 
     def _process_data(self, tensors, updater):
         obj = tensors['obj']
-        top, left, height, width = np.split(tensors['normalized_box'], 4, axis=-1)
+        y, x, height, width = np.split(tensors['normalized_box'], 4, axis=-1)
+
+        image_shape = (updater.network.image_height, updater.network.image_width)
+        anchor_box = updater.network.object_layer.anchor_box
+        top, left, height, width = coords_to_pixel_space(y, x, height, width, image_shape, anchor_box, top_left=True)
 
         batch_size = obj.shape[0]
         n_frames = getattr(updater.network, 'n_frames', 0)
@@ -278,10 +311,10 @@ class AP:
 
         obj = obj.reshape(*shape)
         n_digits = n_objects * np.ones((batch_size, n_frames), dtype=np.int32)
-        top = updater.network.image_height * top.reshape(*shape)
-        left = updater.network.image_width * left.reshape(*shape)
-        height = updater.network.image_height * height.reshape(*shape)
-        width = updater.network.image_width * width.reshape(*shape)
+        top = top.reshape(*shape)
+        left = left.reshape(*shape)
+        height = height.reshape(*shape)
+        width = width.reshape(*shape)
 
         return obj, n_digits, top, left, height, width, annotations, n_annotations
 

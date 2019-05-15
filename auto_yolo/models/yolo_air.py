@@ -7,13 +7,13 @@ from matplotlib.colors import to_rgb
 from dps.utils import Param
 from dps.utils.tf import tf_mean_sum, RenderHook, GridConvNet
 
-from auto_yolo.models.core import AP, xent_loss, VariationalAutoencoder
+from auto_yolo.models.core import AP, xent_loss, VariationalAutoencoder, coords_to_pixel_space
 from auto_yolo.models.object_layer import GridObjectLayer, ObjectRenderer
 
 
 class YoloAir_Network(VariationalAutoencoder):
     n_backbone_features = Param()
-    anchor_boxes = Param()
+    n_objects_per_cell = Param()
 
     backbone = None
     object_layer = None
@@ -23,7 +23,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
     def __init__(self, env, updater, scope=None, **kwargs):
         super(YoloAir_Network, self).__init__(env, updater, scope=scope, **kwargs)
-        self.B = len(self.anchor_boxes)
+        self.B = self.n_objects_per_cell
 
     @property
     def eval_funcs(self):
@@ -167,10 +167,11 @@ class YoloAir_RenderHook(RenderHook):
 
         obj = fetched['obj'].reshape(self.N, -1)
 
-        box = (
-            fetched['normalized_box']
-            * [image_height, image_width, image_height, image_width]
-        )
+        anchor_box = updater.network.object_layer.anchor_box
+        yt, xt, ys, xs = np.split(fetched['normalized_box'], 4, axis=-1)
+        yt, xt, ys, xs = coords_to_pixel_space(
+            yt, xt, ys, xs, (image_height, image_width), anchor_box, top_left=True)
+        box = np.concatenate([yt, xt, ys, xs], axis=-1)
         box = box.reshape(self.N, -1, 4)
 
         n_annotations = fetched.get("n_annotations", [0] * self.N)
@@ -328,10 +329,11 @@ class YoloAir_ComparisonRenderHook(RenderHook):
 
         obj = fetched['obj'].reshape(self.N, -1)
 
-        box = (
-            fetched['normalized_box']
-            * [image_height, image_width, image_height, image_width]
-        )
+        anchor_box = updater.network.object_layer.anchor_box
+        yt, xt, ys, xs = np.split(fetched['normalized_box'], 4, axis=-1)
+        yt, xt, ys, xs = coords_to_pixel_space(
+            yt, xt, ys, xs, (image_height, image_width), anchor_box, top_left=True)
+        box = np.concatenate([yt, xt, ys, xs], axis=-1)
         box = box.reshape(self.N, -1, 4)
 
         on_colour = np.array(to_rgb("xkcd:azure"))
@@ -381,10 +383,11 @@ class YoloAir_PaperSetRenderHook(RenderHook):
 
         obj = fetched['obj'].reshape(self.N, -1)
 
-        box = (
-            fetched['normalized_box']
-            * [image_height, image_width, image_height, image_width]
-        )
+        anchor_box = updater.network.object_layer.anchor_box
+        yt, xt, ys, xs = np.split(fetched['normalized_box'], 4, axis=-1)
+        yt, xt, ys, xs = coords_to_pixel_space(
+            yt, xt, ys, xs, (image_height, image_width), anchor_box, top_left=True)
+        box = np.concatenate([yt, xt, ys, xs], axis=-1)
         box = box.reshape(self.N, -1, 4)
 
         pred_colour = np.array(to_rgb(self.pred_colour))
