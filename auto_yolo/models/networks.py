@@ -607,3 +607,72 @@ class SpatialAttentionLayer(ScopedFunction):
             signal = tf.contrib.layers.layer_norm(signal + output)
 
         return signal
+
+
+class SpatialAttentionLayerV2(ScopedFunction):
+    """ Now there are no keys and queries.
+
+    For the input we are given data and an array of locations. For the output we are just given
+    an array of locations.
+
+    Kind of interesting: this can be viewed as a differentiable way of converting a sparse matrix representation
+    of an image to a dense representation of an image, assuming the output locations are the locations of image pixels.
+    Input data is a list of locations paired with data, conceptually similar to sparse matrix representations.
+
+    """
+    kernel_std = Param()
+    build_mlp = Param()
+    n_hidden = Param()
+    do_object_wise = Param()
+
+    is_built = False
+
+    def _call(self, input_locs, input_features, reference_locs, reference_features, is_training):
+        """
+        input_features: (B, n_inp, n_hidden)
+        input_locs: (B, n_inp, loc_dim)
+        reference_locs: (B, n_ref, loc_dim)
+
+        """
+        assert (reference_features is not None) == self.do_object_wise
+
+        if not self.is_built:
+            self.relation_func = self.build_mlp(scope="relation_func")
+
+            if self.do_object_wise:
+                self.object_wise_func = self.build_mlp(scope="object_wise_func")
+
+            self.is_built = True
+
+        loc_dim = tf_shape(input_locs)[-1]
+        n_ref = tf_shape(reference_locs)[-2]
+        batch_size, n_inp, _ = tf_shape(input_features)
+
+        input_locs = tf.broadcast_to(input_locs, (batch_size, n_inp, loc_dim))
+        reference_locs = tf.broadcast_to(reference_locs, (batch_size, n_ref, loc_dim))
+
+        adjusted_locs = input_locs[:, None, :, :] - reference_locs[:, :, None, :]  # (B, n_ref, n_inp, loc_dim)
+        adjusted_features = tf.tile(input_features[:, None], (1, n_ref, 1, 1))  # (B, n_ref, n_inp, features_dim)
+        relation_input = tf.concat([adjusted_features, adjusted_locs], axis=-1)
+
+        if self.do_object_wise:
+            object_wise = apply_object_wise(
+                self.object_wise_func, reference_features, self.n_hidden, is_training)  # (B, n_ref, n_hidden)
+            _object_wise = tf.tile(object_wise[:, :, None], (1, 1, n_inp, 1))
+            relation_input = tf.concat([relation_input, _object_wise], axis=-1)
+        else:
+            object_wise = None
+
+        V = apply_object_wise(self.relation_func, relation_input, self.n_hidden, is_training)  # (B, n_ref, n_inp, n_hidden)
+
+        attention_weights = tf.exp(-0.5 * tf.reduce_sum((adjusted_locs / self.kernel_std)**2, axis=3))
+        attention_weights = attention_weights / (2 * np.pi * self.kernel_std)**(loc_dim / 2)  # (B, n_ref, n_inp)
+
+        result = tf.reduce_sum(V * attention_weights[..., None], axis=2)  # (B, n_ref, n_hidden)
+
+        if self.do_object_wise:
+            result += object_wise
+
+        # result = tf.contrib.layers.layer_norm(result)
+
+        return result

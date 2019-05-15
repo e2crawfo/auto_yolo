@@ -290,7 +290,7 @@ class AP:
         y, x, height, width = np.split(tensors['normalized_box'], 4, axis=-1)
 
         image_shape = (updater.network.image_height, updater.network.image_width)
-        anchor_box = updater.network.object_layer.anchor_box
+        anchor_box = updater.network.anchor_box
         top, left, height, width = coords_to_pixel_space(y, x, height, width, image_shape, anchor_box, top_left=True)
 
         batch_size = obj.shape[0]

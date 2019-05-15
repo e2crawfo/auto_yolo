@@ -14,6 +14,7 @@ from auto_yolo.models.object_layer import GridObjectLayer, ObjectRenderer
 class YoloAir_Network(VariationalAutoencoder):
     n_backbone_features = Param()
     n_objects_per_cell = Param()
+    anchor_box = Param()
 
     backbone = None
     object_layer = None
@@ -167,7 +168,7 @@ class YoloAir_RenderHook(RenderHook):
 
         obj = fetched['obj'].reshape(self.N, -1)
 
-        anchor_box = updater.network.object_layer.anchor_box
+        anchor_box = updater.network.anchor_box
         yt, xt, ys, xs = np.split(fetched['normalized_box'], 4, axis=-1)
         yt, xt, ys, xs = coords_to_pixel_space(
             yt, xt, ys, xs, (image_height, image_width), anchor_box, top_left=True)
@@ -329,7 +330,7 @@ class YoloAir_ComparisonRenderHook(RenderHook):
 
         obj = fetched['obj'].reshape(self.N, -1)
 
-        anchor_box = updater.network.object_layer.anchor_box
+        anchor_box = updater.network.anchor_box
         yt, xt, ys, xs = np.split(fetched['normalized_box'], 4, axis=-1)
         yt, xt, ys, xs = coords_to_pixel_space(
             yt, xt, ys, xs, (image_height, image_width), anchor_box, top_left=True)
@@ -383,7 +384,7 @@ class YoloAir_PaperSetRenderHook(RenderHook):
 
         obj = fetched['obj'].reshape(self.N, -1)
 
-        anchor_box = updater.network.object_layer.anchor_box
+        anchor_box = updater.network.anchor_box
         yt, xt, ys, xs = np.split(fetched['normalized_box'], 4, axis=-1)
         yt, xt, ys, xs = coords_to_pixel_space(
             yt, xt, ys, xs, (image_height, image_width), anchor_box, top_left=True)
