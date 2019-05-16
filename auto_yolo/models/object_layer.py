@@ -183,16 +183,17 @@ class GridObjectLayer(ObjectLayer):
     def _independent_prior(self):
         return dict(
             cell_y_logit_mean=self.yx_prior_mean,
-            cell_y_logit_std=self.yx_prior_std,
             cell_x_logit_mean=self.yx_prior_mean,
-            cell_x_logit_std=self.yx_prior_std,
             height_logit_mean=self.hw_prior_mean,
-            height_logit_std=self.hw_prior_std,
             width_logit_mean=self.hw_prior_mean,
-            width_logit_std=self.hw_prior_std,
             attr_mean=self.attr_prior_mean,
-            attr_std=self.attr_prior_std,
             z_logit_mean=self.z_prior_mean,
+
+            cell_y_logit_std=self.yx_prior_std,
+            cell_x_logit_std=self.yx_prior_std,
+            height_logit_std=self.hw_prior_std,
+            width_logit_std=self.hw_prior_std,
+            attr_std=self.attr_prior_std,
             z_logit_std=self.z_prior_std,
         )
 
@@ -496,9 +497,6 @@ class GridObjectLayer(ObjectLayer):
         else:
             return tf.zeros_like(edge_element[:, 0:0])
 
-    def _make_empty(self):
-        return np.array([{} for i in range(self.H * self.W * self.B)]).reshape(self.H, self.W, self.B)
-
     def _call(self, inp, inp_features, is_training, is_posterior=True):
         print("\n" + "-" * 10 + " GridObjectLayer(is_posterior={}) ".format(is_posterior) + "-" * 10)
 
@@ -548,7 +546,6 @@ class GridObjectLayer(ObjectLayer):
 
         # --- containers for storing built program ---
 
-        _tensors = collections.defaultdict(self._make_empty)
         program = np.empty((H, W, self.B), dtype=np.object)
 
         # --- build the program ---
@@ -559,7 +556,10 @@ class GridObjectLayer(ObjectLayer):
         else:
             is_posterior_tf = is_posterior_tf * [0, 1]
 
+        results = []
         for h, w, b in itertools.product(range(H), range(W), range(self.B)):
+            built = dict()
+
             partial_program, features = None, None
             context = self._get_sequential_context(program, h, w, b, edge_element)
             base_features = tf.concat([inp_features[:, h, w, b, :], context, is_posterior_tf], axis=1)
@@ -573,10 +573,8 @@ class GridObjectLayer(ObjectLayer):
             network_output = self.box_network(layer_inp, output_size + n_features, self. is_training)
             rep_input, features = tf.split(network_output, (output_size, n_features), axis=1)
 
-            built = self._build_box(rep_input, h, w, b, self.is_training)
-
-            for key, value in built.items():
-                _tensors[key][h, w, b] = value
+            _built = self._build_box(rep_input, h, w, b, self.is_training)
+            built.update(_built)
             partial_program = built['local_box']
 
             # --- attr ---
@@ -621,10 +619,7 @@ class GridObjectLayer(ObjectLayer):
             if "attr" in self.no_gradient:
                 attr = tf.stop_gradient(attr)
 
-            built = dict(attr_mean=attr_mean, attr_std=attr_std, attr=attr, glimpse=glimpse)
-
-            for key, value in built.items():
-                _tensors[key][h, w, b] = value
+            built.update(attr_mean=attr_mean, attr_std=attr_std, attr=attr, glimpse=glimpse)
             partial_program = tf.concat([partial_program, built['attr']], axis=1)
 
             # --- z ---
@@ -647,10 +642,7 @@ class GridObjectLayer(ObjectLayer):
             if "z" in self.fixed_values:
                 z = self.fixed_values['z'] * tf.ones_like(z)
 
-            built = dict(z_logit_mean=z_mean, z_logit_std=z_std, z=z)
-
-            for key, value in built.items():
-                _tensors[key][h, w, b] = value
+            built.update(z_logit_mean=z_mean, z_logit_std=z_std, z=z)
             partial_program = tf.concat([partial_program, built['z']], axis=1)
 
             # --- obj ---
@@ -658,33 +650,21 @@ class GridObjectLayer(ObjectLayer):
             layer_inp = tf.concat([base_features, features, partial_program], axis=1)
             rep_input = self.obj_network(layer_inp, 1, self.is_training)
 
-            built = self._build_obj(rep_input, self.is_training)
+            _built = self._build_obj(rep_input, self.is_training)
+            built.update(_built)
 
-            for key, value in built.items():
-                _tensors[key][h, w, b] = value
             partial_program = tf.concat([partial_program, built['obj']], axis=1)
 
             # --- final ---
 
+            results.append(built)
+
             program[h, w, b] = partial_program
             assert program[h, w, b].shape[1] == total_sample_size
 
-        # --- merge tensors from different grid cells ---
-
         objects = AttrDict()
-        for k, v in _tensors.items():
-            t1 = []
-            for h in range(H):
-                t2 = []
-                for w in range(W):
-                    t2.append(tf.stack([v[h, w, b] for b in range(self.B)], axis=1))
-                t1.append(tf.stack(t2, axis=1))
-            objects[k] = tf.stack(t1, axis=1)
-
-        objects = AttrDict(
-            **{k: tf.reshape(t, (self.batch_size, self.HWB, *tf_shape(t)[4:]))
-               for k, t in objects.items()}
-        )
+        for k in results[0]:
+            objects[k] = tf.stack([r[k] for r in results], axis=1)
 
         objects.all = tf.concat(
             [objects.normalized_box, objects.attr, objects.z, objects.obj], axis=-1)
