@@ -666,7 +666,7 @@ class SpatialAttentionLayerV2(ScopedFunction):
         V = apply_object_wise(self.relation_func, relation_input, self.n_hidden, is_training)  # (B, n_ref, n_inp, n_hidden)
 
         attention_weights = tf.exp(-0.5 * tf.reduce_sum((adjusted_locs / self.kernel_std)**2, axis=3))
-        attention_weights = attention_weights / (2 * np.pi * self.kernel_std)**(loc_dim / 2)  # (B, n_ref, n_inp)
+        attention_weights = attention_weights / (2 * np.pi) ** (loc_dim / 2)  / self.kernel_std**loc_dim  # (B, n_ref, n_inp)
 
         result = tf.reduce_sum(V * attention_weights[..., None], axis=2)  # (B, n_ref, n_hidden)
 

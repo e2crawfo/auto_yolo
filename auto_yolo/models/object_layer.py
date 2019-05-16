@@ -182,12 +182,18 @@ class GridObjectLayer(ObjectLayer):
 
     def _independent_prior(self):
         return dict(
-            cell_y_logit_dist=Normal(loc=self.yx_prior_mean, scale=self.yx_prior_std),
-            cell_x_logit_dist=Normal(loc=self.yx_prior_mean, scale=self.yx_prior_std),
-            height_logit_dist=Normal(loc=self.hw_prior_mean, scale=self.hw_prior_std),
-            width_logit_dist=Normal(loc=self.hw_prior_mean, scale=self.hw_prior_std),
-            attr_dist=Normal(loc=self.attr_prior_mean, scale=self.attr_prior_std),
-            z_logit_dist=Normal(loc=self.z_prior_mean, scale=self.z_prior_std),
+            cell_y_logit_mean=self.yx_prior_mean,
+            cell_y_logit_std=self.yx_prior_std,
+            cell_x_logit_mean=self.yx_prior_mean,
+            cell_x_logit_std=self.yx_prior_std,
+            height_logit_mean=self.hw_prior_mean,
+            height_logit_std=self.hw_prior_std,
+            width_logit_mean=self.hw_prior_mean,
+            width_logit_std=self.hw_prior_std,
+            attr_mean=self.attr_prior_mean,
+            attr_std=self.attr_prior_std,
+            z_logit_mean=self.z_prior_mean,
+            z_logit_std=self.z_prior_std,
         )
 
     def compute_kl(self, tensors, prior=None, existing_objects=None):
@@ -198,10 +204,17 @@ class GridObjectLayer(ObjectLayer):
 
         # --- box ---
 
-        cell_y_kl = tensors["cell_y_logit_dist"].kl_divergence(prior["cell_y_logit_dist"])
-        cell_x_kl = tensors["cell_x_logit_dist"].kl_divergence(prior["cell_x_logit_dist"])
-        height_kl = tensors["height_logit_dist"].kl_divergence(prior["height_logit_dist"])
-        width_kl = tensors["width_logit_dist"].kl_divergence(prior["width_logit_dist"])
+        def normal_kl(name):
+            loc_name = name + "_mean"
+            scale_name = name + "_std"
+            _post = Normal(loc=tensors[loc_name], scale=tensors[scale_name])
+            _prior = Normal(loc=prior[loc_name], scale=prior[scale_name])
+            return _post.kl_divergence(_prior)
+
+        cell_y_kl = normal_kl("cell_y_logit")
+        cell_x_kl = normal_kl("cell_x_logit")
+        height_kl = normal_kl("height_logit")
+        width_kl = normal_kl("width_logit")
 
         if "cell_y" in self.no_gradient:
             cell_y_kl = tf.stop_gradient(cell_y_kl)
@@ -217,14 +230,14 @@ class GridObjectLayer(ObjectLayer):
 
         # --- attr ---
 
-        attr_kl = tensors["attr_dist"].kl_divergence(prior["attr_dist"])
+        attr_kl = normal_kl("attr")
 
         if "attr" in self.no_gradient:
             attr_kl = tf.stop_gradient(attr_kl)
 
         # --- z ---
 
-        z_kl = tensors["z_logit_dist"].kl_divergence(prior["z_logit_dist"])
+        z_kl = normal_kl("z_logit")
 
         if "z" in self.no_gradient:
             z_kl = tf.stop_gradient(z_kl)
@@ -311,12 +324,12 @@ class GridObjectLayer(ObjectLayer):
             if self.use_concrete_kl:
                 prior_log_odds = tf_safe_log(p_z) - tf_safe_log(1-p_z)
                 _obj_kl = concrete_binary_sample_kl(
-                    tensors["obj_pre_sigmoid"][:, h, w, b, :],
-                    tensors["obj_log_odds"][:, h, w, b, :], self.obj_concrete_temp,
+                    tensors["obj_pre_sigmoid"][:, i, :],
+                    tensors["obj_log_odds"][:, i, :], self.obj_concrete_temp,
                     prior_log_odds, self.obj_concrete_temp,
                 )
             else:
-                prob = tensors["obj_prob"][:, h, w, b, :]
+                prob = tensors["obj_prob"][:, i, :]
 
                 _obj_kl = (
                     prob * (tf_safe_log(prob) - tf_safe_log(p_z))
@@ -325,7 +338,7 @@ class GridObjectLayer(ObjectLayer):
 
             obj_kl.append(_obj_kl)
 
-            sample = tf.to_float(tensors["obj"][:, h, w, b, :] > 0.5)
+            sample = tf.to_float(tensors["obj"][:, i, :] > 0.5)
             mult = sample * p_z_given_Cz + (1-sample) * (1-p_z_given_Cz)
             count_distribution = mult * count_distribution
             normalizer = tf.reduce_sum(count_distribution, axis=1, keepdims=True)
@@ -336,9 +349,7 @@ class GridObjectLayer(ObjectLayer):
 
             i += 1
 
-        obj_kl = tf.reshape(
-            tf.concat(obj_kl, axis=1),
-            (self.batch_size, self.H, self.W, self.B, 1))
+        obj_kl = tf.reshape(tf.concat(obj_kl, axis=1), (self.batch_size, self.HWB, 1))
 
         return obj_kl
 
@@ -353,17 +364,10 @@ class GridObjectLayer(ObjectLayer):
         cy_mean, cx_mean, height_mean, width_mean = tf.split(mean, 4, axis=-1)
         cy_std, cx_std, height_std, width_std = tf.split(std, 4, axis=-1)
 
-        cy_logit_dist = Normal(loc=cy_mean, scale=cy_std)
-        cy_logits = cy_logit_dist.sample()
-
-        cx_logit_dist = Normal(loc=cx_mean, scale=cx_std)
-        cx_logits = cx_logit_dist.sample()
-
-        height_logit_dist = Normal(loc=height_mean, scale=height_std)
-        height_logits = height_logit_dist.sample()
-
-        width_logit_dist = Normal(loc=width_mean, scale=width_std)
-        width_logits = width_logit_dist.sample()
+        cy_logits = Normal(loc=cy_mean, scale=cy_std).sample()
+        cx_logits = Normal(loc=cx_mean, scale=cx_std).sample()
+        height_logits = Normal(loc=height_mean, scale=height_std).sample()
+        width_logits = Normal(loc=width_mean, scale=width_std).sample()
 
         # --- cell y/x transform ---
 
@@ -417,10 +421,15 @@ class GridObjectLayer(ObjectLayer):
             width=width,
             local_box=local_box,
 
-            cell_y_logit_dist=cy_logit_dist,
-            cell_x_logit_dist=cx_logit_dist,
-            height_logit_dist=height_logit_dist,
-            width_logit_dist=width_logit_dist,
+            cell_y_logit_mean=cy_mean,
+            cell_x_logit_mean=cx_mean,
+            height_logit_mean=height_mean,
+            width_logit_mean=width_mean,
+
+            cell_y_logit_std=cy_std,
+            cell_x_logit_std=cx_std,
+            height_logit_std=height_std,
+            width_logit_std=width_std,
 
             # box center and height/width, in a coordinate frame where (0, 0) is image top-left
             # and (1, 1) is image bottom-right
@@ -607,13 +616,12 @@ class GridObjectLayer(ObjectLayer):
 
             attr_std = self.std_nonlinearity(attr_log_std)
 
-            attr_dist = Normal(loc=attr_mean, scale=attr_std)
-            attr = attr_dist.sample()
+            attr = Normal(loc=attr_mean, scale=attr_std).sample()
 
             if "attr" in self.no_gradient:
                 attr = tf.stop_gradient(attr)
 
-            built = dict(attr_dist=attr_dist, attr=attr, glimpse=glimpse)
+            built = dict(attr_mean=attr_mean, attr_std=attr_std, attr=attr, glimpse=glimpse)
 
             for key, value in built.items():
                 _tensors[key][h, w, b] = value
@@ -630,8 +638,7 @@ class GridObjectLayer(ObjectLayer):
 
             z_mean = self.training_wheels * tf.stop_gradient(z_mean) + (1-self.training_wheels) * z_mean
             z_std = self.training_wheels * tf.stop_gradient(z_std) + (1-self.training_wheels) * z_std
-            z_logit_dist = Normal(loc=z_mean, scale=z_std)
-            z_logits = z_logit_dist.sample()
+            z_logits = Normal(loc=z_mean, scale=z_std).sample()
             z = self.z_nonlinearity(z_logits)
 
             if "z" in self.no_gradient:
@@ -640,7 +647,7 @@ class GridObjectLayer(ObjectLayer):
             if "z" in self.fixed_values:
                 z = self.fixed_values['z'] * tf.ones_like(z)
 
-            built = dict(z_logit_dist=z_logit_dist, z=z)
+            built = dict(z_logit_mean=z_mean, z_logit_std=z_std, z=z)
 
             for key, value in built.items():
                 _tensors[key][h, w, b] = value
@@ -666,32 +673,18 @@ class GridObjectLayer(ObjectLayer):
 
         objects = AttrDict()
         for k, v in _tensors.items():
-            if k.endswith('_dist'):
-                dist = v[0, 0, 0]
-                dist_class = type(dist)
-                params = dist.parameters.copy()
-                tensor_keys = sorted(key for key, t in params.items() if isinstance(t, tf.Tensor))
-                tensor_params = {}
+            t1 = []
+            for h in range(H):
+                t2 = []
+                for w in range(W):
+                    t2.append(tf.stack([v[h, w, b] for b in range(self.B)], axis=1))
+                t1.append(tf.stack(t2, axis=1))
+            objects[k] = tf.stack(t1, axis=1)
 
-                for key in tensor_keys:
-                    t1 = []
-                    for h in range(H):
-                        t2 = []
-                        for w in range(W):
-                            t2.append(tf.stack([v[h, w, b].parameters[key] for b in range(self.B)], axis=1))
-                        t1.append(tf.stack(t2, axis=1))
-                    tensor_params[key] = tf.stack(t1, axis=1)
-
-                params.update(tensor_params)
-                objects[k] = dist_class(**params)
-            else:
-                t1 = []
-                for h in range(H):
-                    t2 = []
-                    for w in range(W):
-                        t2.append(tf.stack([v[h, w, b] for b in range(self.B)], axis=1))
-                    t1.append(tf.stack(t2, axis=1))
-                objects[k] = tf.stack(t1, axis=1)
+        objects = AttrDict(
+            **{k: tf.reshape(t, (self.batch_size, self.HWB, *tf_shape(t)[4:]))
+               for k, t in objects.items()}
+        )
 
         objects.all = tf.concat(
             [objects.normalized_box, objects.attr, objects.z, objects.obj], axis=-1)
@@ -699,7 +692,7 @@ class GridObjectLayer(ObjectLayer):
         # --- misc ---
 
         objects.n_objects = tf.fill((self.batch_size,), self.HWB)
-        objects.pred_n_objects = tf.reduce_sum(objects.obj, axis=(1, 2, 3, 4))
-        objects.pred_n_objects_hard = tf.reduce_sum(tf.round(objects.obj), axis=(1, 2, 3, 4))
+        objects.pred_n_objects = tf.reduce_sum(objects.obj, axis=(1, 2))
+        objects.pred_n_objects_hard = tf.reduce_sum(tf.round(objects.obj), axis=(1, 2))
 
         return objects

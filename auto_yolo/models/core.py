@@ -98,8 +98,8 @@ def coords_to_pixel_space(y, x, h, w, image_shape, anchor_box, top_left):
     h = h * anchor_box[0]
     w = w * anchor_box[1]
 
-    y = y * anchor_box[0]
-    x = x * anchor_box[1]
+    y = y * anchor_box[0] - 0.5
+    x = x * anchor_box[1] - 0.5
 
     if top_left:
         y -= h / 2

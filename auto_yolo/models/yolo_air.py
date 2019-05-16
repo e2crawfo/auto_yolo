@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.colors import to_rgb
+import itertools
 
 from dps.utils import Param
 from dps.utils.tf import tf_mean_sum, RenderHook, GridConvNet
@@ -86,19 +87,19 @@ class YoloAir_Network(VariationalAutoencoder):
             width=self._tensors["width"],
             z=self._tensors["z"],
 
-            cell_y_std=self._tensors["cell_y_logit_dist"].scale,
-            cell_x_std=self._tensors["cell_x_logit_dist"].scale,
-            height_std=self._tensors["height_logit_dist"].scale,
-            width_std=self._tensors["width_logit_dist"].scale,
-            z_std=self._tensors["z_logit_dist"].scale,
+            cell_y_std=self._tensors["cell_y_logit_std"],
+            cell_x_std=self._tensors["cell_x_logit_std"],
+            height_std=self._tensors["height_logit_std"],
+            width_std=self._tensors["width_logit_std"],
+            z_std=self._tensors["z_logit_std"],
 
             n_objects=pred_n_objects,
             obj=obj,
-            on_cell_y_avg=tf.reduce_sum(self._tensors["cell_y"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
-            on_cell_x_avg=tf.reduce_sum(self._tensors["cell_x"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
-            on_height_avg=tf.reduce_sum(self._tensors["height"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
-            on_width_avg=tf.reduce_sum(self._tensors["width"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
-            on_z_avg=tf.reduce_sum(self._tensors["z"] * obj, axis=(1, 2, 3, 4)) / pred_n_objects,
+            on_cell_y_avg=tf.reduce_sum(self._tensors["cell_y"] * obj, axis=(1, 2)) / pred_n_objects,
+            on_cell_x_avg=tf.reduce_sum(self._tensors["cell_x"] * obj, axis=(1, 2)) / pred_n_objects,
+            on_height_avg=tf.reduce_sum(self._tensors["height"] * obj, axis=(1, 2)) / pred_n_objects,
+            on_width_avg=tf.reduce_sum(self._tensors["width"] * obj, axis=(1, 2)) / pred_n_objects,
+            on_z_avg=tf.reduce_sum(self._tensors["z"] * obj, axis=(1, 2)) / pred_n_objects,
 
             attr=self._tensors["attr"],
         )
@@ -275,35 +276,35 @@ class YoloAir_RenderHook(RenderHook):
             fig, axes = plt.subplots(3*H, W*B, figsize=(20, 20))
             axes = np.array(axes).reshape(3*H, W*B)
 
-            for h in range(H):
-                for w in range(W):
-                    for b in range(B):
-                        _obj = obj[idx, h, w, b, 0]
-                        _render_obj = render_obj[idx, h, w, b, 0]
-                        _z = z[idx, h, w, b, 0]
+            cell_idx = 0
+            for h, w, b in itertools.product(range(H), range(W), range(B)):
+                _obj = obj[idx, cell_idx, 0]
+                _render_obj = render_obj[idx, cell_idx, 0]
+                _z = z[idx, cell_idx, 0]
 
-                        ax = axes[3*h, w * B + b]
-                        self.imshow(ax, appearance[idx, h, w, b, :, :, :3])
+                ax = axes[3*h, w * B + b]
+                self.imshow(ax, appearance[idx, cell_idx, :, :, :3])
 
-                        colour = _obj * on_colour + (1-_obj) * off_colour
-                        obj_rect = patches.Rectangle(
-                            (1, 0), 0.2, 1, clip_on=False, transform=ax.transAxes, facecolor=colour)
-                        ax.add_patch(obj_rect)
+                colour = _obj * on_colour + (1-_obj) * off_colour
+                obj_rect = patches.Rectangle(
+                    (1, 0), 0.2, 1, clip_on=False, transform=ax.transAxes, facecolor=colour)
+                ax.add_patch(obj_rect)
 
-                        if h == 0 and b == 0:
-                            ax.set_title("w={}".format(w))
-                        if w == 0 and b == 0:
-                            ax.set_ylabel("h={}".format(h))
+                if h == 0 and b == 0:
+                    ax.set_title("w={}".format(w))
+                if w == 0 and b == 0:
+                    ax.set_ylabel("h={}".format(h))
 
-                        ax = axes[3*h+1, w * B + b]
-                        self.imshow(ax, appearance[idx, h, w, b, :, :, 3], cmap="gray")
+                ax = axes[3*h+1, w * B + b]
+                self.imshow(ax, appearance[idx, cell_idx, :, :, 3], cmap="gray")
 
-                        ax.set_title("obj={:.2f}, render_obj={:.2f}, z={:.2f}, b={}".format(_obj, _render_obj, _z, b))
+                ax.set_title("obj={:.2f}, render_obj={:.2f}, z={:.2f}, b={}".format(_obj, _render_obj, _z, b))
 
-                        ax = axes[3*h+2, w * B + b]
-                        ax.set_title("input glimpse")
+                ax = axes[3*h+2, w * B + b]
+                ax.set_title("input glimpse")
 
-                        self.imshow(ax, glimpse[idx, h, w, b, :, :, :])
+                self.imshow(ax, glimpse[idx, cell_idx, :, :, :])
+                cell_idx += 1
 
             for ax in axes.flatten():
                 ax.set_axis_off()
@@ -459,35 +460,35 @@ class YoloAir_PaperSetRenderHook(RenderHook):
             fig, axes = plt.subplots(3*H, W*B, figsize=(20, 20))
             axes = np.array(axes).reshape(3*H, W*B)
 
-            for h in range(H):
-                for w in range(W):
-                    for b in range(B):
-                        _obj = obj[idx, h, w, b, 0]
-                        _render_obj = render_obj[idx, h, w, b, 0]
-                        _z = z[idx, h, w, b, 0]
+            cell_idx = 0
+            for h, w, b in itertools.product(range(H), range(W), range(B)):
+                _obj = obj[idx, cell_idx, 0]
+                _render_obj = render_obj[idx, cell_idx, 0]
+                _z = z[idx, cell_idx, 0]
 
-                        ax = axes[3*h, w * B + b]
-                        self.imshow(ax, appearance[idx, h, w, b, :, :, :3])
+                ax = axes[3*h, w * B + b]
+                self.imshow(ax, appearance[idx, cell_idx, :, :, :3])
 
-                        colour = _obj * on_colour + (1-_obj) * off_colour
-                        obj_rect = patches.Rectangle(
-                            (1, 0), 0.2, 1, clip_on=False, transform=ax.transAxes, facecolor=colour)
-                        ax.add_patch(obj_rect)
+                colour = _obj * on_colour + (1-_obj) * off_colour
+                obj_rect = patches.Rectangle(
+                    (1, 0), 0.2, 1, clip_on=False, transform=ax.transAxes, facecolor=colour)
+                ax.add_patch(obj_rect)
 
-                        if h == 0 and b == 0:
-                            ax.set_title("w={}".format(w))
-                        if w == 0 and b == 0:
-                            ax.set_ylabel("h={}".format(h))
+                if h == 0 and b == 0:
+                    ax.set_title("w={}".format(w))
+                if w == 0 and b == 0:
+                    ax.set_ylabel("h={}".format(h))
 
-                        ax = axes[3*h+1, w * B + b]
-                        self.imshow(ax, appearance[idx, h, w, b, :, :, 3], cmap="gray")
+                ax = axes[3*h+1, w * B + b]
+                self.imshow(ax, appearance[idx, cell_idx, :, :, 3], cmap="gray")
 
-                        ax.set_title("obj={:.2f}, render_obj={:.2f}, z={:.2f}, b={}".format(_obj, _render_obj, _z, b))
+                ax.set_title("obj={:.2f}, render_obj={:.2f}, z={:.2f}, b={}".format(_obj, _render_obj, _z, b))
 
-                        ax = axes[3*h+2, w * B + b]
-                        ax.set_title("input glimpse")
+                ax = axes[3*h+2, w * B + b]
+                ax.set_title("input glimpse")
 
-                        self.imshow(ax, glimpse[idx, h, w, b, :, :, :])
+                self.imshow(ax, glimpse[idx, cell_idx, :, :, :])
+                cell_idx += 1
 
             for ax in axes.flatten():
                 ax.set_axis_off()
