@@ -9,7 +9,7 @@ import os
 
 from dps import cfg
 from dps.utils import Param
-from dps.utils.tf import RNNCell, tf_mean_sum
+from dps.utils.tf import RNNCell, tf_mean_sum, tf_shape
 
 from auto_yolo.tf_ops import render_sprites
 from auto_yolo.models import yolo_air
@@ -29,16 +29,16 @@ class BboxCell(RNNCell):
         batch_idx = self.batch_indices_for_boxes[t[0, 0]-1]
         nonzero_indices = tf.where(tf.equal(self.components[batch_idx, :, :], t[0, 0]))
 
-        maxs = tf.reduce_max(nonzero_indices, axis=0)
-        mins = tf.reduce_min(nonzero_indices, axis=0)
+        mins = tf.cast(tf.reduce_min(nonzero_indices, axis=0), tf.float32)
+        maxs = tf.cast(tf.reduce_max(nonzero_indices, axis=0), tf.float32) + 1
 
-        yt = mins[0] / self.image_height
-        xt = mins[1] / self.image_width
+        cyt = (mins[0] + (maxs[0] - mins[0]) / 2) / self.image_height
+        cxt = (mins[1] + (maxs[1] - mins[1]) / 2) / self.image_width
 
         ys = (maxs[0] - mins[0]) / self.image_height
         xs = (maxs[1] - mins[1]) / self.image_width
 
-        return tf.to_float(tf.stack([yt, xt, ys, xs])[None, :]), state
+        return tf.to_float(tf.stack([cyt, cxt, ys, xs])[None, :]), state
 
     @property
     def state_size(self):
@@ -50,6 +50,65 @@ class BboxCell(RNNCell):
 
     def zero_state(self, batch_size, dtype):
         return tf.zeros((batch_size, 1), dtype=dtype)
+
+
+def tf_find_connected_components(inp, bg, threshold):
+    assert len(inp.shape) == 4
+    mask = tf.reduce_sum(tf.abs(inp - bg), axis=3) >= threshold
+    components = tf.contrib.image.connected_components(mask)
+
+    total_n_objects = tf.to_int32(tf.reduce_max(components))
+    indices = tf.range(1, total_n_objects + 1)
+
+    maxs = tf.reduce_max(components, axis=(1, 2))
+
+    # So that we don't pick up zeros.
+    for_mins = tf.where(mask, components, (total_n_objects + 1) * tf.ones_like(components))
+    mins = tf.reduce_min(for_mins, axis=(1, 2))
+
+    n_objects = tf.to_int32(tf.maximum((maxs - mins) + 1, 0))
+
+    under = indices[None, :] <= maxs[:, None]
+    over = indices[None, :] >= mins[:, None]
+
+    both = tf.to_int32(tf.logical_and(under, over))
+    batch_indices_for_objects = tf.argmax(both, axis=0)
+
+    assert_valid_batch_indices = tf.Assert(
+        tf.reduce_all(tf.equal(tf.reduce_sum(both, axis=0), 1)),
+        [both], name="assert_valid_batch_indices")
+
+    with tf.control_dependencies([assert_valid_batch_indices]):
+        batch_indices_for_objects = tf.identity(batch_indices_for_objects)
+
+    _, image_height, image_width, _ = tf_shape(inp)
+    cell = BboxCell(components, batch_indices_for_objects, image_height, image_width)
+
+    # For each object, get its bounding box by using `indices` to figure out which element of
+    # `components` the object appears in, and then check that element
+    object_bboxes, _ = dynamic_rnn(
+        cell, indices[:, None, None], initial_state=cell.zero_state(1, tf.float32),
+        parallel_iterations=10, swap_memory=False, time_major=True)
+
+    # Couldn't I have just iterated through all object indices and used tf.where on `components` to simultaneously
+    # get both the bounding box and the batch index? Yes, but I think I thought that would be expensive
+    # (have to look through the entirety of `components` once for each object).
+
+    # Get rid of dummy batch dim created for dynamic_rnn
+    object_bboxes = object_bboxes[:, 0, :]
+
+    obj = tf.sequence_mask(n_objects)
+    routing = tf.reshape(tf.to_int32(obj), (-1,))
+    routing = tf.cumsum(routing, exclusive=True)
+    routing = tf.reshape(routing, tf.shape(obj))
+    obj = tf.to_float(obj[:, :, None])
+
+    return dict(
+        normalized_box=tf.gather(object_bboxes, routing, axis=0),
+        obj=obj,
+        n_objects=n_objects,
+        max_objects=tf.reduce_max(n_objects),
+    )
 
 
 class Baseline_Network(VariationalAutoencoder):
@@ -66,67 +125,15 @@ class Baseline_Network(VariationalAutoencoder):
 
         super(Baseline_Network, self).__init__(env, updater, scope=scope, **kwargs)
 
-    def _build_program_generator(self):
-        assert len(self.inp.shape) == 4
-        mask = tf.reduce_sum(tf.abs(self.inp - self._tensors["background"]), axis=3) >= self.cc_threshold
-        components = tf.contrib.image.connected_components(mask)
+    def _build_program_generator(self, tensors):
+        return tf_find_connected_components(tensors['inp'], tensors['background'], self.cc_threshold)
 
-        total_n_objects = tf.to_int32(tf.reduce_max(components))
-        indices = tf.range(1, total_n_objects + 1)
-
-        maxs = tf.reduce_max(components, axis=(1, 2))
-
-        # So that we don't pick up zeros.
-        for_mins = tf.where(mask, components, (total_n_objects + 1) * tf.ones_like(components))
-        mins = tf.reduce_min(for_mins, axis=(1, 2))
-
-        n_objects = tf.to_int32(tf.maximum((maxs - mins) + 1, 0))
-
-        under = indices[None, :] <= maxs[:, None]
-        over = indices[None, :] >= mins[:, None]
-
-        both = tf.to_int32(tf.logical_and(under, over))
-        batch_indices_for_objects = tf.argmax(both, axis=0)
-
-        assert_valid_batch_indices = tf.Assert(
-            tf.reduce_all(tf.equal(tf.reduce_sum(both, axis=0), 1)),
-            [both], name="assert_valid_batch_indices")
-
-        with tf.control_dependencies([assert_valid_batch_indices]):
-            batch_indices_for_objects = tf.identity(batch_indices_for_objects)
-
-        cell = BboxCell(components, batch_indices_for_objects, self.image_height, self.image_width)
-
-        # For each object, get its bounding box by using `indices` to figure out which element of
-        # `components` the object appears in, and then check that element
-        object_bboxes, _ = dynamic_rnn(
-            cell, indices[:, None, None], initial_state=cell.zero_state(1, tf.float32),
-            parallel_iterations=10, swap_memory=False, time_major=True)
-
-        # Couldn't I have just iterated through all object indices and used tf.where on `components` to simultaneously
-        # get both the bounding box and the batch index? Yes, but I think I thought that would be expensive
-        # (have to look through the entirety of `components` once for each object).
-
-        # Get rid of dummy batch dim created for dynamic_rnn
-        object_bboxes = object_bboxes[:, 0, :]
-
-        obj = tf.sequence_mask(n_objects)
-        routing = tf.reshape(tf.to_int32(obj), (-1,))
-        routing = tf.cumsum(routing, exclusive=True)
-        routing = tf.reshape(routing, tf.shape(obj))
-        obj = tf.to_float(obj[:, :, None])
-
-        self._tensors["normalized_box"] = tf.gather(object_bboxes, routing, axis=0)
-        self._tensors["obj"] = obj
-        self._tensors["n_objects"] = n_objects
-        self._tensors["max_objects"] = tf.reduce_max(n_objects)
-
-    def _build_program_interpreter(self):
+    def _build_program_interpreter(self, tensors):
         # --- Get object attributes using object encoder ---
 
-        max_objects = self._tensors["max_objects"]
+        max_objects = tensors["max_objects"]
 
-        yt, xt, ys, xs = tf.split(self._tensors["normalized_box"], 4, axis=-1)
+        yt, xt, ys, xs = tf.split(tensors["normalized_box"], 4, axis=-1)
 
         transform_constraints = snt.AffineWarpConstraints.no_shear_2d()
         warper = snt.AffineGridWarper(
@@ -136,10 +143,7 @@ class Baseline_Network(VariationalAutoencoder):
         _boxes = tf.reshape(_boxes, (self.batch_size * max_objects, 4))
         grid_coords = warper(_boxes)
         grid_coords = tf.reshape(grid_coords, (self.batch_size, max_objects, *self.object_shape, 2,))
-        glimpse = tf.contrib.resampler.resampler(self.inp, grid_coords)
-
-        self._tensors["glimpse"] = tf.reshape(
-            glimpse, (self.batch_size, max_objects, *self.object_shape, self.image_depth))
+        glimpse = tf.contrib.resampler.resampler(tensors["inp"], grid_coords)
 
         object_encoder_in = tf.reshape(
             glimpse, (self.batch_size * max_objects, *self.object_shape, self.image_depth))
@@ -154,13 +158,6 @@ class Baseline_Network(VariationalAutoencoder):
 
         attr, attr_kl = normal_vae(attr_mean, attr_std, self.attr_prior_mean, self.attr_prior_std)
 
-        if "attr" in self.no_gradient:
-            attr = tf.stop_gradient(attr)
-            attr_kl = tf.stop_gradient(attr_kl)
-
-        self._tensors["attr"] = tf.reshape(attr, (self.batch_size, max_objects, self.A))
-        self._tensors["attr_kl"] = tf.reshape(attr_kl, (self.batch_size, max_objects, self.A))
-
         object_decoder_in = tf.reshape(attr, (self.batch_size * max_objects, 1, 1, self.A))
 
         # --- Compute sprites from attr using object decoder ---
@@ -170,11 +167,8 @@ class Baseline_Network(VariationalAutoencoder):
 
         objects = tf.nn.sigmoid(tf.clip_by_value(object_logits, -10., 10.))
 
-        self._tensors["objects"] = tf.reshape(
-            objects, (self.batch_size, max_objects, *self.object_shape, self.image_depth,))
-
         objects = tf.reshape(objects, (self.batch_size, max_objects, *self.object_shape, self.image_depth,))
-        alpha = self._tensors["obj"][:, :, :, None, None] * tf.ones_like(objects[:, :, :, :, :1])
+        alpha = tensors["obj"][:, :, :, None, None] * tf.ones_like(objects[:, :, :, :, :1])
         importance = tf.ones_like(objects[:, :, :, :, :1])
         objects = tf.concat([objects, alpha, importance], axis=-1)
 
@@ -188,31 +182,32 @@ class Baseline_Network(VariationalAutoencoder):
 
         output = render_sprites.render_sprites(
             objects,
-            self._tensors["n_objects"],
+            tensors["n_objects"],
             scales,
             offsets,
-            self._tensors["background"]
+            tensors["background"]
         )
 
-        self._tensors['output'] = output
+        return dict(
+            output=output,
+            glimpse=tf.reshape(
+                glimpse, (self.batch_size, max_objects, *self.object_shape, self.image_depth)),
+            attr=tf.reshape(attr, (self.batch_size, max_objects, self.A)),
+            attr_kl=tf.reshape(attr_kl, (self.batch_size, max_objects, self.A)),
+            objects=tf.reshape(
+                objects, (self.batch_size, max_objects, *self.object_shape, self.image_depth,))
+        )
 
     def build_representation(self):
 
-        # --- build graph ---
+        self.maybe_build_subnet("object_encoder")
+        self.maybe_build_subnet("object_decoder")
 
-        self._build_program_generator()
+        program_tensors = self._build_program_generator(self._tensors)
+        self._tensors.update(program_tensors)
 
-        if self.object_encoder is None:
-            self.object_encoder = cfg.build_object_encoder(scope="object_encoder")
-            if "object_encoder" in self.fixed_weights:
-                self.object_encoder.fix_variables()
-
-        if self.object_decoder is None:
-            self.object_decoder = cfg.build_object_decoder(scope="object_decoder")
-            if "object_decoder" in self.fixed_weights:
-                self.object_decoder.fix_variables()
-
-        self._build_program_interpreter()
+        interpreter_tensors = self._build_program_interpreter(self._tensors)
+        self._tensors.update(interpreter_tensors)
 
         # --- specify values to record ---
 
