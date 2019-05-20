@@ -9,7 +9,7 @@ import os
 
 from dps import cfg
 from dps.utils import Param
-from dps.utils.tf import RNNCell, tf_mean_sum, tf_shape
+from dps.utils.tf import RNNCell, tf_mean_sum, tf_shape, tf_cosine_similarity
 
 from auto_yolo.tf_ops import render_sprites
 from auto_yolo.models import yolo_air
@@ -52,9 +52,7 @@ class BboxCell(RNNCell):
         return tf.zeros((batch_size, 1), dtype=dtype)
 
 
-def tf_find_connected_components(inp, bg, threshold):
-    assert len(inp.shape) == 4
-    mask = tf.reduce_sum(tf.abs(inp - bg), axis=3) >= threshold
+def _find_connected_componenents_body(mask):
     components = tf.contrib.image.connected_components(mask)
 
     total_n_objects = tf.to_int32(tf.reduce_max(components))
@@ -81,7 +79,7 @@ def tf_find_connected_components(inp, bg, threshold):
     with tf.control_dependencies([assert_valid_batch_indices]):
         batch_indices_for_objects = tf.identity(batch_indices_for_objects)
 
-    _, image_height, image_width, _ = tf_shape(inp)
+    _, image_height, image_width, *_ = tf_shape(mask)
     cell = BboxCell(components, batch_indices_for_objects, image_height, image_width)
 
     # For each object, get its bounding box by using `indices` to figure out which element of
@@ -109,6 +107,45 @@ def tf_find_connected_components(inp, bg, threshold):
         n_objects=n_objects,
         max_objects=tf.reduce_max(n_objects),
     )
+
+
+def tf_find_connected_components(inp, bg, threshold, colors=None, cosine_threshold=None):
+    assert len(inp.shape) == 4
+
+    if isinstance(colors, str):
+        colors = colors.split()
+
+    mask = tf.reduce_sum(tf.abs(inp - bg), axis=3) >= threshold
+
+    if colors is None or cosine_threshold is None:
+        print("NOT using colors for connected_components")
+        output = _find_connected_componenents_body(mask)
+        output['color'] = output['obj']
+        return output
+
+    print("USING colors for connected_components")
+
+    objects = []
+
+    for color in colors:
+        if isinstance(color, str):
+            color = tf.constant(to_rgb(color), tf.float32)
+
+        similarity = tf_cosine_similarity(inp, color)
+        color_mask = tf.logical_and(similarity >= cosine_threshold, mask)
+        objects.append(
+            _find_connected_componenents_body(color_mask)
+        )
+
+    output = dict(
+        normalized_box=tf.concat([o['normalized_box'] for o in objects], axis=1),
+        obj=tf.concat([o['obj'] for o in objects], axis=1),
+        n_objects=tf.reduce_sum(tf.stack([o['n_objects'] for o in objects], axis=1), axis=1),
+        color=tf.concat([float(i+1) * o['obj'] for i, o in enumerate(objects)], axis=1),
+    )
+    output['max_objects'] = tf.reduce_max(output['n_objects'])
+
+    return output
 
 
 class Baseline_Network(VariationalAutoencoder):

@@ -375,6 +375,9 @@ class Updater(_Updater):
         return self.network.trainable_variables(for_opt)
 
     def _update(self, batch_size):
+        if cfg.get('no_gradient', False):
+            return dict(train=dict())
+
         feed_dict = self.data_manager.do_train()
 
         sess = tf.get_default_session()
@@ -443,9 +446,9 @@ class Updater(_Updater):
             recorded_tensors['loss_' + name] = tensor
         recorded_tensors['loss'] = self.loss
 
-        if cfg.do_train:
-            # --- train op ---
+        # --- train op ---
 
+        if cfg.do_train and not cfg.get('no_gradient', False):
             tvars = self.trainable_variables(for_opt=True)
 
             self.train_op, self.train_records = build_gradient_train_op(
