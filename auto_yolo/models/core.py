@@ -437,19 +437,20 @@ class Updater(_Updater):
 
         # --- loss ---
 
-        self.loss = 0.0
+        self.loss = tf.constant(0., tf.float32)
         for name, tensor in network_losses.items():
             self.loss += tensor
             recorded_tensors['loss_' + name] = tensor
         recorded_tensors['loss'] = self.loss
 
-        # --- train op ---
+        if cfg.do_train:
+            # --- train op ---
 
-        tvars = self.trainable_variables(for_opt=True)
+            tvars = self.trainable_variables(for_opt=True)
 
-        self.train_op, self.train_records = build_gradient_train_op(
-            self.loss, tvars, self.optimizer_spec, self.lr_schedule,
-            self.max_grad_norm, self.noise_schedule)
+            self.train_op, self.train_records = build_gradient_train_op(
+                self.loss, tvars, self.optimizer_spec, self.lr_schedule,
+                self.max_grad_norm, self.noise_schedule)
 
         # --- recorded values ---
 
