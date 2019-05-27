@@ -118,12 +118,9 @@ def tf_find_connected_components(inp, bg, threshold, colors=None, cosine_thresho
     mask = tf.reduce_sum(tf.abs(inp - bg), axis=3) >= threshold
 
     if colors is None or cosine_threshold is None:
-        print("NOT using colors for connected_components")
         output = _find_connected_componenents_body(mask)
         output['color'] = output['obj']
         return output
-
-    print("USING colors for connected_components")
 
     objects = []
 
