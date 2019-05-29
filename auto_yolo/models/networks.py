@@ -482,10 +482,12 @@ class AttentionLayer(ScopedFunction):
                 self.object_wise_func = self.build_object_wise(scope="object_wise")
 
             if self.memory is not None:
-                self.K = [apply_object_wise(self.key_funcs[j], memory, self.key_dim, is_training, True)
-                          for j in range(self.n_heads)]
-                self.V = [apply_object_wise(self.value_funcs[j], memory, self.value_dim, is_training, True)
-                          for j in range(self.n_heads)]
+                self.K = [
+                    apply_object_wise(self.key_funcs[j], memory, output_size=self.key_dim, is_training=is_training)
+                    for j in range(self.n_heads)]
+                self.V = [
+                    apply_object_wise(self.value_funcs[j], memory, output_size=self.value_dim, is_training=is_training)
+                    for j in range(self.n_heads)]
 
             self.is_built = True
 
@@ -497,23 +499,23 @@ class AttentionLayer(ScopedFunction):
             K, V = memory
         elif memory is not None:
             # memory is a value that we apply key_funcs and value_funcs to to obtain keys and values
-            K = [apply_object_wise(self.key_funcs[j], memory, self.key_dim, is_training, True)
+            K = [apply_object_wise(self.key_funcs[j], memory, output_size=self.key_dim, is_training=is_training)
                  for j in range(self.n_heads)]
-            V = [apply_object_wise(self.value_funcs[j], memory, self.value_dim, is_training, True)
+            V = [apply_object_wise(self.value_funcs[j], memory, output_size=self.value_dim, is_training=is_training)
                  for j in range(self.n_heads)]
         elif self.K is not None:
             K = self.K
             V = self.V
         else:
             # self-attention - `signal` used for queries, keys and values.
-            K = [apply_object_wise(self.key_funcs[j], signal, self.key_dim, is_training, True)
+            K = [apply_object_wise(self.key_funcs[j], signal, output_size=self.key_dim, is_training=is_training)
                  for j in range(self.n_heads)]
-            V = [apply_object_wise(self.value_funcs[j], signal, self.value_dim, is_training, True)
+            V = [apply_object_wise(self.value_funcs[j], signal, output_size=self.value_dim, is_training=is_training)
                  for j in range(self.n_heads)]
 
         head_outputs = []
         for j in range(self.n_heads):
-            Q = apply_object_wise(self.query_funcs[j], signal, self.key_dim, is_training, True)
+            Q = apply_object_wise(self.query_funcs[j], signal, output_size=self.key_dim, is_training=is_training)
 
             if n_signal_dim == 2:
                 Q = Q[:, None, :]
@@ -533,12 +535,12 @@ class AttentionLayer(ScopedFunction):
         # signal. Next, if `object_wise_func` is not None and `do_object_wise` is True, object_wise_func is
         # applied object wise and in a ResNet-style manner.
 
-        output = apply_object_wise(self.after_func, head_outputs, self.n_hidden, is_training, True)
+        output = apply_object_wise(self.after_func, head_outputs, output_size=self.n_hidden, is_training=is_training)
         output = tf.layers.dropout(output, self.p_dropout, training=is_training)
         signal = tf.contrib.layers.layer_norm(signal + output)
 
         if self.do_object_wise:
-            output = apply_object_wise(self.object_wise_func, signal, self.n_hidden, is_training, True)
+            output = apply_object_wise(self.object_wise_func, signal, output_size=self.n_hidden, is_training=is_training)
             output = tf.layers.dropout(output, self.p_dropout, training=is_training)
             signal = tf.contrib.layers.layer_norm(signal + output)
 
@@ -590,19 +592,22 @@ class SpatialAttentionLayer(ScopedFunction):
         proximity = tf.exp(-0.5 * tf.reduce_sum((dist / self.kernel_std)**2, axis=3))
         proximity = proximity / (2 * np.pi)**(0.5 * loc_dim) / self.kernel_std**loc_dim
 
-        V = apply_object_wise(self.value_func, input_signal, self.n_hidden, is_training)  # (batch_size, n_inp, value_dim)
+        V = apply_object_wise(
+            self.value_func, input_signal,
+            output_size=self.n_hidden, is_training=is_training)  # (batch_size, n_inp, value_dim)
+
         result = tf.matmul(proximity, V)  # (batch_size, n_outp, value_dim)
 
         # `after_func` is applied to the concatenation of the head outputs, and the result is added to the original
         # signal. Next, if `object_wise_func` is not None and `do_object_wise` is True, object_wise_func is
         # applied object wise and in a ResNet-style manner.
 
-        output = apply_object_wise(self.after_func, result, self.n_hidden, is_training, True)
+        output = apply_object_wise(self.after_func, result, output_size=self.n_hidden, is_training=is_training)
         output = tf.layers.dropout(output, self.p_dropout, training=is_training)
         signal = tf.contrib.layers.layer_norm(output)
 
         if self.do_object_wise:
-            output = apply_object_wise(self.object_wise_func, signal, self.n_hidden, is_training, True)
+            output = apply_object_wise(self.object_wise_func, signal, output_size=self.n_hidden, is_training=is_training)
             output = tf.layers.dropout(output, self.p_dropout, training=is_training)
             signal = tf.contrib.layers.layer_norm(signal + output)
 
@@ -657,16 +662,21 @@ class SpatialAttentionLayerV2(ScopedFunction):
 
         if self.do_object_wise:
             object_wise = apply_object_wise(
-                self.object_wise_func, reference_features, self.n_hidden, is_training)  # (B, n_ref, n_hidden)
+                self.object_wise_func, reference_features,
+                output_size=self.n_hidden, is_training=is_training)  # (B, n_ref, n_hidden)
+
             _object_wise = tf.tile(object_wise[:, :, None], (1, 1, n_inp, 1))
             relation_input = tf.concat([relation_input, _object_wise], axis=-1)
         else:
             object_wise = None
 
-        V = apply_object_wise(self.relation_func, relation_input, self.n_hidden, is_training)  # (B, n_ref, n_inp, n_hidden)
+        V = apply_object_wise(
+            self.relation_func, relation_input,
+            output_size=self.n_hidden, is_training=is_training)  # (B, n_ref, n_inp, n_hidden)
 
         attention_weights = tf.exp(-0.5 * tf.reduce_sum((adjusted_locs / self.kernel_std)**2, axis=3))
-        attention_weights = attention_weights / (2 * np.pi) ** (loc_dim / 2)  / self.kernel_std**loc_dim  # (B, n_ref, n_inp)
+        attention_weights = (
+            attention_weights / (2 * np.pi) ** (loc_dim / 2) / self.kernel_std**loc_dim)  # (B, n_ref, n_inp)
 
         result = tf.reduce_sum(V * attention_weights[..., None], axis=2)  # (B, n_ref, n_hidden)
 
@@ -676,3 +686,21 @@ class SpatialAttentionLayerV2(ScopedFunction):
         # result = tf.contrib.layers.layer_norm(result)
 
         return result
+
+
+class DummySpatialAttentionLayer(SpatialAttentionLayerV2):
+    """ A replacement for SpatialAttentionLayerV2 which treats all objects independently. """
+
+    def _call(self, input_locs, input_features, reference_locs, reference_features, is_training):
+        """ Assumes input_features and reference_features are identical. """
+        assert self.do_object_wise
+
+        if not self.is_built:
+            self.object_wise_func = self.build_mlp(scope="object_wise_func")
+            self.is_built = True
+
+        object_wise = apply_object_wise(
+            self.object_wise_func, reference_features,
+            output_size=self.n_hidden, is_training=is_training)  # (B, n_ref, n_hidden)
+
+        return object_wise

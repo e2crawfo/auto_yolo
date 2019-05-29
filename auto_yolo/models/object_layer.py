@@ -1,7 +1,6 @@
 import tensorflow as tf
 import tensorflow_probability as tfp
 import numpy as np
-import collections
 import sonnet as snt
 import itertools
 from orderedattrdict import AttrDict
@@ -71,7 +70,9 @@ class ObjectRenderer(ScopedFunction):
         # --- compute sprite appearance from attr using object decoder ---
 
         appearance_logits = apply_object_wise(
-            self.object_decoder, objects.attr, self.object_shape + (self.image_depth+1,), is_training)
+            self.object_decoder, objects.attr,
+            output_size=self.object_shape + (self.image_depth+1,),
+            is_training=is_training)
 
         appearance_logits = appearance_logits * ([self.color_logit_scale] * 3 + [self.alpha_logit_scale])
         appearance_logits = appearance_logits + ([0.] * 3 + [self.alpha_logit_bias])
@@ -497,7 +498,7 @@ class GridObjectLayer(ObjectLayer):
         else:
             return tf.zeros_like(edge_element[:, 0:0])
 
-    def _call(self, inp, inp_features, is_training, is_posterior=True):
+    def _call(self, inp, inp_features, is_training, is_posterior=True, prop_state=None):
         print("\n" + "-" * 10 + " GridObjectLayer(is_posterior={}) ".format(is_posterior) + "-" * 10)
 
         # --- set up sub networks and attributes ---
@@ -668,6 +669,9 @@ class GridObjectLayer(ObjectLayer):
 
         objects.all = tf.concat(
             [objects.normalized_box, objects.attr, objects.z, objects.obj], axis=-1)
+
+        if prop_state is not None:
+            objects.prop_state = tf.tile(prop_state[0:1, None], (self.batch_size, self.HWB, 1))
 
         # --- misc ---
 
