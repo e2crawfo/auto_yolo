@@ -41,12 +41,92 @@ class ObjectLayer(ScopedFunction):
             std = tf.zeros_like(std)
         return std
 
-    def z_nonlinearity(self, z_logits):
-        return 4 * tf.nn.sigmoid(tf.clip_by_value(z_logits, -10, 10))
+    def z_nonlinearity(self, z_logit):
+        return 4 * tf.nn.sigmoid(tf.clip_by_value(z_logit, -10, 10))
 
-    def z_nonlinearity_inverse(self, z):
-        p = tf.clip_by_value(z / 4., 1e-6, 1-1e-6)
-        return -tf.log(1. / p - 1.)
+    def _compute_obj_kl(self, tensors, existing_objects=None):
+        # --- compute obj_kl ---
+
+        obj_pre_sigmoid = tensors["obj_pre_sigmoid"]
+        obj_log_odds = tensors["obj_log_odds"]
+        obj_prob = tensors["obj_prob"]
+        obj = tensors["obj"]
+        batch_size, n_objects, _ = tf_shape(obj)
+
+        max_n_objects = n_objects
+
+        if existing_objects is not None:
+            _, n_existing_objects, _ = tf_shape(existing_objects)
+            existing_objects = tf.reshape(existing_objects, (batch_size, n_existing_objects))
+            max_n_objects += n_existing_objects
+
+        count_support = tf.range(max_n_objects+1, dtype=tf.float32)
+
+        if self.count_prior_dist is not None:
+            if self.count_prior_dist is not None:
+                assert len(self.count_prior_dist) == (max_n_objects + 1)
+            count_distribution = tf.constant(self.count_prior_dist, dtype=tf.float32)
+        else:
+            count_prior_prob = tf.nn.sigmoid(self.count_prior_log_odds)
+            count_distribution = (1 - count_prior_prob) * (count_prior_prob ** count_support)
+
+        normalizer = tf.reduce_sum(count_distribution)
+        count_distribution = count_distribution / tf.maximum(normalizer, 1e-6)
+        count_distribution = tf.tile(count_distribution[None, :], (batch_size, 1))
+
+        if existing_objects is not None:
+            count_so_far = tf.reduce_sum(tf.round(existing_objects), axis=1, keepdims=True)
+
+            count_distribution = (
+                count_distribution
+                * tf_binomial_coefficient(count_support, count_so_far)
+                * tf_binomial_coefficient(max_n_objects - count_support, n_existing_objects - count_so_far)
+            )
+
+            normalizer = tf.reduce_sum(count_distribution, axis=1, keepdims=True)
+            count_distribution = count_distribution / tf.maximum(normalizer, 1e-6)
+        else:
+            count_so_far = tf.zeros((batch_size, 1), dtype=tf.float32)
+
+        obj_kl = []
+        for i in range(n_objects):
+            p_z_given_Cz = tf.maximum(count_support[None, :] - count_so_far, 0) / (max_n_objects - i)
+
+            # Reshape for batch matmul
+            _count_distribution = count_distribution[:, None, :]
+            _p_z_given_Cz = p_z_given_Cz[:, :, None]
+
+            p_z = tf.matmul(_count_distribution, _p_z_given_Cz)[:, :, 0]
+
+            if self.use_concrete_kl:
+                prior_log_odds = tf_safe_log(p_z) - tf_safe_log(1-p_z)
+                _obj_kl = concrete_binary_sample_kl(
+                    obj_pre_sigmoid[:, i, :],
+                    obj_log_odds[:, i, :], self.obj_concrete_temp,
+                    prior_log_odds, self.obj_concrete_temp,
+                )
+            else:
+                prob = obj_prob[:, i, :]
+
+                _obj_kl = (
+                    prob * (tf_safe_log(prob) - tf_safe_log(p_z))
+                    + (1-prob) * (tf_safe_log(1-prob) - tf_safe_log(1-p_z))
+                )
+
+            obj_kl.append(_obj_kl)
+
+            sample = tf.to_float(obj[:, i, :] > 0.5)
+            mult = sample * p_z_given_Cz + (1-sample) * (1-p_z_given_Cz)
+            count_distribution = mult * count_distribution
+            normalizer = tf.reduce_sum(count_distribution, axis=1, keepdims=True)
+            normalizer = tf.maximum(normalizer, 1e-6)
+            count_distribution = count_distribution / normalizer
+
+            count_so_far += sample
+
+        obj_kl = tf.reshape(tf.concat(obj_kl, axis=1), (batch_size, n_objects, 1))
+
+        return obj_kl
 
 
 class ObjectRenderer(ScopedFunction):
@@ -69,15 +149,15 @@ class ObjectRenderer(ScopedFunction):
 
         # --- compute sprite appearance from attr using object decoder ---
 
-        appearance_logits = apply_object_wise(
+        appearance_logit = apply_object_wise(
             self.object_decoder, objects.attr,
             output_size=self.object_shape + (self.image_depth+1,),
             is_training=is_training)
 
-        appearance_logits = appearance_logits * ([self.color_logit_scale] * 3 + [self.alpha_logit_scale])
-        appearance_logits = appearance_logits + ([0.] * 3 + [self.alpha_logit_bias])
+        appearance_logit = appearance_logit * ([self.color_logit_scale] * 3 + [self.alpha_logit_scale])
+        appearance_logit = appearance_logit + ([0.] * 3 + [self.alpha_logit_bias])
 
-        appearance = tf.nn.sigmoid(tf.clip_by_value(appearance_logits, -10., 10.))
+        appearance = tf.nn.sigmoid(tf.clip_by_value(appearance_logit, -10., 10.))
 
         if appearance_only:
             return dict(appearance=appearance)
@@ -90,12 +170,6 @@ class ObjectRenderer(ScopedFunction):
             appearance, (batch_size, n_objects, *self.object_shape, self.image_depth+1))
 
         obj_colors, obj_alpha = tf.split(appearance, [self.image_depth, 1], axis=-1)
-
-        if "alpha" in self.no_gradient:
-            obj_alpha = tf.stop_gradient(obj_alpha)
-
-        if "alpha" in self.fixed_values:
-            obj_alpha = float(self.fixed_values["alpha"]) * tf.ones_like(obj_alpha)
 
         obj_alpha *= tf.reshape(objects.render_obj, (batch_size, n_objects, 1, 1, 1))
 
@@ -198,13 +272,9 @@ class GridObjectLayer(ObjectLayer):
             z_logit_std=self.z_prior_std,
         )
 
-    def compute_kl(self, tensors, prior=None, existing_objects=None):
-        simple_obj_kl = prior is not None
-
+    def compute_kl(self, tensors, prior=None, do_obj=True):
         if prior is None:
             prior = self._independent_prior()
-
-        # --- box ---
 
         def normal_kl(name):
             loc_name = name + "_mean"
@@ -217,143 +287,22 @@ class GridObjectLayer(ObjectLayer):
         cell_x_kl = normal_kl("cell_x_logit")
         height_kl = normal_kl("height_logit")
         width_kl = normal_kl("width_logit")
-
-        if "cell_y" in self.no_gradient:
-            cell_y_kl = tf.stop_gradient(cell_y_kl)
-
-        if "cell_x" in self.no_gradient:
-            cell_x_kl = tf.stop_gradient(cell_x_kl)
-
-        if "height" in self.no_gradient:
-            height_kl = tf.stop_gradient(height_kl)
-
-        if "width" in self.no_gradient:
-            width_kl = tf.stop_gradient(width_kl)
-
-        # --- attr ---
-
         attr_kl = normal_kl("attr")
-
-        if "attr" in self.no_gradient:
-            attr_kl = tf.stop_gradient(attr_kl)
-
-        # --- z ---
-
         z_kl = normal_kl("z_logit")
 
-        if "z" in self.no_gradient:
-            z_kl = tf.stop_gradient(z_kl)
-
-        if "z" in self.fixed_values:
-            z_kl = tf.zeros_like(z_kl)
-
-        # --- obj ---
-
-        if simple_obj_kl:
-            obj_kl = concrete_binary_sample_kl(
-                tensors["obj_pre_sigmoid"],
-                tensors["obj_log_odds"], self.obj_concrete_temp,
-                prior["obj_log_odds"], self.obj_concrete_temp,
-            )
-        else:
-            obj_kl = self._compute_obj_kl(tensors, existing_objects=existing_objects)
-
-        if "obj" in self.no_gradient:
-            obj_kl = tf.stop_gradient(obj_kl)
-
-        return dict(
+        kl = dict(
             cell_y_kl=cell_y_kl,
             cell_x_kl=cell_x_kl,
             height_kl=height_kl,
             width_kl=width_kl,
             z_kl=z_kl,
             attr_kl=attr_kl,
-            obj_kl=obj_kl,
         )
 
-    def _compute_obj_kl(self, tensors, existing_objects=None):
-        # --- compute obj_kl ---
+        if do_obj:
+            kl['obj_kl'] = self._compute_obj_kl(tensors)
 
-        max_n_objects = self.HWB
-
-        if existing_objects is not None:
-            batch_size, *other_shape, _ = tf_shape(existing_objects)
-            P = np.prod(other_shape)
-            existing_objects = tf.reshape(existing_objects, (batch_size, P))
-            max_n_objects += P
-
-        count_support = tf.range(max_n_objects+1, dtype=tf.float32)
-
-        if self.count_prior_dist is not None:
-            if self.count_prior_dist is not None:
-                assert len(self.count_prior_dist) == (max_n_objects + 1)
-            count_distribution = tf.constant(self.count_prior_dist, dtype=tf.float32)
-        else:
-            count_prior_prob = tf.nn.sigmoid(self.count_prior_log_odds)
-            count_distribution = (1 - count_prior_prob) * (count_prior_prob ** count_support)
-
-        normalizer = tf.reduce_sum(count_distribution)
-        count_distribution = count_distribution / tf.maximum(normalizer, 1e-6)
-        count_distribution = tf.tile(count_distribution[None, :], (self.batch_size, 1))
-
-        if existing_objects is not None:
-            count_so_far = tf.reduce_sum(tf.round(existing_objects), axis=1, keepdims=True)
-
-            count_distribution = (
-                count_distribution
-                * tf_binomial_coefficient(count_support, count_so_far)
-                * tf_binomial_coefficient(max_n_objects - count_support, P - count_so_far)
-            )
-
-            normalizer = tf.reduce_sum(count_distribution, axis=1, keepdims=True)
-            count_distribution = count_distribution / tf.maximum(normalizer, 1e-6)
-        else:
-            count_so_far = tf.zeros((self.batch_size, 1), dtype=tf.float32)
-
-        i = 0
-
-        obj_kl = []
-
-        for h, w, b in itertools.product(range(self.H), range(self.W), range(self.B)):
-            p_z_given_Cz = tf.maximum(count_support[None, :] - count_so_far, 0) / (max_n_objects - i)
-
-            # Reshape for batch matmul
-            _count_distribution = count_distribution[:, None, :]
-            _p_z_given_Cz = p_z_given_Cz[:, :, None]
-
-            p_z = tf.matmul(_count_distribution, _p_z_given_Cz)[:, :, 0]
-
-            if self.use_concrete_kl:
-                prior_log_odds = tf_safe_log(p_z) - tf_safe_log(1-p_z)
-                _obj_kl = concrete_binary_sample_kl(
-                    tensors["obj_pre_sigmoid"][:, i, :],
-                    tensors["obj_log_odds"][:, i, :], self.obj_concrete_temp,
-                    prior_log_odds, self.obj_concrete_temp,
-                )
-            else:
-                prob = tensors["obj_prob"][:, i, :]
-
-                _obj_kl = (
-                    prob * (tf_safe_log(prob) - tf_safe_log(p_z))
-                    + (1-prob) * (tf_safe_log(1-prob) - tf_safe_log(1-p_z))
-                )
-
-            obj_kl.append(_obj_kl)
-
-            sample = tf.to_float(tensors["obj"][:, i, :] > 0.5)
-            mult = sample * p_z_given_Cz + (1-sample) * (1-p_z_given_Cz)
-            count_distribution = mult * count_distribution
-            normalizer = tf.reduce_sum(count_distribution, axis=1, keepdims=True)
-            normalizer = tf.maximum(normalizer, 1e-6)
-            count_distribution = count_distribution / normalizer
-
-            count_so_far += sample
-
-            i += 1
-
-        obj_kl = tf.reshape(tf.concat(obj_kl, axis=1), (self.batch_size, self.HWB, 1))
-
-        return obj_kl
+        return kl
 
     def _build_box(self, box_params, h, w, b, is_training):
         mean, log_std = tf.split(box_params, 2, axis=-1)
@@ -363,18 +312,18 @@ class GridObjectLayer(ObjectLayer):
         mean = self.training_wheels * tf.stop_gradient(mean) + (1-self.training_wheels) * mean
         std = self.training_wheels * tf.stop_gradient(std) + (1-self.training_wheels) * std
 
-        cy_mean, cx_mean, height_mean, width_mean = tf.split(mean, 4, axis=-1)
-        cy_std, cx_std, height_std, width_std = tf.split(std, 4, axis=-1)
+        cell_y_mean, cell_x_mean, height_mean, width_mean = tf.split(mean, 4, axis=-1)
+        cell_y_std, cell_x_std, height_std, width_std = tf.split(std, 4, axis=-1)
 
-        cy_logits = Normal(loc=cy_mean, scale=cy_std).sample()
-        cx_logits = Normal(loc=cx_mean, scale=cx_std).sample()
-        height_logits = Normal(loc=height_mean, scale=height_std).sample()
-        width_logits = Normal(loc=width_mean, scale=width_std).sample()
+        cell_y_logit = Normal(loc=cell_y_mean, scale=cell_y_std).sample()
+        cell_x_logit = Normal(loc=cell_x_mean, scale=cell_x_std).sample()
+        height_logit = Normal(loc=height_mean, scale=height_std).sample()
+        width_logit = Normal(loc=width_mean, scale=width_std).sample()
 
         # --- cell y/x transform ---
 
-        cell_y = tf.nn.sigmoid(tf.clip_by_value(cy_logits, -10, 10))
-        cell_x = tf.nn.sigmoid(tf.clip_by_value(cx_logits, -10, 10))
+        cell_y = tf.nn.sigmoid(tf.clip_by_value(cell_y_logit, -10, 10))
+        cell_x = tf.nn.sigmoid(tf.clip_by_value(cell_x_logit, -10, 10))
 
         assert self.max_yx > self.min_yx
 
@@ -383,24 +332,12 @@ class GridObjectLayer(ObjectLayer):
 
         # --- height/width transform ---
 
-        height = tf.nn.sigmoid(tf.clip_by_value(height_logits, -10, 10))
-        width = tf.nn.sigmoid(tf.clip_by_value(width_logits, -10, 10))
+        height = tf.nn.sigmoid(tf.clip_by_value(height_logit, -10, 10))
+        width = tf.nn.sigmoid(tf.clip_by_value(width_logit, -10, 10))
         assert self.max_hw > self.min_hw
 
         height = float(self.max_hw - self.min_hw) * height + self.min_hw
         width = float(self.max_hw - self.min_hw) * width + self.min_hw
-
-        if "cell_y" in self.no_gradient:
-            cell_y = tf.stop_gradient(cell_y)
-
-        if "cell_x" in self.no_gradient:
-            cell_x = tf.stop_gradient(cell_x)
-
-        if "height" in self.no_gradient:
-            height = tf.stop_gradient(height)
-
-        if "width" in self.no_gradient:
-            width = tf.stop_gradient(width)
 
         local_box = tf.concat([cell_y, cell_x, height, width], axis=-1)
 
@@ -415,6 +352,9 @@ class GridObjectLayer(ObjectLayer):
 
         normalized_box = tf.concat([yt, xt, ys, xs], axis=-1)
 
+        ys_logit = height_logit
+        xs_logit = width_logit
+
         return dict(
             # "raw" box values
             cell_y=cell_y,
@@ -423,13 +363,13 @@ class GridObjectLayer(ObjectLayer):
             width=width,
             local_box=local_box,
 
-            cell_y_logit_mean=cy_mean,
-            cell_x_logit_mean=cx_mean,
+            cell_y_logit_mean=cell_y_mean,
+            cell_x_logit_mean=cell_x_mean,
             height_logit_mean=height_mean,
             width_logit_mean=width_mean,
 
-            cell_y_logit_std=cy_std,
-            cell_x_logit_std=cx_std,
+            cell_y_logit_std=cell_y_std,
+            cell_x_logit_std=cell_x_std,
             height_logit_std=height_std,
             width_logit_std=width_std,
 
@@ -441,12 +381,15 @@ class GridObjectLayer(ObjectLayer):
             xt=xt,
             ys=ys,
             xs=xs,
-            normalized_box=normalized_box
+            normalized_box=normalized_box,
+
+            ys_logit=ys_logit,
+            xs_logit=xs_logit,
         )
 
-    def _build_obj(self, obj_logits, is_training, **kwargs):
-        obj_logits = self.training_wheels * tf.stop_gradient(obj_logits) + (1-self.training_wheels) * obj_logits
-        obj_log_odds = tf.clip_by_value(obj_logits / self.obj_temp, -10., 10.)
+    def _build_obj(self, obj_logit, is_training, **kwargs):
+        obj_logit = self.training_wheels * tf.stop_gradient(obj_logit) + (1-self.training_wheels) * obj_logit
+        obj_log_odds = tf.clip_by_value(obj_logit / self.obj_temp, -10., 10.)
 
         if self.noisy:
             obj_pre_sigmoid = concrete_binary_pre_sigmoid_sample(obj_log_odds, self.obj_concrete_temp)
@@ -617,9 +560,6 @@ class GridObjectLayer(ObjectLayer):
 
             attr = Normal(loc=attr_mean, scale=attr_std).sample()
 
-            if "attr" in self.no_gradient:
-                attr = tf.stop_gradient(attr)
-
             built.update(attr_mean=attr_mean, attr_std=attr_std, attr=attr, glimpse=glimpse)
             partial_program = tf.concat([partial_program, built['attr']], axis=1)
 
@@ -634,16 +574,10 @@ class GridObjectLayer(ObjectLayer):
 
             z_mean = self.training_wheels * tf.stop_gradient(z_mean) + (1-self.training_wheels) * z_mean
             z_std = self.training_wheels * tf.stop_gradient(z_std) + (1-self.training_wheels) * z_std
-            z_logits = Normal(loc=z_mean, scale=z_std).sample()
-            z = self.z_nonlinearity(z_logits)
+            z_logit = Normal(loc=z_mean, scale=z_std).sample()
+            z = self.z_nonlinearity(z_logit)
 
-            if "z" in self.no_gradient:
-                z = tf.stop_gradient(z)
-
-            if "z" in self.fixed_values:
-                z = self.fixed_values['z'] * tf.ones_like(z)
-
-            built.update(z_logit_mean=z_mean, z_logit_std=z_std, z=z)
+            built.update(z_logit_mean=z_mean, z_logit_std=z_std, z_logit=z_logit, z=z)
             partial_program = tf.concat([partial_program, built['z']], axis=1)
 
             # --- obj ---
