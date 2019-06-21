@@ -4,6 +4,8 @@ import collections
 from matplotlib.colors import to_rgb
 import matplotlib.pyplot as plt
 from matplotlib import animation
+import json
+from collections import defaultdict
 
 from dps import cfg
 from dps.updater import Updater as _Updater
@@ -110,6 +112,7 @@ def coords_to_pixel_space(y, x, h, w, image_shape, anchor_box, top_left):
 
 def coords_to_image_space(y, x, h, w, image_shape, anchor_box, top_left):
     """ Map to a normalized space (0, 1) x (0, 1) """
+
     h = h * anchor_box[0] / image_shape[0]
     w = w * anchor_box[1] / image_shape[1]
 
@@ -135,12 +138,7 @@ class Evaluator(object):
 
     """
     def __init__(self, functions, tensors, updater):
-        self.functions = functions
         self.updater = updater
-
-        if not functions:
-            self.fetches = {}
-            return
 
         fetch_keys = set()
         for f in functions.values():
@@ -167,20 +165,64 @@ class Evaluator(object):
 
         self.fetches = fetches
 
-    def eval(self, fetched):
-        """ fetched should be a dictionary containing numpy arrays derived by fetching the tensors
-            in self.fetches """
-        record = {}
-        for name, func in self.functions.items():
-            result = func(fetched, self.updater)
-
-            if isinstance(result, dict):
-                for k, v in result.items():
-                    record["{}:{}".format(name, k)] = np.mean(v)
+        self.functions = defaultdict(list)
+        self.feed_dicts = {}
+        for name, func in functions.items():
+            if hasattr(func, 'get_feed_dict'):
+                feed_dict = func.get_feed_dict(updater)
             else:
-                record[name] = np.mean(result)
+                feed_dict = {}
 
-        return record
+            key = {str(k): str(v) for k, v in feed_dict.items()}
+            key = json.dumps(key, default=str, indent=4, sort_keys=True)
+
+            self.functions[key].append((name, func))
+            self.feed_dicts[key] = feed_dict
+
+    def eval(self, recorded_tensors, data_manager, mode):
+        final_record = {}
+
+        for key, functions in self.functions.items():
+            _feed_dict = self.feed_dicts[key]
+            if mode == "val":
+                feed_dict = data_manager.do_val()
+            elif mode == "test":
+                feed_dict = data_manager.do_test()
+            else:
+                raise Exception("Unknown evaluation mode: {}".format(mode))
+
+            feed_dict.update(_feed_dict)
+
+            sess = tf.get_default_session()
+
+            n_points = 0
+            record = collections.defaultdict(float)
+
+            while True:
+                try:
+                    _record, fetched = sess.run([recorded_tensors, self.fetches], feed_dict=feed_dict)
+                except tf.errors.OutOfRangeError:
+                    break
+
+                for name, func in functions:
+                    result = func(fetched, self.updater)
+
+                    if isinstance(result, dict):
+                        for k, v in result.items():
+                            _record["{}:{}".format(name, k)] = np.mean(v)
+                    else:
+                        _record[name] = np.mean(result)
+
+                batch_size = _record['batch_size']
+
+                # Assumes that each record entry is an average over the batch
+                for k, v in _record.items():
+                    record[k] += batch_size * v
+
+                n_points += batch_size
+
+            final_record.update({k: v / n_points for k, v in record.items()})
+        return final_record
 
 
 def compute_iou(box, others):
@@ -277,13 +319,16 @@ def mAP(pred_boxes, gt_boxes, n_classes, recall_values=None, iou_threshold=None)
 class AP:
     keys_accessed = "normalized_box obj annotations n_annotations"
 
-    def __init__(self, iou_threshold=None):
+    def __init__(self, iou_threshold=None, start_frame=0, end_frame=np.inf):
         if iou_threshold is not None:
             try:
                 iou_threshold = list(iou_threshold)
             except (TypeError, ValueError):
                 iou_threshold = [float(iou_threshold)]
         self.iou_threshold = iou_threshold
+
+        self.start_frame = start_frame
+        self.end_frame = end_frame
 
     def _process_data(self, tensors, updater):
         obj = tensors['obj']
@@ -330,7 +375,7 @@ class AP:
         predicted_boxes = []
 
         for b in range(batch_size):
-            for f in range(n_frames):
+            for f in range(self.start_frame, min(self.end_frame, n_frames)):
                 _ground_truth_boxes = [
                     [0, *bbox]
                     for (valid, _, _, *bbox), _
@@ -362,6 +407,7 @@ class Updater(_Updater):
     lr_schedule = Param()
     noise_schedule = Param()
     max_grad_norm = Param()
+    grad_n_record_groups = Param(None)
 
     def __init__(self, env, scope=None, **kwargs):
         self.obs_shape = env.obs_shape
@@ -388,36 +434,7 @@ class Updater(_Updater):
         return dict(train=record)
 
     def _evaluate(self, _batch_size, mode):
-        if mode == "val":
-            feed_dict = self.data_manager.do_val()
-        elif mode == "test":
-            feed_dict = self.data_manager.do_test()
-        else:
-            raise Exception("Unknown evaluation mode: {}".format(mode))
-
-        record = collections.defaultdict(float)
-        n_points = 0
-
-        sess = tf.get_default_session()
-
-        while True:
-            try:
-                _record, eval_fetched = sess.run(
-                    [self.recorded_tensors, self.evaluator.fetches], feed_dict=feed_dict)
-            except tf.errors.OutOfRangeError:
-                break
-
-            eval_record = self.evaluator.eval(eval_fetched)
-            _record.update(eval_record)
-
-            batch_size = _record['batch_size']
-
-            for k, v in _record.items():
-                record[k] += batch_size * v
-
-            n_points += batch_size
-
-        return {k: v / n_points for k, v in record.items()}
+        return self.evaluator.eval(self.recorded_tensors, self.data_manager, mode)
 
     def _build_graph(self):
         self.data_manager = DataManager(self.env.datasets['train'],
@@ -453,7 +470,7 @@ class Updater(_Updater):
 
             self.train_op, self.train_records = build_gradient_train_op(
                 self.loss, tvars, self.optimizer_spec, self.lr_schedule,
-                self.max_grad_norm, self.noise_schedule)
+                self.max_grad_norm, self.noise_schedule, grad_n_record_groups=self.grad_n_record_groups)
 
         # --- recorded values ---
 

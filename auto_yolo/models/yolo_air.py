@@ -9,13 +9,14 @@ from dps.utils import Param
 from dps.utils.tf import tf_mean_sum, RenderHook, GridConvNet
 
 from auto_yolo.models.core import AP, xent_loss, VariationalAutoencoder, coords_to_pixel_space
-from auto_yolo.models.object_layer import GridObjectLayer, ObjectRenderer
+from auto_yolo.models.object_layer import ConvGridObjectLayer, GridObjectLayer, ObjectRenderer
 
 
 class YoloAir_Network(VariationalAutoencoder):
     n_backbone_features = Param()
     n_objects_per_cell = Param()
     anchor_box = Param()
+    conv_object_layer = Param()
 
     backbone = None
     object_layer = None
@@ -58,7 +59,10 @@ class YoloAir_Network(VariationalAutoencoder):
             (-1, self.H, self.W, self.B, self.n_backbone_features))
 
         if self.object_layer is None:
-            self.object_layer = GridObjectLayer(self.pixels_per_cell, scope="objects")
+            if self.conv_object_layer:
+                self.object_layer = ConvGridObjectLayer(self.pixels_per_cell, scope="objects")
+            else:
+                self.object_layer = GridObjectLayer(self.pixels_per_cell, scope="objects")
 
         if self.object_renderer is None:
             self.object_renderer = ObjectRenderer(scope="renderer")

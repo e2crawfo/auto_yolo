@@ -25,6 +25,7 @@ class ObjectLayer(ScopedFunction):
     A = Param()
     training_wheels = Param()
     noisy = Param()
+    edge_resampler = Param()
     obj_concrete_temp = Param(help="Higher values -> smoother")
     obj_temp = Param(help="Higher values -> more uniform")
 
@@ -42,7 +43,7 @@ class ObjectLayer(ScopedFunction):
         return std
 
     def z_nonlinearity(self, z_logit):
-        return 4 * tf.nn.sigmoid(tf.clip_by_value(z_logit, -10, 10))
+        return tf.nn.sigmoid(tf.clip_by_value(z_logit, -10, 10))
 
     def _compute_obj_kl(self, tensors, existing_objects=None):
         # --- compute obj_kl ---
@@ -92,7 +93,6 @@ class ObjectLayer(ScopedFunction):
         for i in range(n_objects):
             p_z_given_Cz = tf.maximum(count_support[None, :] - count_so_far, 0) / (max_n_objects - i)
 
-            # Reshape for batch matmul
             _count_distribution = count_distribution[:, None, :]
             _p_z_given_Cz = p_z_given_Cz[:, :, None]
 
@@ -136,6 +136,7 @@ class ObjectRenderer(ScopedFunction):
     alpha_logit_scale = Param()
     alpha_logit_bias = Param()
     anchor_box = Param()
+    importance_temp = Param()
 
     def __init__(self, scope=None, **kwargs):
         self.anchor_box = np.array(self.anchor_box)
@@ -174,7 +175,7 @@ class ObjectRenderer(ScopedFunction):
         obj_alpha *= tf.reshape(objects.render_obj, (batch_size, n_objects, 1, 1, 1))
 
         z = tf.reshape(objects.z, (batch_size, n_objects, 1, 1, 1))
-        obj_importance = tf.maximum(obj_alpha * z, 0.01)
+        obj_importance = tf.maximum(obj_alpha * z / self.importance_temp, 0.01)
 
         object_maps = tf.concat([obj_colors, obj_alpha, obj_importance], axis=-1)
 
@@ -546,7 +547,10 @@ class GridObjectLayer(ObjectLayer):
 
                 grid_coords = warper(_boxes)
                 grid_coords = tf.reshape(grid_coords, (self.batch_size, 1, *self.object_shape, 2,))
-                glimpse = resampler_edge.resampler_edge(inp, grid_coords)
+                if self.edge_resampler:
+                    glimpse = resampler_edge.resampler_edge(inp, grid_coords)
+                else:
+                    glimpse = tf.contrib.resampler.resampler(inp, grid_coords)
                 glimpse = tf.reshape(glimpse, (self.batch_size, *self.object_shape, self.image_depth))
             else:
                 glimpse = tf.zeros((self.batch_size, *self.object_shape, self.image_depth))
@@ -608,11 +612,9 @@ class GridObjectLayer(ObjectLayer):
         for k in results[0]:
             objects[k] = tf.stack([r[k] for r in results], axis=1)
 
-        objects.all = tf.concat(
-            [objects.normalized_box, objects.attr, objects.z, objects.obj], axis=-1)
-
         if prop_state is not None:
             objects.prop_state = tf.tile(prop_state[0:1, None], (self.batch_size, self.HWB, 1))
+            objects.prior_prop_state = tf.tile(prop_state[0:1, None], (self.batch_size, self.HWB, 1))
 
         # --- misc ---
 
@@ -693,7 +695,11 @@ class ConvGridObjectLayer(GridObjectLayer):
             _boxes = tf.reshape(_boxes, (self.batch_size*H*W, 4))
             grid_coords = warper(_boxes)
             grid_coords = tf.reshape(grid_coords, (self.batch_size, H, W, *self.object_shape, 2,))
-            glimpse = resampler_edge.resampler_edge(inp, grid_coords)
+
+            if self.edge_resampler:
+                glimpse = resampler_edge.resampler_edge(inp, grid_coords)
+            else:
+                glimpse = tf.contrib.resampler.resampler(inp, grid_coords)
         else:
             glimpse = tf.zeros((self.batch_size, H, W, *self.object_shape, self.image_depth))
 
@@ -740,9 +746,6 @@ class ConvGridObjectLayer(GridObjectLayer):
 
         # --- final ---
 
-        objects.all = tf.concat(
-            [objects.normalized_box, objects.attr, objects.z, objects.obj], axis=-1)
-
         _objects = AttrDict()
         for k, v in objects.items():
             _, _, _, *trailing_dims = tf_shape(v)
@@ -751,6 +754,7 @@ class ConvGridObjectLayer(GridObjectLayer):
 
         if prop_state is not None:
             objects.prop_state = tf.tile(prop_state[0:1, None], (self.batch_size, self.HWB, 1))
+            objects.prior_prop_state = tf.tile(prop_state[0:1, None], (self.batch_size, self.HWB, 1))
 
         # --- misc ---
 

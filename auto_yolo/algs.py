@@ -5,7 +5,7 @@ from dps import cfg
 from dps.utils import Config
 from dps.utils.tf import (
     MLP, IdentityFunction, FeedforwardCell, ScopedCellWrapper, AttentionalRelationNetwork, ObjectNetwork,
-    GridConvNet
+    GridConvNet, ConvNet,
 )
 
 from auto_yolo.models import core, simple, baseline, ground_truth, yolo_air, air, nem, networks
@@ -48,6 +48,8 @@ alg_config = Config(
     z_prior_std=1.0,
     A=50,
     n_objects_per_cell=1,
+    importance_temp=0.25,
+    edge_resampler=False,
 
     train_reconstruction=True,
     train_kl=True,
@@ -143,6 +145,7 @@ yolo_air_config = alg_config.copy(
     n_passthrough_features=100,
 
     n_lookback=1,
+    conv_object_layer=False,
 
     use_concrete_kl=False,
     obj_concrete_temp=1.0,
@@ -171,6 +174,16 @@ yolo_air_config = alg_config.copy(
     hw_prior_std=0.5,
     count_prior_decay_steps=1000,
     final_count_prior_log_odds=0.0125,
+)
+
+yolo_air_conv_config = yolo_air_config.copy(
+    conv_object_layer=True,
+    build_conv_lateral=lambda scope: ConvNet(
+        scope=scope, layers=[
+            dict(filters=None, kernel_size=1, strides=1, padding="SAME"),
+            dict(filters=None, kernel_size=1, strides=1, padding="SAME"),
+        ],
+    ),
 )
 
 yolo_air_transfer_config = yolo_air_config.copy(
