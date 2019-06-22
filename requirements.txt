@@ -1,2 +1,1 @@
 dm-sonnet>=1.17
-tensorflow_probability>=0.2
