@@ -13,7 +13,9 @@ named `aaai_2019_v2` preserve most of the behaviour of the original experiments,
 but with significant code improvements.
 
 ### Installation
-1. [Install TensorFlow](https://www.tensorflow.org/install/) with [GPU support](https://www.tensorflow.org/install/gpu). auto_yolo should work with any version of TensorFlow > 1.4, but has not been tested extensively with any version other than 1.8.
+1. [Install TensorFlow](https://www.tensorflow.org/install/) with [GPU support](https://www.tensorflow.org/install/gpu).
+   The branch `aaai_2019` can work with any version of TensorFlow >= 1.4, but has not been tested extensively with any version other than 1.8.
+   The more recent branches (`master` and `aaai_2019_v2`) require a relatively recent version of tensorflow_probability (>= 0.2) and so require TensorFlow >= 1.9. For example, in recent development I've been using tensorflow==1.13.1 and tensorflow-probability==0.6.0.
 
 2. Clone `dps`, optionally switch to `aaai_2019` or `aaai_2019_v2` branches, and install:
     ```
@@ -54,5 +56,5 @@ but with significant code improvements.
 To train SPAIR on a scattered MNIST dataset:
 ```
 cd auto_yolo/experiments/comparison
-python yolo_air_run.py
+python yolo_air_run.py local
 ```

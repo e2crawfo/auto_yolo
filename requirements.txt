@@ -1,2 +1,2 @@
-# -e git+https://github.com/e2crawfo/dps.git@auto_yolo#egg=dps
-dm-sonnet==1.17
+dm-sonnet>=1.17
+tensorflow_probability>=0.2
