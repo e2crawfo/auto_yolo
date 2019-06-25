@@ -434,7 +434,12 @@ class Updater(_Updater):
         return dict(train=record)
 
     def _evaluate(self, _batch_size, mode):
-        return self.evaluator.eval(self.recorded_tensors, self.data_manager, mode)
+        result = self.evaluator.eval(self.recorded_tensors, self.data_manager, mode)
+
+        if "MOT:mota" in result and "prior_MOT:mota" in result:
+            result['mota_post_prior_sum'] = result["MOT:mota"] + result["prior_MOT:mota"]
+
+        return result
 
     def _build_graph(self):
         self.data_manager = DataManager(self.env.datasets['train'],

@@ -96,7 +96,12 @@ class ObjectLayer(ScopedFunction):
             _count_distribution = count_distribution[:, None, :]
             _p_z_given_Cz = p_z_given_Cz[:, :, None]
 
-            p_z = tf.matmul(_count_distribution, _p_z_given_Cz)[:, :, 0]
+            assert_op = tf.Assert(
+                tf.reduce_all(tf.logical_not(tf.logical_and(p_z_given_Cz > 1, count_distribution > 0))),
+                [p_z_given_Cz, count_support])
+
+            with tf.control_dependencies([assert_op]):
+                p_z = tf.matmul(_count_distribution, _p_z_given_Cz)[:, :, 0]
 
             if self.use_concrete_kl:
                 prior_log_odds = tf_safe_log(p_z) - tf_safe_log(1-p_z)
