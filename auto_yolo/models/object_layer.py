@@ -91,17 +91,10 @@ class ObjectLayer(ScopedFunction):
 
         obj_kl = []
         for i in range(n_objects):
-            p_z_given_Cz = tf.maximum(count_support[None, :] - count_so_far, 0) / (max_n_objects - i)
+            p_z_given_Cz = (count_support[None, :] - count_so_far) / (max_n_objects - i)
+            p_z_given_Cz = tf.clip_by_value(p_z_given_Cz, 0.0, 1.0)
 
-            _count_distribution = count_distribution[:, None, :]
-            _p_z_given_Cz = p_z_given_Cz[:, :, None]
-
-            assert_op = tf.Assert(
-                tf.reduce_all(tf.logical_not(tf.logical_and(p_z_given_Cz > 1, count_distribution > 0))),
-                [p_z_given_Cz, count_support])
-
-            with tf.control_dependencies([assert_op]):
-                p_z = tf.matmul(_count_distribution, _p_z_given_Cz)[:, :, 0]
+            p_z = tf.reduce_sum(count_distribution * p_z_given_Cz, axis=1, keepdims=True)
 
             if self.use_concrete_kl:
                 prior_log_odds = tf_safe_log(p_z) - tf_safe_log(1-p_z)
@@ -122,10 +115,20 @@ class ObjectLayer(ScopedFunction):
 
             sample = tf.to_float(obj[:, i, :] > 0.5)
             mult = sample * p_z_given_Cz + (1-sample) * (1-p_z_given_Cz)
-            count_distribution = mult * count_distribution
-            normalizer = tf.reduce_sum(count_distribution, axis=1, keepdims=True)
+            raw_count_distribution = mult * count_distribution
+            normalizer = tf.reduce_sum(raw_count_distribution, axis=1, keepdims=True)
             normalizer = tf.maximum(normalizer, 1e-6)
-            count_distribution = count_distribution / normalizer
+
+            invalid = tf.cast(tf.logical_and(p_z_given_Cz > 1, count_distribution > 1e-8), tf.float32)
+            diagnostic = tf.stack([invalid, p_z_given_Cz, count_distribution, mult, raw_count_distribution], axis=-1)
+
+            assert_op = tf.Assert(
+                tf.reduce_all(tf.logical_not(invalid)),
+                [invalid, diagnostic, count_so_far, sample, tf.constant(i, dtype=tf.float32)],
+                summarize=100000)
+
+            with tf.control_dependencies([assert_op]):
+                count_distribution = raw_count_distribution / normalizer
 
             count_so_far += sample
 
