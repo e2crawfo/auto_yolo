@@ -91,8 +91,12 @@ class ObjectLayer(ScopedFunction):
 
         obj_kl = []
         for i in range(n_objects):
-            p_z_given_Cz = (count_support[None, :] - count_so_far) / (max_n_objects - i)
-            p_z_given_Cz = tf.clip_by_value(p_z_given_Cz, 0.0, 1.0)
+            p_z_given_Cz_raw = (count_support[None, :] - count_so_far) / (max_n_objects - i)
+            p_z_given_Cz = tf.clip_by_value(p_z_given_Cz_raw, 0.0, 1.0)
+
+            # Doing this instead of 1 - p_z_given_Cz seems to be more numerically stable.
+            inv_p_z_given_Cz_raw = (max_n_objects - i - count_support[None, :] + count_so_far) / (max_n_objects - i)
+            inv_p_z_given_Cz = tf.clip_by_value(inv_p_z_given_Cz_raw, 0.0, 1.0)
 
             p_z = tf.reduce_sum(count_distribution * p_z_given_Cz, axis=1, keepdims=True)
 
@@ -114,23 +118,26 @@ class ObjectLayer(ScopedFunction):
             obj_kl.append(_obj_kl)
 
             sample = tf.to_float(obj[:, i, :] > 0.5)
-            mult = sample * p_z_given_Cz + (1-sample) * (1-p_z_given_Cz)
+            mult = sample * p_z_given_Cz + (1-sample) * inv_p_z_given_Cz
             raw_count_distribution = mult * count_distribution
             normalizer = tf.reduce_sum(raw_count_distribution, axis=1, keepdims=True)
             normalizer = tf.maximum(normalizer, 1e-6)
 
-            invalid = tf.cast(tf.logical_and(p_z_given_Cz > 1, count_distribution > 1e-8), tf.float32)
-            diagnostic = tf.stack([invalid, p_z_given_Cz, count_distribution, mult, raw_count_distribution], axis=-1)
+            # invalid = tf.logical_and(p_z_given_Cz_raw > 1, count_distribution > 1e-8)
+            # float_invalid = tf.cast(invalid, tf.float32)
+            # diagnostic = tf.stack(
+            #     [float_invalid, p_z_given_Cz, count_distribution, mult, raw_count_distribution], axis=-1)
 
-            assert_op = tf.Assert(
-                tf.reduce_all(tf.logical_not(invalid)),
-                [invalid, diagnostic, count_so_far, sample, tf.constant(i, dtype=tf.float32)],
-                summarize=100000)
+            # assert_op = tf.Assert(
+            #     tf.reduce_all(tf.logical_not(invalid)),
+            #     [invalid, diagnostic, count_so_far, sample, tf.constant(i, dtype=tf.float32)],
+            #     summarize=100000)
 
-            with tf.control_dependencies([assert_op]):
-                count_distribution = raw_count_distribution / normalizer
-
+            count_distribution = raw_count_distribution / normalizer
             count_so_far += sample
+
+            # this avoids buildup of inaccuracies that can cause problems in computing p_z_given_Cz_raw
+            count_so_far = tf.round(count_so_far)
 
         obj_kl = tf.reshape(tf.concat(obj_kl, axis=1), (batch_size, n_objects, 1))
 
