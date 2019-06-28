@@ -331,13 +331,12 @@ class AP:
         self.end_frame = end_frame
 
     def _process_data(self, tensors, updater):
+        nb = np.split(tensors['normalized_box'], 4, axis=-1)
+        top, left, height, width = coords_to_pixel_space(
+            *nb, (updater.image_height, updater.image_width),
+            updater.network.anchor_box, top_left=True)
+
         obj = tensors['obj']
-        y, x, height, width = np.split(tensors['normalized_box'], 4, axis=-1)
-
-        image_shape = (updater.network.image_height, updater.network.image_width)
-        anchor_box = updater.network.anchor_box
-        top, left, height, width = coords_to_pixel_space(y, x, height, width, image_shape, anchor_box, top_left=True)
-
         batch_size = obj.shape[0]
         n_frames = getattr(updater.network, 'n_frames', 0)
 
@@ -354,8 +353,9 @@ class AP:
 
         shape = (batch_size, n_frames, n_objects)
 
-        obj = obj.reshape(*shape)
         n_digits = n_objects * np.ones((batch_size, n_frames), dtype=np.int32)
+
+        obj = obj.reshape(*shape)
         top = top.reshape(*shape)
         left = left.reshape(*shape)
         height = height.reshape(*shape)
