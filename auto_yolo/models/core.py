@@ -183,7 +183,6 @@ class Evaluator(object):
         final_record = {}
 
         for key, functions in self.functions.items():
-            _feed_dict = self.feed_dicts[key]
             if mode == "val":
                 feed_dict = data_manager.do_val()
             elif mode == "test":
@@ -191,7 +190,7 @@ class Evaluator(object):
             else:
                 raise Exception("Unknown evaluation mode: {}".format(mode))
 
-            feed_dict.update(_feed_dict)
+            feed_dict.update(self.feed_dicts[key])
 
             sess = tf.get_default_session()
 
@@ -319,7 +318,7 @@ def mAP(pred_boxes, gt_boxes, n_classes, recall_values=None, iou_threshold=None)
 class AP:
     keys_accessed = "normalized_box obj annotations n_annotations"
 
-    def __init__(self, iou_threshold=None, start_frame=0, end_frame=np.inf):
+    def __init__(self, iou_threshold=None, start_frame=0, end_frame=np.inf, is_training=False):
         if iou_threshold is not None:
             try:
                 iou_threshold = list(iou_threshold)
@@ -329,6 +328,13 @@ class AP:
 
         self.start_frame = start_frame
         self.end_frame = end_frame
+        self.is_training = is_training
+
+    def get_feed_dict(self, updater):
+        if self.is_training:
+            return {updater.network.is_training: True}
+        else:
+            return {}
 
     def _process_data(self, tensors, updater):
         nb = np.split(tensors['normalized_box'], 4, axis=-1)
