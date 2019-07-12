@@ -69,7 +69,7 @@ class ObjectLayer(ScopedFunction):
             count_distribution = tf.constant(self.count_prior_dist, dtype=tf.float32)
         else:
             count_prior_prob = tf.nn.sigmoid(self.count_prior_log_odds)
-            count_distribution = (1 - count_prior_prob) * (count_prior_prob ** count_support)
+            count_distribution = count_prior_prob ** count_support
 
         normalizer = tf.reduce_sum(count_distribution)
         count_distribution = count_distribution / tf.maximum(normalizer, 1e-6)
