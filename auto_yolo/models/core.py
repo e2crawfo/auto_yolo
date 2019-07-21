@@ -126,58 +126,74 @@ def coords_to_image_space(y, x, h, w, image_shape, anchor_box, top_left):
     return y, x, h, w
 
 
+class DummyFunc:
+    keys_accessed = ""
+
+    def __call__(self, fetched, updater):
+        return {}
+
+
 class Evaluator(object):
     """ A helper object for running a list of functions on a collection of evaluated tensors.
 
     Parameters
     ----------
-    functions: a list of functions, each with an attribute `keys_accessed`
-               listing the keys required by that function
+    functions: a dict (name-> function). Each function has an attribute `keys_accessed`
+               listing the keys (into `tensors`) that will be accessed required by that function.
     tensors: a (possibly nested) dictionary of tensors which will provide the input to the functions
     updater: the updater object, passed into the functions at eval time
 
     """
     def __init__(self, functions, tensors, updater):
+        # Force evaluation to happen at with the default feed_dict
+        functions["dummy"] = DummyFunc()
+
         self.updater = updater
-
-        fetch_keys = set()
-        for f in functions.values():
-            keys_accessed = f.keys_accessed
-            if isinstance(keys_accessed, str):
-                keys_accessed = keys_accessed.split()
-            for key in keys_accessed:
-                fetch_keys.add(key)
-
-        fetches = {}
-        for key in list(fetch_keys):
-            dst = fetches
-            src = tensors
-            subkeys = key.split(":")
-
-            for i, _key in enumerate(subkeys):
-                if i == len(subkeys)-1:
-                    dst[_key] = src[_key]
-                else:
-                    if _key not in dst:
-                        dst[_key] = dict()
-                    dst = dst[_key]
-                    src = src[_key]
-
-        self.fetches = fetches
 
         self.functions = defaultdict(list)
         self.feed_dicts = {}
+        fetch_keys = defaultdict(set)
+
         for name, func in functions.items():
             if hasattr(func, 'get_feed_dict'):
                 feed_dict = func.get_feed_dict(updater)
             else:
                 feed_dict = {}
 
-            key = {str(k): str(v) for k, v in feed_dict.items()}
-            key = json.dumps(key, default=str, indent=4, sort_keys=True)
+            fd_key = {str(k): str(v) for k, v in feed_dict.items()}
+            fd_key = json.dumps(fd_key, default=str, indent=4, sort_keys=True)
 
-            self.functions[key].append((name, func))
-            self.feed_dicts[key] = feed_dict
+            self.functions[fd_key].append((name, func))
+            self.feed_dicts[fd_key] = feed_dict
+
+            # store for the function
+
+            keys_accessed = func.keys_accessed
+
+            if isinstance(keys_accessed, str):
+                keys_accessed = keys_accessed.split()
+
+            for key in keys_accessed:
+                fetch_keys[fd_key].add(key)
+
+        self.fetches = {}
+
+        for fd_key, _fetch_keys in fetch_keys.items():
+            fetches = self.fetches[fd_key] = {}
+
+            for key in _fetch_keys:
+                dst = fetches
+                src = tensors
+                subkeys = key.split(":")
+
+                for i, _key in enumerate(subkeys):
+                    if i == len(subkeys)-1:
+                        dst[_key] = src[_key]
+                    else:
+                        if _key not in dst:
+                            dst[_key] = dict()
+                        dst = dst[_key]
+                        src = src[_key]
 
     def eval(self, recorded_tensors, data_manager, mode):
         final_record = {}
@@ -190,16 +206,23 @@ class Evaluator(object):
             else:
                 raise Exception("Unknown evaluation mode: {}".format(mode))
 
-            feed_dict.update(self.feed_dicts[key])
+            extra_feed_dict = self.feed_dicts[key]
+            feed_dict.update(extra_feed_dict)
 
             sess = tf.get_default_session()
 
             n_points = 0
             record = collections.defaultdict(float)
+            fetches = self.fetches.get(key, {})
 
             while True:
                 try:
-                    _record, fetched = sess.run([recorded_tensors, self.fetches], feed_dict=feed_dict)
+                    if extra_feed_dict:
+                        _recorded_tensors = dict(batch_size=recorded_tensors['batch_size'])
+                        _record, fetched = sess.run([_recorded_tensors, fetches], feed_dict=feed_dict)
+                    else:
+                        # Only get values from recorded_tensors when using the default feed dict.
+                        _record, fetched = sess.run([recorded_tensors, fetches], feed_dict=feed_dict)
                 except tf.errors.OutOfRangeError:
                     break
 
@@ -220,7 +243,13 @@ class Evaluator(object):
 
                 n_points += batch_size
 
-            final_record.update({k: v / n_points for k, v in record.items()})
+            record = {k: v / n_points for k, v in record.items()}
+
+            intersection = record.keys() & final_record.keys() - set(['batch_size'])
+            assert not intersection, "Key sets have non-zero intersection: {}".format(intersection)
+
+            final_record.update(record)
+
         return final_record
 
 
@@ -483,6 +512,13 @@ class Updater(_Updater):
                 self.loss, tvars, self.optimizer_spec, self.lr_schedule,
                 self.max_grad_norm, self.noise_schedule, grad_n_record_groups=self.grad_n_record_groups)
 
+        sess = tf.get_default_session()
+        for k, v in getattr(sess, 'scheduled_values', None).items():
+            if k in recorded_tensors:
+                recorded_tensors['scheduled_' + k] = v
+            else:
+                recorded_tensors[k] = v
+
         # --- recorded values ---
 
         intersection = recorded_tensors.keys() & network_recorded_tensors.keys()
@@ -491,6 +527,11 @@ class Updater(_Updater):
 
         intersection = recorded_tensors.keys() & self.network.eval_funcs.keys()
         assert not intersection, "Key sets have non-zero intersection: {}".format(intersection)
+
+        if self.network.eval_funcs:
+            eval_funcs = self.network.eval_funcs
+        else:
+            eval_funcs = {}
 
         # For running functions, during evaluation, that are not implemented in tensorflow
         self.evaluator = Evaluator(self.network.eval_funcs, network_tensors, self)

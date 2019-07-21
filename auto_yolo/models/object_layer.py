@@ -25,9 +25,11 @@ class ObjectLayer(ScopedFunction):
     A = Param()
     training_wheels = Param()
     noisy = Param()
+    eval_noisy = Param()
     edge_resampler = Param()
     obj_concrete_temp = Param(help="Higher values -> smoother")
     obj_temp = Param(help="Higher values -> more uniform")
+    render_threshold = Param()
 
     def __init__(self, scope=None, **kwargs):
         super().__init__(scope=scope, **kwargs)
@@ -37,13 +39,20 @@ class ObjectLayer(ScopedFunction):
 
     def std_nonlinearity(self, std_logit):
         # return tf.exp(std)
-        std = 2 * tf.nn.sigmoid(tf.clip_by_value(std_logit, -10, 10))
-        if not self.noisy:
-            std = tf.zeros_like(std)
-        return std
+        return (
+            self._noisy * 2 * tf.nn.sigmoid(tf.clip_by_value(std_logit, -10, 10))
+            + (1 - self._noisy) * tf.zeros_like(std_logit)
+        )
 
     def z_nonlinearity(self, z_logit):
         return tf.nn.sigmoid(tf.clip_by_value(z_logit, -10, 10))
+
+    @property
+    def _noisy(self):
+        return (
+            self.float_is_training * tf.to_float(self.noisy)
+            + (1 - self.float_is_training) * tf.to_float(self.eval_noisy)
+        )
 
     def _compute_obj_kl(self, tensors, existing_objects=None):
         # --- compute obj_kl ---
@@ -417,16 +426,16 @@ class GridObjectLayer(ObjectLayer):
         obj_logit = self.training_wheels * tf.stop_gradient(obj_logit) + (1-self.training_wheels) * obj_logit
         obj_log_odds = tf.clip_by_value(obj_logit / self.obj_temp, -10., 10.)
 
-        if self.noisy:
-            obj_pre_sigmoid = concrete_binary_pre_sigmoid_sample(obj_log_odds, self.obj_concrete_temp)
-        else:
-            obj_pre_sigmoid = obj_log_odds
+        obj_pre_sigmoid = (
+            self._noisy * concrete_binary_pre_sigmoid_sample(obj_log_odds, self.obj_concrete_temp)
+            + (1 - self._noisy) * obj_log_odds
+        )
 
         obj = tf.nn.sigmoid(obj_pre_sigmoid)
 
         render_obj = (
             self.float_is_training * obj
-            + (1 - self.float_is_training) * tf.round(obj)
+            + (1 - self.float_is_training) * tf.round(obj + 0.5 - self.render_threshold)
         )
 
         return dict(
