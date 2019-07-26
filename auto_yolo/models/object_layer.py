@@ -308,20 +308,13 @@ class GridObjectLayer(ObjectLayer):
             _prior = Normal(loc=prior[loc_name], scale=prior[scale_name])
             return _post.kl_divergence(_prior)
 
-        cell_y_kl = normal_kl("cell_y_logit")
-        cell_x_kl = normal_kl("cell_x_logit")
-        height_kl = normal_kl("height_logit")
-        width_kl = normal_kl("width_logit")
-        attr_kl = normal_kl("attr")
-        z_kl = normal_kl("z_logit")
-
         kl = dict(
-            cell_y_kl=cell_y_kl,
-            cell_x_kl=cell_x_kl,
-            height_kl=height_kl,
-            width_kl=width_kl,
-            z_kl=z_kl,
-            attr_kl=attr_kl,
+            cell_y_kl=normal_kl("cell_y_logit"),
+            cell_x_kl=normal_kl("cell_x_logit"),
+            height_kl=normal_kl("height_logit"),
+            width_kl=normal_kl("width_logit"),
+            z_kl=normal_kl("z_logit"),
+            attr_kl=normal_kl("attr")
         )
 
         if do_obj:
