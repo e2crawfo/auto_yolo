@@ -179,8 +179,8 @@ class ObjectRenderer(ScopedFunction):
             output_size=self.object_shape + (self.image_depth+1,),
             is_training=is_training)
 
-        appearance_logit = appearance_logit * ([self.color_logit_scale] * 3 + [self.alpha_logit_scale])
-        appearance_logit = appearance_logit + ([0.] * 3 + [self.alpha_logit_bias])
+        appearance_logit = appearance_logit * ([self.color_logit_scale] * self.image_depth + [self.alpha_logit_scale])
+        appearance_logit = appearance_logit + ([0.] * self.image_depth + [self.alpha_logit_bias])
 
         appearance = tf.nn.sigmoid(tf.clip_by_value(appearance_logit, -10., 10.))
 

@@ -534,7 +534,7 @@ class Updater(_Updater):
             eval_funcs = {}
 
         # For running functions, during evaluation, that are not implemented in tensorflow
-        self.evaluator = Evaluator(self.network.eval_funcs, network_tensors, self)
+        self.evaluator = Evaluator(eval_funcs, network_tensors, self)
 
 
 class EvalHook(Hook):
