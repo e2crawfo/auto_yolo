@@ -133,7 +133,7 @@ class DummyFunc:
         return {}
 
 
-class Evaluator(object):
+class Evaluator:
     """ A helper object for running a list of functions on a collection of evaluated tensors.
 
     Parameters
@@ -145,6 +145,9 @@ class Evaluator(object):
 
     """
     def __init__(self, functions, tensors, updater):
+        self._functions = functions
+        self._tensors = tensors
+
         # Force evaluation to happen at with the default feed_dict
         functions["dummy"] = DummyFunc()
 
@@ -195,6 +198,9 @@ class Evaluator(object):
                         dst = dst[_key]
                         src = src[_key]
 
+    def _check_continue(self, record):
+        return True
+
     def eval(self, recorded_tensors, data_manager, mode):
         final_record = {}
 
@@ -242,6 +248,10 @@ class Evaluator(object):
                     record[k] += batch_size * v
 
                 n_points += batch_size
+
+                do_continue = self._check_continue(_record)
+                if not do_continue:
+                    break
 
             record = {k: v / n_points for k, v in record.items()}
 
