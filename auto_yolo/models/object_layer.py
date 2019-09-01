@@ -54,8 +54,14 @@ class ObjectLayer(ScopedFunction):
             + (1 - self.float_is_training) * tf.to_float(self.eval_noisy)
         )
 
-    def _compute_obj_kl(self, tensors, existing_objects=None):
+    def _compute_obj_kl(self, tensors, existing_objects=None, simple=False):
         # --- compute obj_kl ---
+        if simple:
+            prior = self._independent_prior()
+            return concrete_binary_sample_kl(
+                tensors["obj_pre_sigmoid"],
+                tensors["obj_log_odds"], self.obj_concrete_temp,
+                prior["obj_log_odds"], self.obj_concrete_temp)
 
         obj_pre_sigmoid = tensors["obj_pre_sigmoid"]
         obj_log_odds = tensors["obj_log_odds"]
@@ -295,6 +301,8 @@ class GridObjectLayer(ObjectLayer):
             width_logit_std=self.hw_prior_std,
             attr_std=self.attr_prior_std,
             z_logit_std=self.z_prior_std,
+
+            obj_log_odds=self.count_prior_log_odds,
         )
 
     def compute_kl(self, tensors, prior=None, do_obj=True):
@@ -425,11 +433,7 @@ class GridObjectLayer(ObjectLayer):
         )
 
         obj = tf.nn.sigmoid(obj_pre_sigmoid)
-
-        render_obj = (
-            self.float_is_training * obj
-            + (1 - self.float_is_training) * tf.round(obj + 0.5 - self.render_threshold)
-        )
+        render_obj = obj
 
         return dict(
             obj_log_odds=obj_log_odds,
