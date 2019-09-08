@@ -146,7 +146,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
 
 class YoloAir_RenderHook(RenderHook):
-    fetches = "render_obj obj z inp output appearance n_objects normalized_box glimpse"
+    fetches = "obj z inp output appearance n_objects normalized_box glimpse"
 
     def __call__(self, updater):
         network = updater.network
@@ -274,7 +274,6 @@ class YoloAir_RenderHook(RenderHook):
         glimpse = fetched.get('glimpse', None)
         appearance = fetched['appearance']
         obj = fetched['obj']
-        render_obj = fetched['render_obj']
         z = fetched['z']
 
         on_colour = np.array(to_rgb("xkcd:azure"))
@@ -287,7 +286,6 @@ class YoloAir_RenderHook(RenderHook):
             cell_idx = 0
             for h, w, b in itertools.product(range(H), range(W), range(B)):
                 _obj = obj[idx, cell_idx, 0]
-                _render_obj = render_obj[idx, cell_idx, 0]
                 _z = z[idx, cell_idx, 0]
 
                 ax = axes[3*h, w * B + b]
@@ -306,7 +304,7 @@ class YoloAir_RenderHook(RenderHook):
                 ax = axes[3*h+1, w * B + b]
                 self.imshow(ax, appearance[idx, cell_idx, :, :, 3], cmap="gray")
 
-                ax.set_title("obj={:.2f}, render_obj={:.2f}, z={:.2f}, b={}".format(_obj, _render_obj, _z, b))
+                ax.set_title("obj={:.2f}, z={:.2f}, b={}".format(_obj, _z, b))
 
                 ax = axes[3*h+2, w * B + b]
                 ax.set_title("input glimpse")
@@ -372,7 +370,7 @@ class YoloAir_ComparisonRenderHook(RenderHook):
 
 
 class YoloAir_PaperSetRenderHook(RenderHook):
-    fetches = "obj render_obj z inp output appearance n_objects normalized_box glimpse"
+    fetches = "obj z inp output appearance n_objects normalized_box glimpse"
     do_annotations = True
 
     def __call__(self, updater):
@@ -458,7 +456,6 @@ class YoloAir_PaperSetRenderHook(RenderHook):
         glimpse = fetched.get('glimpse', None)
         appearance = fetched['appearance']
         obj = fetched['obj']
-        render_obj = fetched['render_obj']
         z = fetched['z']
 
         on_colour = np.array(to_rgb("xkcd:azure"))
@@ -471,7 +468,6 @@ class YoloAir_PaperSetRenderHook(RenderHook):
             cell_idx = 0
             for h, w, b in itertools.product(range(H), range(W), range(B)):
                 _obj = obj[idx, cell_idx, 0]
-                _render_obj = render_obj[idx, cell_idx, 0]
                 _z = z[idx, cell_idx, 0]
 
                 ax = axes[3*h, w * B + b]
@@ -490,7 +486,7 @@ class YoloAir_PaperSetRenderHook(RenderHook):
                 ax = axes[3*h+1, w * B + b]
                 self.imshow(ax, appearance[idx, cell_idx, :, :, 3], cmap="gray")
 
-                ax.set_title("obj={:.2f}, render_obj={:.2f}, z={:.2f}, b={}".format(_obj, _render_obj, _z, b))
+                ax.set_title("obj={:.2f}, z={:.2f}, b={}".format(_obj, _z, b))
 
                 ax = axes[3*h+2, w * B + b]
                 ax.set_title("input glimpse")

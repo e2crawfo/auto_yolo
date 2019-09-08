@@ -29,7 +29,6 @@ class ObjectLayer(ScopedFunction):
     edge_resampler = Param()
     obj_concrete_temp = Param(help="Higher values -> smoother")
     obj_temp = Param(help="Higher values -> more uniform")
-    render_threshold = Param()
 
     def __init__(self, scope=None, **kwargs):
         super().__init__(scope=scope, **kwargs)
@@ -202,7 +201,7 @@ class ObjectRenderer(ScopedFunction):
 
         obj_colors, obj_alpha = tf.split(appearance, [self.image_depth, 1], axis=-1)
 
-        obj_alpha *= tf.reshape(objects.render_obj, (batch_size, n_objects, 1, 1, 1))
+        obj_alpha *= tf.reshape(objects.obj, (batch_size, n_objects, 1, 1, 1))
 
         z = tf.reshape(objects.z, (batch_size, n_objects, 1, 1, 1))
         obj_importance = tf.maximum(obj_alpha * z / self.importance_temp, 0.01)
@@ -433,14 +432,12 @@ class GridObjectLayer(ObjectLayer):
         )
 
         obj = tf.nn.sigmoid(obj_pre_sigmoid)
-        render_obj = obj
 
         return dict(
             obj_log_odds=obj_log_odds,
             obj_prob=tf.nn.sigmoid(obj_log_odds),
             obj_pre_sigmoid=obj_pre_sigmoid,
             obj=obj,
-            render_obj=render_obj,
         )
 
     def _get_sequential_context(self, program, h, w, b, edge_element):

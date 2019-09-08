@@ -355,7 +355,7 @@ def mAP(pred_boxes, gt_boxes, n_classes, recall_values=None, iou_threshold=None)
 
 
 class AP:
-    keys_accessed = "normalized_box render_obj obj annotations n_annotations"
+    keys_accessed = "normalized_box obj annotations n_annotations"
 
     def __init__(self, iou_threshold=None, start_frame=0, end_frame=np.inf, is_training=False):
         if iou_threshold is not None:
