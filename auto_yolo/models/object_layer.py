@@ -644,6 +644,11 @@ class GridObjectLayer(ObjectLayer):
 
 
 class ConvGridObjectLayer(GridObjectLayer):
+    """ Similar to GridObjectLayer, but without lateral connections between grid locations. Only has
+        `lateral` connections between different fields/attributes, which are implemented by size-preserving
+        convolutional networks.
+
+    """
     def _call(self, inp, inp_features, is_training, is_posterior=True, prop_state=None):
         print("\n" + "-" * 10 + " ConvGridObjectLayer(is_posterior={}) ".format(is_posterior) + "-" * 10)
 

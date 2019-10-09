@@ -1,1 +1,4 @@
 dm-sonnet>=1.17
+tensorflow-probability==0.6.0
+tensorflow==1.13.1
+orderedattrdict==1.5.1

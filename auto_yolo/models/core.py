@@ -4,16 +4,14 @@ import collections
 from matplotlib.colors import to_rgb
 import matplotlib.pyplot as plt
 from matplotlib import animation
-import json
-from collections import defaultdict
 
 from dps import cfg
 from dps.updater import Updater as _Updater
 from dps.utils import Param, square_subplots
 from dps.utils.tf import (
     build_gradient_train_op, apply_mask_and_group_at_front,
-    ScopedFunction, build_scheduled_value, FIXED_COLLECTION)
-from dps.updater import DataManager
+    build_scheduled_value, FIXED_COLLECTION)
+from dps.updater import DataManager, Evaluator, TensorRecorder
 from dps.train import Hook
 
 
@@ -124,143 +122,6 @@ def coords_to_image_space(y, x, h, w, image_shape, anchor_box, top_left):
         x -= w / 2
 
     return y, x, h, w
-
-
-class DummyFunc:
-    keys_accessed = ""
-
-    def __call__(self, fetched, updater):
-        return {}
-
-
-class Evaluator:
-    """ A helper object for running a list of functions on a collection of evaluated tensors.
-
-    Parameters
-    ----------
-    functions: a dict (name-> function). Each function has an attribute `keys_accessed`
-               listing the keys (into `tensors`) that will be accessed required by that function.
-    tensors: a (possibly nested) dictionary of tensors which will provide the input to the functions
-    updater: the updater object, passed into the functions at eval time
-
-    """
-    def __init__(self, functions, tensors, updater):
-        self._functions = functions
-        self._tensors = tensors
-
-        # Force evaluation to happen at with the default feed_dict
-        functions["dummy"] = DummyFunc()
-
-        self.updater = updater
-
-        self.functions = defaultdict(list)
-        self.feed_dicts = {}
-        fetch_keys = defaultdict(set)
-
-        for name, func in functions.items():
-            if hasattr(func, 'get_feed_dict'):
-                feed_dict = func.get_feed_dict(updater)
-            else:
-                feed_dict = {}
-
-            fd_key = {str(k): str(v) for k, v in feed_dict.items()}
-            fd_key = json.dumps(fd_key, default=str, indent=4, sort_keys=True)
-
-            self.functions[fd_key].append((name, func))
-            self.feed_dicts[fd_key] = feed_dict
-
-            # store for the function
-
-            keys_accessed = func.keys_accessed
-
-            if isinstance(keys_accessed, str):
-                keys_accessed = keys_accessed.split()
-
-            for key in keys_accessed:
-                fetch_keys[fd_key].add(key)
-
-        self.fetches = {}
-
-        for fd_key, _fetch_keys in fetch_keys.items():
-            fetches = self.fetches[fd_key] = {}
-
-            for key in _fetch_keys:
-                dst = fetches
-                src = tensors
-                subkeys = key.split(":")
-
-                for i, _key in enumerate(subkeys):
-                    if i == len(subkeys)-1:
-                        dst[_key] = src[_key]
-                    else:
-                        if _key not in dst:
-                            dst[_key] = dict()
-                        dst = dst[_key]
-                        src = src[_key]
-
-    def _check_continue(self, record):
-        return True
-
-    def eval(self, recorded_tensors, data_manager, mode):
-        final_record = {}
-
-        for key, functions in self.functions.items():
-            if mode == "val":
-                feed_dict = data_manager.do_val()
-            elif mode == "test":
-                feed_dict = data_manager.do_test()
-            else:
-                raise Exception("Unknown evaluation mode: {}".format(mode))
-
-            extra_feed_dict = self.feed_dicts[key]
-            feed_dict.update(extra_feed_dict)
-
-            sess = tf.get_default_session()
-
-            n_points = 0
-            record = collections.defaultdict(float)
-            fetches = self.fetches.get(key, {})
-
-            while True:
-                try:
-                    if extra_feed_dict:
-                        _recorded_tensors = dict(batch_size=recorded_tensors['batch_size'])
-                        _record, fetched = sess.run([_recorded_tensors, fetches], feed_dict=feed_dict)
-                    else:
-                        # Only get values from recorded_tensors when using the default feed dict.
-                        _record, fetched = sess.run([recorded_tensors, fetches], feed_dict=feed_dict)
-                except tf.errors.OutOfRangeError:
-                    break
-
-                for name, func in functions:
-                    result = func(fetched, self.updater)
-
-                    if isinstance(result, dict):
-                        for k, v in result.items():
-                            _record["{}:{}".format(name, k)] = np.mean(v)
-                    else:
-                        _record[name] = np.mean(result)
-
-                batch_size = _record['batch_size']
-
-                # Assumes that each record entry is an average over the batch
-                for k, v in _record.items():
-                    record[k] += batch_size * v
-
-                n_points += batch_size
-
-                do_continue = self._check_continue(_record)
-                if not do_continue:
-                    break
-
-            record = {k: v / n_points for k, v in record.items()}
-
-            intersection = record.keys() & final_record.keys() - set(['batch_size'])
-            assert not intersection, "Key sets have non-zero intersection: {}".format(intersection)
-
-            final_record.update(record)
-
-        return final_record
 
 
 def compute_iou(box, others):
@@ -487,10 +348,7 @@ class Updater(_Updater):
         return result
 
     def _build_graph(self):
-        self.data_manager = DataManager(self.env.datasets['train'],
-                                        self.env.datasets['val'],
-                                        self.env.datasets['test'],
-                                        cfg.batch_size)
+        self.data_manager = DataManager(datasets=self.env.datasets)
         self.data_manager.build_graph()
 
         data = self.data_manager.iterator.get_next()
@@ -649,20 +507,6 @@ class EvalHook(Hook):
         anim.save(path, writer='imagemagick')
 
         plt.close(fig)
-
-
-class TensorRecorder(ScopedFunction):
-    _recorded_tensors = None
-
-    def record_tensors(self, **kwargs):
-        for k, v in kwargs.items():
-            self.recorded_tensors[k] = tf.reduce_mean(tf.to_float(v))
-
-    @property
-    def recorded_tensors(self):
-        if self._recorded_tensors is None:
-            self._recorded_tensors = {}
-        return self._recorded_tensors
 
 
 class VariationalAutoencoder(TensorRecorder):

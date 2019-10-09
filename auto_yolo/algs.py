@@ -14,6 +14,7 @@ from auto_yolo.models import core, simple, baseline, ground_truth, yolo_air, air
 alg_config = Config(
     get_updater=core.Updater,
 
+    shuffle_buffer_size=10000,
     batch_size=32,
     lr_schedule=1e-4,
     optimizer_spec="adam",
@@ -50,6 +51,7 @@ alg_config = Config(
     n_objects_per_cell=1,
     importance_temp=0.25,
     edge_resampler=False,
+    eval_noisy=False,
 
     train_reconstruction=True,
     train_kl=True,

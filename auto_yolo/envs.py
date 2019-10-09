@@ -4,8 +4,7 @@ import itertools
 from dps import cfg
 from dps.datasets import (
     GridEmnistObjectDetectionDataset, EmnistObjectDetectionDataset,
-    VisualArithmeticDataset, GameDataset)
-from dps.env.basic import collect
+    VisualArithmeticDataset)
 from dps.datasets.base import Environment
 from dps.datasets.shapes import ShapesDataset, BlueXAboveRedCircle, SetThreeAttr
 from dps.datasets.clevr import ClevrDataset
@@ -199,9 +198,13 @@ class Nips2018Atari(Environment):
 
 class Nips2018Collect(Environment):
     def __init__(self):
+        from dps.env.basic import collect
+        from dps.datasets.game import GameDataset
+
         train_seed, val_seed, test_seed = 0, 1, 2
 
         env = collect.build_env().gym_env
+
         train = GameDataset(env=env, n_examples=cfg.n_train, seed=train_seed)
         val = GameDataset(env=env, n_examples=cfg.n_val, seed=val_seed)
         test = GameDataset(env=env, n_examples=cfg.n_val, seed=test_seed)
