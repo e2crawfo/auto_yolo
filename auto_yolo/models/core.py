@@ -641,7 +641,7 @@ class VariationalAutoencoder(TensorRecorder):
 
     def build_background(self):
         if self.needs_background:
-            if cfg.background_cfg.mode == "colour":
+            if cfg.background_cfg.mode in ["colour", "color"]:
                 rgb = np.array(to_rgb(cfg.background_cfg.colour))[None, None, None, :]
                 background = rgb * tf.ones_like(self.inp)
 

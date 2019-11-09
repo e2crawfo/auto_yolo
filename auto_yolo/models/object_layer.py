@@ -204,6 +204,8 @@ class ObjectRenderer(ScopedFunction):
         obj_alpha *= tf.reshape(objects.obj, (batch_size, n_objects, 1, 1, 1))
 
         z = tf.reshape(objects.z, (batch_size, n_objects, 1, 1, 1))
+
+        # We use a minimum value to handle case where none of objects want to use a large value.
         obj_importance = tf.maximum(obj_alpha * z / self.importance_temp, 0.01)
 
         object_maps = tf.concat([obj_colors, obj_alpha, obj_importance], axis=-1)
@@ -222,11 +224,87 @@ class ObjectRenderer(ScopedFunction):
 
         # --- Compose images ---
 
-        n_objects_per_image = tf.fill((batch_size,), int(n_objects))
+        output = render_sprites.render_sprites(
+            [object_maps],
+            [scales],
+            [offsets],
+            background
+        )
+        # output = render_sprites.render_sprites(
+        #     [object_maps, object_maps],
+        #     [scales, scales],
+        #     [offsets, offsets],
+        #     background
+        # )
+
+        return dict(
+            appearance=appearance_for_output,
+            output=output)
+
+
+class MultiscaleObjectRenderer(ObjectRenderer):
+    object_shape = None
+    anchor_box = None
+
+    def __init__(self, anchor_boxes, object_shapes, scope=None, **kwargs):
+        self.anchor_boxes = anchor_boxes
+        self.object_shapes = object_shapes
+
+        super().__init__(scope=scope, **kwargs)
+
+    def _call(self, objects, background, is_training, appearance_only=False):
+        if not self.initialized:
+            self.image_depth = tf_shape(background)[-1]
+
+        self.maybe_build_subnet("object_decoder")
+
+        # --- compute sprite appearance from attr using object decoder ---
+
+        appearance_logit = apply_object_wise(
+            self.object_decoder, objects.attr,
+            output_size=self.object_shape + (self.image_depth+1,),
+            is_training=is_training)
+
+        appearance_logit = appearance_logit * ([self.color_logit_scale] * self.image_depth + [self.alpha_logit_scale])
+        appearance_logit = appearance_logit + ([0.] * self.image_depth + [self.alpha_logit_bias])
+
+        appearance = tf.nn.sigmoid(tf.clip_by_value(appearance_logit, -10., 10.))
+
+        if appearance_only:
+            return dict(appearance=appearance)
+
+        appearance_for_output = appearance
+
+        batch_size, *obj_leading_shape, _, _, _ = tf_shape(appearance)
+        n_objects = np.prod(obj_leading_shape)
+        appearance = tf.reshape(
+            appearance, (batch_size, n_objects, *self.object_shape, self.image_depth+1))
+
+        obj_colors, obj_alpha = tf.split(appearance, [self.image_depth, 1], axis=-1)
+
+        obj_alpha *= tf.reshape(objects.obj, (batch_size, n_objects, 1, 1, 1))
+
+        z = tf.reshape(objects.z, (batch_size, n_objects, 1, 1, 1))
+        obj_importance = tf.maximum(obj_alpha * z / self.importance_temp, 0.01)
+
+        object_maps = tf.concat([obj_colors, obj_alpha, obj_importance], axis=-1)
+
+        *_, image_height, image_width, _ = tf_shape(background)
+
+        yt, xt, ys, xs = coords_to_image_space(
+            objects.yt, objects.xt, objects.ys, objects.xs,
+            (image_height, image_width), self.anchor_box, top_left=True)
+
+        scales = tf.concat([ys, xs], axis=-1)
+        scales = tf.reshape(scales, (batch_size, n_objects, 2))
+
+        offsets = tf.concat([yt, xt], axis=-1)
+        offsets = tf.reshape(offsets, (batch_size, n_objects, 2))
+
+        # --- Compose images ---
 
         output = render_sprites.render_sprites(
             object_maps,
-            n_objects_per_image,
             scales,
             offsets,
             background
@@ -265,10 +343,11 @@ class GridObjectLayer(ObjectLayer):
 
     edge_weights = None
 
-    def __init__(self, pixels_per_cell, scope=None, **kwargs):
+    def __init__(self, pixels_per_cell, grid_offset=None, scope=None, **kwargs):
         super(GridObjectLayer, self).__init__(scope=scope, **kwargs)
 
         self.pixels_per_cell = pixels_per_cell
+        self.grid_offset = np.zeros(2) if grid_offset is None else grid_offset
 
         self.B = self.n_objects_per_cell
 
@@ -359,6 +438,7 @@ class GridObjectLayer(ObjectLayer):
 
         height = tf.nn.sigmoid(tf.clip_by_value(height_logit, -10, 10))
         width = tf.nn.sigmoid(tf.clip_by_value(width_logit, -10, 10))
+
         assert self.max_hw > self.min_hw
 
         height = float(self.max_hw - self.min_hw) * height + self.min_hw
@@ -378,12 +458,11 @@ class GridObjectLayer(ObjectLayer):
                 tf.range(self.H, dtype=tf.float32))
             h = h[None, :, :, None]
             w = w[None, :, :, None]
-            yt = (self.pixels_per_cell[0] / self.anchor_box[0]) * (cell_y + h)
-            xt = (self.pixels_per_cell[1] / self.anchor_box[1]) * (cell_x + w)
         else:
             h, w = hw
-            yt = (self.pixels_per_cell[0] / self.anchor_box[0]) * (cell_y + h)
-            xt = (self.pixels_per_cell[1] / self.anchor_box[1]) * (cell_x + w)
+
+        yt = (self.pixels_per_cell[0] * (cell_y + h) + self.grid_offset[0]) / self.anchor_box[0]
+        xt = (self.pixels_per_cell[1] * (cell_x + w) + self.grid_offset[1]) / self.anchor_box[1]
 
         normalized_box = tf.concat([yt, xt, ys, xs], axis=-1)
 
@@ -482,7 +561,7 @@ class GridObjectLayer(ObjectLayer):
 
         self.maybe_build_subnet("object_encoder")
 
-        _, H, W, _, _ = tf_shape(inp_features)
+        _, H, W, _ = tf_shape(inp_features)
         H = int(H)
         W = int(W)
 
@@ -532,7 +611,7 @@ class GridObjectLayer(ObjectLayer):
 
             partial_program, features = None, None
             context = self._get_sequential_context(program, h, w, b, edge_element)
-            base_features = tf.concat([inp_features[:, h, w, b, :], context, is_posterior_tf], axis=1)
+            base_features = tf.concat([inp_features[:, h, w, :], context, is_posterior_tf], axis=1)
 
             # --- box ---
 
@@ -649,8 +728,10 @@ class ConvGridObjectLayer(GridObjectLayer):
         convolutional networks.
 
     """
+    n_lookback = None
+
     def _call(self, inp, inp_features, is_training, is_posterior=True, prop_state=None):
-        print("\n" + "-" * 10 + " ConvGridObjectLayer(is_posterior={}) ".format(is_posterior) + "-" * 10)
+        print("\n" + "-" * 10 + " ConvGridObjectLayer({}, is_posterior={}) ".format(self.name, is_posterior) + "-" * 10)
 
         # --- set up sub networks and attributes ---
 
@@ -661,7 +742,7 @@ class ConvGridObjectLayer(GridObjectLayer):
 
         self.maybe_build_subnet("object_encoder")
 
-        _, H, W, _, n_channels = tf_shape(inp_features)
+        _, H, W, n_channels = tf_shape(inp_features)
 
         if self.B != 1:
             raise Exception("NotImplemented")
@@ -677,7 +758,6 @@ class ConvGridObjectLayer(GridObjectLayer):
             self.is_training = is_training
             self.float_is_training = tf.to_float(is_training)
 
-        inp_features = tf.reshape(inp_features, (self.batch_size, H, W, n_channels))
         is_posterior_tf = tf.ones_like(inp_features[..., :2])
         if is_posterior:
             is_posterior_tf = is_posterior_tf * [1, 0]

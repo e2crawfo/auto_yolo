@@ -90,16 +90,14 @@ class Nips2018Grid(Environment):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
         train = GridEmnistObjectDetectionDataset(
-            n_examples=int(cfg.n_train), shuffle=True,
+            n_examples=int(cfg.n_train),
             example_range=cfg.train_example_range, seed=train_seed)
 
         val = GridEmnistObjectDetectionDataset(
-            n_examples=int(cfg.n_val), shuffle=True,
-            example_range=cfg.val_example_range, seed=val_seed)
+            n_examples=int(cfg.n_val), example_range=cfg.val_example_range, seed=val_seed)
 
         test = GridEmnistObjectDetectionDataset(
-            n_examples=int(cfg.n_val), shuffle=True,
-            example_range=cfg.test_example_range, seed=test_seed)
+            n_examples=int(cfg.n_val), example_range=cfg.test_example_range, seed=test_seed)
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -108,16 +106,13 @@ class Nips2018Scatter(Environment):
     def __init__(self):
         train_seed, val_seed, test_seed = 0, 1, 2
         train = EmnistObjectDetectionDataset(
-            n_examples=int(cfg.n_train), shuffle=True,
-            example_range=cfg.train_example_range, seed=train_seed)
+            n_examples=int(cfg.n_train), example_range=cfg.train_example_range, seed=train_seed)
 
         val = EmnistObjectDetectionDataset(
-            n_examples=int(cfg.n_val), shuffle=True,
-            example_range=cfg.val_example_range, seed=val_seed)
+            n_examples=int(cfg.n_val), example_range=cfg.val_example_range, seed=val_seed)
 
         test = EmnistObjectDetectionDataset(
-            n_examples=int(cfg.n_val), shuffle=True,
-            example_range=cfg.test_example_range, seed=test_seed)
+            n_examples=int(cfg.n_val), example_range=cfg.test_example_range, seed=test_seed)
 
         self.datasets = dict(train=train, val=val, test=test)
 
@@ -127,16 +122,13 @@ class Nips2018Arithmetic(Environment):
         train_seed, val_seed, test_seed = 0, 1, 2
 
         train = VisualArithmeticDataset(
-            n_examples=int(cfg.n_train), shuffle=True,
-            example_range=cfg.train_example_range, seed=train_seed)
+            n_examples=int(cfg.n_train), example_range=cfg.train_example_range, seed=train_seed)
 
         val = VisualArithmeticDataset(
-            n_examples=int(cfg.n_val), shuffle=True,
-            example_range=cfg.val_example_range, seed=val_seed)
+            n_examples=int(cfg.n_val), example_range=cfg.val_example_range, seed=val_seed)
 
         test = VisualArithmeticDataset(
-            n_examples=int(cfg.n_val), shuffle=True,
-            example_range=cfg.test_example_range, seed=test_seed)
+            n_examples=int(cfg.n_val), example_range=cfg.test_example_range, seed=test_seed)
 
         self.datasets = dict(train=train, val=val, test=test)
 

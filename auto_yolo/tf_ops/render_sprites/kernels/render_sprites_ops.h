@@ -20,6 +20,10 @@
 #define __restrict__ __restrict
 #endif
 
+#include <vector>
+#include "tensorflow/core/framework/register_types.h"
+#include "tensorflow/core/framework/op_kernel.h"
+
 namespace tensorflow {
 class OpKernelContext;
 }
@@ -27,29 +31,31 @@ class OpKernelContext;
 namespace tensorflow {
 namespace functor {
 
+template<typename T> void allocate_temp_array(
+        ::tensorflow::OpKernelContext* ctx, T** ptr_address, int n_elements, Tensor* tensor){
+
+    int n_bytes = n_elements * sizeof(T);
+    OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_UINT8, TensorShape({n_bytes}), tensor));
+    *ptr_address = reinterpret_cast<T*>(tensor->flat<unsigned char>().data());
+}
 
 template <typename Device, typename T>
 struct RenderSprites2DFunctor {
   void operator ()(::tensorflow::OpKernelContext* ctx,
                    const Device& d,
 
-                   const T* __restrict__ sprites,
-                   const int* __restrict__ n_sprites,
-                   const T* __restrict__ scales,
-                   const T* __restrict__ offsets,
+                   const std::vector<int>& shapes,
+
+                   const std::vector<const T*>& sprites,
+                   const std::vector<const T*>& scales,
+                   const std::vector<const T*>& offsets,
                    const T* __restrict__ backgrounds,
 
                    T* __restrict__ output,
 
                    const int batch_size,
-
-                   const int max_sprites,
-                   const int sprite_height,
-                   const int sprite_width,
-
                    const int img_height,
                    const int img_width,
-
                    const int n_channels);
 };
 
@@ -58,28 +64,23 @@ struct RenderSpritesGrad2DFunctor {
   void operator ()(::tensorflow::OpKernelContext* ctx,
                    const Device& d,
 
-                   const T* __restrict__ sprites,
-                   const int* __restrict__ n_sprites,
-                   const T* __restrict__ scales,
-                   const T* __restrict__ offsets,
+                   const std::vector<int>& shapes,
+
+                   const std::vector<const T*>& sprites,
+                   const std::vector<const T*>& scales,
+                   const std::vector<const T*>& offsets,
                    const T* __restrict__ backgrounds,
+
                    const T* __restrict__ grad_output,
 
-                   T* __restrict__ grad_sprites,
-                   T* __restrict__ grad_n_sprites,
-                   T* __restrict__ grad_scales,
-                   T* __restrict__ grad_offsets,
+                   const std::vector<T*>& grad_sprites,
+                   const std::vector<T*>& grad_scales,
+                   const std::vector<T*>& grad_offsets,
                    T* __restrict__ grad_backgrounds,
 
                    const int batch_size,
-
-                   const int max_sprites,
-                   const int sprite_height,
-                   const int sprite_width,
-
                    const int img_height,
                    const int img_width,
-
                    const int n_channels);
 };
 

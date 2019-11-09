@@ -19,7 +19,7 @@ all: _render_sprites.so
 render_sprites_ops_gpu.cu.o: kernels/render_sprites_ops_gpu.cu.cc kernels/render_sprites_ops.h
 	nvcc -std=c++11 -c -o render_sprites_ops_gpu.cu.o kernels/render_sprites_ops_gpu.cu.cc -Ikernels -I$(CUDA_INC_HACK) $(TF_CFLAGS) -D GOOGLE_CUDA=1 -x cu -Xcompiler -fPIC --expt-relaxed-constexpr -DNDEBUG
 
-_render_sprites.so: render_sprites_ops_gpu.cu.o kernels/render_sprites_ops.cc kernels/render_sprites_ops.h
+_render_sprites.so: render_sprites_ops_gpu.cu.o kernels/render_sprites_ops.cc kernels/render_sprites_ops.h ops/render_sprites_ops.cc
 	g++ -std=c++11 -shared ops/render_sprites_ops.cc render_sprites_ops_gpu.cu.o kernels/render_sprites_ops.cc -o _render_sprites.so -fPIC -Ikernels $(TF_CFLAGS) $(TF_LFLAGS) -O2 -D GOOGLE_CUDA=1
 
 clean:

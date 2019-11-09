@@ -5,22 +5,7 @@ import os
 from dps.datasets.base import (
     ImageDataset, ImageFeature, VariableShapeArrayFeature, ArrayFeature, StringFeature
 )
-from dps.utils import Param, atleast_nd
-
-
-def walk_images(path, extensions=None):
-    extensions = extensions or 'jpg jpeg png'
-    if isinstance(extensions, str):
-        extensions = extensions.split()
-    extensions = [ext if ext.startswith('.') else '.' + ext for ext in extensions]
-
-    for dir_name, _, filenames in os.walk(path):
-        local_path_start = len(path) + (0 if path.endswith('/') else 1)
-        local_path = dir_name[local_path_start:]
-
-        for f in filenames:
-            if any(f.endswith(ext) for ext in extensions):
-                yield os.path.join(local_path, f)
+from dps.utils import Param, atleast_nd, walk_images
 
 
 class FITSDataset(ImageDataset):
@@ -29,7 +14,7 @@ class FITSDataset(ImageDataset):
     image_shape = None
 
     """
-    Params inhereited from ImageDataset, listed here for clarity.
+    Params inherited from ImageDataset, listed here for clarity.
 
     postprocessing = Param("")
     tile_shape = Param(None)
@@ -86,11 +71,9 @@ if __name__ == "__main__":
     import tensorflow as tf
     import matplotlib.pyplot as plt
     from astropy.utils.data import get_pkg_data_filename
-    from astropy.visualization import astropy_mpl_style
-    plt.style.use(astropy_mpl_style)
 
-    image_file = get_pkg_data_filename('galactic_center/gc_2mass_k.fits')
-    # image_file = get_pkg_data_filename('tutorials/FITS-images/HorseHead.fits')
+    # image_file = get_pkg_data_filename('galactic_center/gc_2mass_k.fits')
+    image_file = get_pkg_data_filename('tutorials/FITS-images/HorseHead.fits')
     image_data = fits.getdata(image_file, ext=0)
 
     plt.figure()
@@ -101,8 +84,8 @@ if __name__ == "__main__":
     n = 32
 
     dset = FITSDataset(
-        fits_file=image_file, postprocessing='random',
-        n_samples_per_image=n, tile_shape=(50, 50),
+        fits_file=image_file, postprocessing='tile_pad',
+        n_samples_per_image=n, tile_shape=(200, 200),
         force_memmap=False,
     )
     print(dset.depth)

@@ -21,7 +21,6 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-import traceback
 
 import tensorflow as tf
 from tensorflow.python.framework import ops
@@ -45,51 +44,69 @@ def lib_avail():
     return so is not None
 
 
-def render_sprites(sprites, n_sprites, scales, offsets, backgrounds, name="render_sprites"):
-  """ Render a scene composed of sprites on top of a background.
+def render_sprites(sprites, scales, offsets, backgrounds, name="render_sprites"):
+    """ Render a scene composed of sprites on top of a background.
 
-  Currently only supports bilinear interpolation.
+    Sprites should be organized into a series of `flights`. Each flight uses a different sprite size.
 
-  An implicit scene is composed by scaling the sprites by `scales`, translating
-  them by `offsets`, and putting them on top of the background.
+    The coordinate system for scales and offsets has (0, 0) at the image top-left and (1, 1) at the image bottom-right.
 
-  Args:
-    sprites: Tensor of shape `[batch_size, n_sprites, sprite_height, sprite_width, n_channels+1]`
-      The final channel is priority channel and must be > 0.
-    n_sprites: Tensor of shape `[batch_size,]`
-      i-th entry gives number of active sprites for the i-th image (the first i sprites are used)
-    scales: Tensor of shape `[batch_size, n_sprites, 2]`
-      Amount to scale sprites by. Order is y, x.
-    offsets: Tensor of shape `[batch_size, n_sprites, 2]`
-      Amount to offset sprites by. Order is y, x.
-    backgrounds: Tensor of shape `[batch_size, output_height, output_width, n_channels]`
-      The background for each image.
-    name: Optional name of the op.
+    Currently only supports bilinear interpolation.
 
-  Returns:
-    Tensor giving the stitched images. Shape is
-    `[batch_size, output_height, output_width, n_channels]`, same as `backgrounds`.
+    An implicit scene is composed by scaling the sprites by `scales`, translating
+    them by `offsets`, and putting them on top of the background.
 
-  Raises:
-    ImportError: if the wrapper generated during compilation is not present when
-    the function is called.
-  """
-  with ops.name_scope(name, "render_sprites", [sprites, n_sprites, scales, offsets, backgrounds]):
-    sprites_tensor = ops.convert_to_tensor(sprites, name="sprites")
-    n_sprites_tensor = ops.convert_to_tensor(n_sprites, dtype=tf.int32, name="n_sprites")
-    scales_tensor = ops.convert_to_tensor(scales, name="scales")
-    offsets_tensor = ops.convert_to_tensor(offsets, name="offsets")
-    backgrounds_tensor = ops.convert_to_tensor(backgrounds, name="backgrounds")
-    return render_sprites_so().render_sprites(
-      sprites_tensor, n_sprites_tensor, scales_tensor, offsets_tensor, backgrounds_tensor)
+    Args:
+      sprites: List of tensors of length `n_flights`, each of shape
+        (batch_size, sprite_height_i, sprite_width_i, n_channels+2)
+        The sprites in flight i are assumed to have shape (sprite_height_i, sprite_width_i).
+        The final two channels are the alpha and importance channels.
+      scales: Tensor of shape `[batch_size, n_sprites, 2]`
+        Amount to scale sprites by. Order is y, x. A value of 1 will have the sprite occupy the whole output image.
+      offsets: Tensor of shape `[batch_size, n_sprites, 2]`
+        Location of top-left corner of each sprite. Order is y, x.
+      backgrounds: Tensor of shape `[batch_size, output_height, output_width, n_channels]`
+        The background for each image.
+      name: Optional name of the op.
+
+    Returns:
+      Tensor giving the stitched images. Shape is
+      `(batch_size, output_height, output_width, n_channels)`, same as `backgrounds`.
+
+    Raises:
+      ImportError: if the wrapper generated during compilation is not present when
+      the function is called.
+    """
+    with ops.name_scope(name, "render_sprites", [sprites, scales, offsets, backgrounds]):
+        sprites_tensor_list = [
+            ops.convert_to_tensor(s, name="sprites_flight_{}".format(i))
+            for i, s in enumerate(sprites)]
+        scales_tensor_list = [
+            ops.convert_to_tensor(s, name="scales_flight_{}".format(i))
+            for i, s in enumerate(scales)]
+        offsets_tensor_list = [
+            ops.convert_to_tensor(s, name="offsets_flight_{}".format(i))
+            for i, s in enumerate(offsets)]
+
+        backgrounds_tensor = ops.convert_to_tensor(backgrounds, name="backgrounds")
+
+        return render_sprites_so().render_sprites(
+            sprites_tensor_list, scales_tensor_list, offsets_tensor_list, backgrounds_tensor)
 
 
 @ops.RegisterGradient("RenderSprites")
 def _render_sprites_grad(op, grad_output):
-  sprites, n_sprites, scales, offsets, backgrounds = op.inputs
-  grad_output_tensor = ops.convert_to_tensor(grad_output, name="grad_output")
-  return render_sprites_so().render_sprites_grad(
-    sprites, n_sprites, scales, offsets, backgrounds, grad_output_tensor)
+    # op.inputs is a flattened list of all inputs.
+    M = len(op.inputs)
+    n_flights = (M - 1) // 3
+    sprites = op.inputs[:n_flights]
+    scales = op.inputs[n_flights:2*n_flights]
+    offsets = op.inputs[2*n_flights:3*n_flights]
+    backgrounds = op.inputs[3*n_flights]
+    grad_output_tensor = ops.convert_to_tensor(grad_output, name="grad_output")
+    output = render_sprites_so().render_sprites_grad(
+        sprites, scales, offsets, backgrounds, grad_output_tensor, M=M)
+    return output
 
 
 ops.NotDifferentiable("RenderSpritesGrad")

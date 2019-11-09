@@ -22,72 +22,77 @@ using ::tensorflow::shape_inference::InferenceContext;
 using ::tensorflow::shape_inference::ShapeHandle;
 
 REGISTER_OP("RenderSprites")
-    .Input("sprites: T")
-    .Input("n_sprites: int32")
-    .Input("scales: T")
-    .Input("offsets: T")
+    .Input("sprites: N * T")
+    .Input("scales: N * T")
+    .Input("offsets: N * T")
     .Input("backgrounds: T")
 
     .Output("output: T")
 
+    .Attr("N: int")
     .Attr("T: {float}")
-    // .Attr("T: {half, float, double}")
 
     .SetShapeFn([](InferenceContext* c) {
-      ShapeHandle sprites;
-      ShapeHandle n_sprites;
-      ShapeHandle scales;
-      ShapeHandle offsets;
-      ShapeHandle backgrounds;
+      int N;
+      TF_RETURN_IF_ERROR(c->GetAttr("N", &N));
+      for(int i=0; i < N; i++){
+        ShapeHandle sprites_shape;
+        TF_RETURN_IF_ERROR(c->WithRank(c->input(i), 5, &sprites_shape));
+        ShapeHandle scales_shape;
+        TF_RETURN_IF_ERROR(c->WithRank(c->input(N+i), 3, &scales_shape));
+        ShapeHandle offsets_shape;
+        TF_RETURN_IF_ERROR(c->WithRank(c->input(2*N+i), 3, &offsets_shape));
+      }
 
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 5, &sprites));
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &n_sprites));
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 3, &scales));
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 3, &offsets));
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(4), 4, &backgrounds));
+      ShapeHandle backgrounds_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3*N), 4, &backgrounds_shape));
 
-      c->set_output(0, backgrounds);
+      c->set_output(0, backgrounds_shape);
+
       return ::tensorflow::Status::OK();
     })
     .Doc(R"doc(RenderSprites op.)doc");
 
 REGISTER_OP("RenderSpritesGrad")
-    .Input("sprites: T")
-    .Input("n_sprites: int32")
-    .Input("scales: T")
-    .Input("offsets: T")
+    .Input("sprites: N * T")
+    .Input("scales: N * T")
+    .Input("offsets: N * T")
     .Input("backgrounds: T")
     .Input("grad_output: T")
 
-    .Output("grad_sprites: T")
-    .Output("grad_n_sprites: T")
-    .Output("grad_scales: T")
-    .Output("grad_offsets: T")
-    .Output("grad_backgrounds: T")
+    .Output("grads: M * T")
 
+    // .Output("grad_sprites: N * T")
+    // .Output("grad_scales: N * T")
+    // .Output("grad_offsets: N * T")
+    // .Output("grad_backgrounds: T")
+
+    .Attr("N: int")
+    .Attr("M: int")
     .Attr("T: {float}")
-    // .Attr("T: {half, float, double}")
 
     .SetShapeFn([](InferenceContext* c) {
-      ShapeHandle sprites;
-      ShapeHandle n_sprites;
-      ShapeHandle scales;
-      ShapeHandle offsets;
-      ShapeHandle backgrounds;
-      ShapeHandle grad_output;
+      int N;
+      TF_RETURN_IF_ERROR(c->GetAttr("N", &N));
+      for(int i=0; i < N; i++){
+        ShapeHandle sprites_shape;
+        TF_RETURN_IF_ERROR(c->WithRank(c->input(i), 5, &sprites_shape));
+        c->set_output(i, sprites_shape);
 
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 5, &sprites));
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(1), 1, &n_sprites));
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(2), 3, &scales));
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(3), 3, &offsets));
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(4), 4, &backgrounds));
-      TF_RETURN_IF_ERROR(c->WithRank(c->input(5), 4, &grad_output));
+        ShapeHandle scales_shape;
+        TF_RETURN_IF_ERROR(c->WithRank(c->input(N+i), 3, &scales_shape));
+        c->set_output(N+i, scales_shape);
 
-      c->set_output(0, sprites);
-      c->set_output(1, n_sprites);
-      c->set_output(2, scales);
-      c->set_output(3, offsets);
-      c->set_output(4, backgrounds);
+        ShapeHandle offsets_shape;
+        TF_RETURN_IF_ERROR(c->WithRank(c->input(2*N+i), 3, &offsets_shape));
+        c->set_output(2*N+i, offsets_shape);
+      }
+
+      ShapeHandle backgrounds_shape, grad_output_shape;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3*N), 4, &backgrounds_shape));
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(3*N+1), 4, &grad_output_shape));
+
+      c->set_output(3*N, backgrounds_shape);
 
       return ::tensorflow::Status::OK();
     })
