@@ -60,11 +60,12 @@ def _get_data():
     image_shape = (100, 100)
     batch_size = 16
 
-    # shapes = ((50, 50), (25, 25), (12, 12), (6, 6))
-    # n_shapes = [4, 8, 16, 32]
+    shapes = ((50, 50), (25, 25), (12, 12), (6, 6))
+    n_sprites = [4, 8, 16, 32]
 
-    # sprite_shapes = [(25, 25)]
+    # sprite_shapes = [(14, 14)]
     # n_sprites = [2]
+    # n_sprites = [16]
     sprite_shapes = [(50, 50), (25, 25), (12, 12)]
     n_sprites = [2, 4, 8]
 
@@ -75,6 +76,8 @@ def _get_data():
     bg_colors = list('w')
 
     sprites = [[] for i in range(n_flights)]
+    sprite_color_names = [[] for i in range(n_flights)]
+    sprite_shape_names = [[] for i in range(n_flights)]
     backgrounds = []
 
     for b in range(batch_size):
@@ -85,6 +88,8 @@ def _get_data():
 
             patches = [make_patch(ss, _c, _s, i) for _c, _s, i in zip(c, s, importances)]
             sprites[i].append(patches)
+            sprite_color_names[i].append(c)
+            sprite_shape_names[i].append(s)
 
         bg_color = np.random.choice(bg_colors)
         bg_shape = np.random.choice(shapes)
@@ -98,7 +103,20 @@ def _get_data():
     scales = [
         (np.ones((batch_size, ns, 2)) * (np.array(ss) / np.array(image_shape))).astype('f')
         for ss, ns in zip(sprite_shapes, n_sprites)]
-    offsets = [0.5 * np.random.rand(batch_size, ns, 2).astype('f') for ns in n_sprites]
+    offsets = [np.random.rand(*s.shape).astype('f') * (1-s) for s in scales]
+
+    for b in range(batch_size):
+        print("\n\n")
+        print("Batch element : {}".format(b))
+        for f in range(n_flights):
+            print('\n')
+            print('flight : {}'.format(f))
+
+            print(sprite_color_names[f][b])
+            print(sprite_shape_names[f][b])
+            print(scales[f][b])
+            print(offsets[f][b])
+
     backgrounds = np.array(backgrounds).astype('f')
 
     return sprites, scales, offsets, backgrounds
@@ -263,13 +281,54 @@ def _test_gradient(device):
 
 if __name__ == "__main__":
 
-    with NumpySeed(np.random.randint(100000)):
+    from contextlib import ExitStack
+
+    with NumpySeed(100000):
         sprites, scales, offsets, backgrounds = _get_data()
 
-        with tf.device('/{}:0'.format('gpu')):
-            images = render_sprites.render_sprites(sprites, scales, offsets, backgrounds)
-            sess = get_session()
-            result = sess.run(images)
+        device = 'gpu'
+
+        print("Running...")
+
+        session_config = tf.ConfigProto()
+        session_config.log_device_placement = 1
+        session_config.gpu_options.per_process_gpu_memory_fraction = 0.1
+        session_config.gpu_options.allow_growth = True
+
+        graph = tf.Graph()
+        sess = tf.Session(graph=graph, config=session_config)
+
+        with ExitStack() as stack:
+            stack.enter_context(graph.as_default())
+            stack.enter_context(sess)
+            stack.enter_context(sess.as_default())
+
+            sprites_ph = [tf.placeholder(tf.float32, (None, *s.shape[1:])) for s in sprites]
+            scales_ph = [tf.placeholder(tf.float32, (None, *s.shape[1:])) for s in scales]
+            offsets_ph = [tf.placeholder(tf.float32, (None, *s.shape[1:])) for s in offsets]
+            backgrounds_ph = tf.placeholder(tf.float32, (None, *backgrounds.shape[1:]))
+
+            with tf.device('/{}:0'.format(device)):
+                images = render_sprites.render_sprites(sprites_ph, scales_ph, offsets_ph, backgrounds_ph)
+
+            d = {}
+            d.update({ph: a for ph, a in zip(sprites_ph, sprites)})
+            d.update({ph: a for ph, a in zip(scales_ph, scales)})
+            d.update({ph: a for ph, a in zip(offsets_ph, offsets)})
+            d[backgrounds_ph] = backgrounds
+            result = sess.run(images, feed_dict=d)
+
+        from dps.utils import image_to_string
+        print(image_to_string(result[0, ..., 0]))
+        print()
+        print(image_to_string(result[0, ..., 1]))
+        print()
+        print(image_to_string(result[0, ..., 2]))
+        print()
+
+        print(result)
+
+        print("Done running.")
 
         # Sometimes we get values like 1.0001, nothing really bad.
         result = np.clip(result, 1e-6, 1-1e-6)
@@ -277,6 +336,7 @@ if __name__ == "__main__":
         import matplotlib.pyplot as plt
         from dps.utils import square_subplots
         fig, axes = square_subplots(len(sprites[0]))
+        fig.suptitle(device)
         for img, ax in zip(result, axes.flatten()):
             ax.imshow(img)
         plt.show()

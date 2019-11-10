@@ -62,11 +62,6 @@ REGISTER_OP("RenderSpritesGrad")
 
     .Output("grads: M * T")
 
-    // .Output("grad_sprites: N * T")
-    // .Output("grad_scales: N * T")
-    // .Output("grad_offsets: N * T")
-    // .Output("grad_backgrounds: T")
-
     .Attr("N: int")
     .Attr("M: int")
     .Attr("T: {float}")

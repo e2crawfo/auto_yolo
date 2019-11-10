@@ -47,19 +47,22 @@ def lib_avail():
 def render_sprites(sprites, scales, offsets, backgrounds, name="render_sprites"):
     """ Render a scene composed of sprites on top of a background.
 
-    Sprites should be organized into a series of `flights`. Each flight uses a different sprite size.
+    An scene is composed by scaling the sprites by `scales` and offseting them by offsets
+    (using spatial transformers), and merging the sprites and background together using per-sprite
+    alpha and importance channels.
+
+    Sprites are organized into a series of `flights`. Each flight can use a different shape for the sprite maps,
+    and there can be a different number of sprites in each flight.
 
     The coordinate system for scales and offsets has (0, 0) at the image top-left and (1, 1) at the image bottom-right.
+    A sprite with scale (1, 1) and offset (0, 0) would occupy the whole output image.
 
-    Currently only supports bilinear interpolation.
-
-    An implicit scene is composed by scaling the sprites by `scales`, translating
-    them by `offsets`, and putting them on top of the background.
+    Uses bilinear interpolation for the spatial transformer sections.
 
     Args:
       sprites: List of tensors of length `n_flights`, each of shape
         (batch_size, sprite_height_i, sprite_width_i, n_channels+2)
-        The sprites in flight i are assumed to have shape (sprite_height_i, sprite_width_i).
+        The sprite maps in flight i are assumed to have shape (sprite_height_i, sprite_width_i).
         The final two channels are the alpha and importance channels.
       scales: Tensor of shape `[batch_size, n_sprites, 2]`
         Amount to scale sprites by. Order is y, x. A value of 1 will have the sprite occupy the whole output image.
@@ -90,13 +93,18 @@ def render_sprites(sprites, scales, offsets, backgrounds, name="render_sprites")
 
         backgrounds_tensor = ops.convert_to_tensor(backgrounds, name="backgrounds")
 
-        return render_sprites_so().render_sprites(
+        lib = render_sprites_so()
+
+        output = lib.render_sprites(
             sprites_tensor_list, scales_tensor_list, offsets_tensor_list, backgrounds_tensor)
+
+        return output
 
 
 @ops.RegisterGradient("RenderSprites")
 def _render_sprites_grad(op, grad_output):
-    # op.inputs is a flattened list of all inputs.
+    # The grad has to work on a flattened set of tensors; op.inputs is a flattened list of all inputs.
+    # In turn, it must return a flattened list of gradients.
     M = len(op.inputs)
     n_flights = (M - 1) // 3
     sprites = op.inputs[:n_flights]

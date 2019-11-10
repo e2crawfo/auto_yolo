@@ -230,12 +230,6 @@ class ObjectRenderer(ScopedFunction):
             [offsets],
             background
         )
-        # output = render_sprites.render_sprites(
-        #     [object_maps, object_maps],
-        #     [scales, scales],
-        #     [offsets, offsets],
-        #     background
-        # )
 
         return dict(
             appearance=appearance_for_output,

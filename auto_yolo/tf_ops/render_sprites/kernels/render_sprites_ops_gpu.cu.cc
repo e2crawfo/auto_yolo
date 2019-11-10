@@ -388,10 +388,10 @@ __global__ void index_affecting_sprites(const T *const * __restrict__ scales,
     const T _right = w;
     const T _bottom = h;
 
-    const T left = -0.5 + w * ((_left + 0.5) * scale_x / w + offset_x);
-    const T right = -0.5 + w * ((_right + 0.5) * scale_x / w + offset_x);
-    const T top = -0.5 + h * ((_top + 0.5) * scale_y / h + offset_y);
-    const T bottom = -0.5 + h * ((_bottom + 0.5) * scale_y / h + offset_y);
+    const T left = -0.5 + img_width_T * ((_left + 0.5) * scale_x / w + offset_x);
+    const T right = -0.5 + img_width_T * ((_right + 0.5) * scale_x / w + offset_x);
+    const T top = -0.5 + img_height_T * ((_top + 0.5) * scale_y / h + offset_y);
+    const T bottom = -0.5 + img_height_T * ((_bottom + 0.5) * scale_y / h + offset_y);
 
     const int left_i = static_cast<int>(MAX(0.0, ceil(left)));
     const int right_i = static_cast<int>(MIN(img_width_T-1, floor(right)));
@@ -616,6 +616,15 @@ __global__ void Copy(const int count, T* dst, const T* src) {
   }
 }
 
+template <typename T>
+void print_device_array(T* const p, int n){
+    std::vector<typename std::remove_const<T>::type> h(n);
+    cudaMemcpy(&h[0], p, sizeof(T)*n, cudaMemcpyDeviceToHost);
+    for(int i = 0; i < n; i++){
+        std::cout << i << ": " << h.at(i) << std::endl;
+    }
+}
+
 #define FUNCTOR_SETUP \
     const int n_flights = sprites.size(); \
  \
@@ -628,12 +637,12 @@ __global__ void Copy(const int count, T* dst, const T* src) {
  \
     Tensor scales_t; \
     T** scales_d; \
-    allocate_temp_array<T*>(ctx, &scales_d, scales.size(), &scales_t); \
+    allocate_temp_array<T*>(ctx, &scales_d, n_flights, &scales_t); \
     cudaMemcpy(scales_d, &scales[0], sizeof(T*)*n_flights, cudaMemcpyHostToDevice); \
  \
     Tensor offsets_t; \
     T** offsets_d; \
-    allocate_temp_array<T*>(ctx, &offsets_d, offsets.size(), &offsets_t); \
+    allocate_temp_array<T*>(ctx, &offsets_d, n_flights, &offsets_t); \
     cudaMemcpy(offsets_d, &offsets[0], sizeof(T*)*n_flights, cudaMemcpyHostToDevice); \
  \
     /* -- compute flight_info --- */ \
@@ -660,9 +669,9 @@ __global__ void Copy(const int count, T* dst, const T* src) {
       n_sprites_per_batch += n; \
     } \
  \
-    Tensor flight_info_tensor; \
+    Tensor flight_info_t; \
     FlightInfo* flight_info_d; \
-    allocate_temp_array<FlightInfo>(ctx, &flight_info_d, n_flights, &flight_info_tensor); \
+    allocate_temp_array<FlightInfo>(ctx, &flight_info_d, n_flights, &flight_info_t); \
     cudaMemcpy(flight_info_d, &flight_info[0], sizeof(FlightInfo)*n_flights, cudaMemcpyHostToDevice); \
  \
     /* --- compute (flight_id, sprite_id) pairs */ \
@@ -679,7 +688,7 @@ __global__ void Copy(const int count, T* dst, const T* src) {
  \
     Tensor pairs_t; \
     int* pairs_d; \
-    allocate_temp_array<int>(ctx, &pairs_d, 2*n_sprites_per_batch, &pairs_t); \
+    allocate_temp_array<int>(ctx, &pairs_d, n_sprites_per_batch*2, &pairs_t); \
     cudaMemcpy(pairs_d, &pairs[0], sizeof(int)*n_sprites_per_batch*2, cudaMemcpyHostToDevice); \
  \
     /* --- */ \
@@ -831,154 +840,6 @@ namespace {
             sprite_id * 2 + 1, \
             v)
 
-// template <typename T>
-// __global__ void RenderSpritesGrad2DKernel(const T* __restrict__ sprites,
-//                                           const int* __restrict__ n_sprites,
-//                                           const T* __restrict__ scales,
-//                                           const T* __restrict__ offsets,
-//                                           const T* __restrict__ backgrounds,
-// 
-//                                           const int* __restrict__ affecting,
-//                                           const int* __restrict__ counts,
-//                                           const T* __restrict__ grad_output,
-// 
-//                                           T* __restrict__ grad_sprites,
-//                                           T* __restrict__ grad_n_sprites,
-//                                           T* __restrict__ grad_scales,
-//                                           T* __restrict__ grad_offsets,
-//                                           T* __restrict__ grad_backgrounds,
-// 
-//                                           const int batch_size,
-// 
-//                                           const int max_sprites,
-//                                           const int sprite_height,
-//                                           const int sprite_width,
-// 
-//                                           const int img_height,
-//                                           const int img_width,
-// 
-//                                           const int n_channels,
-//                                           const int max_affecting){
-
-//  const int output_size = batch_size * img_height * img_width * n_channels;
-//  const int sprites_batch_stride = max_sprites * sprite_height * sprite_width * (n_channels + 2);
-//  const int sprites_sprite_stride = sprite_height * sprite_width * (n_channels + 2);
-//  const int sprites_row_stride = sprite_width * (n_channels + 2);
-//
-//  const int scales_batch_stride = 2 * max_sprites;
-//  const int offsets_batch_stride = 2 * max_sprites;
-//
-//  const int img_batch_stride = img_height * img_width * n_channels;
-//  const int img_row_stride = img_width * n_channels;
-//
-//  const T sprite_height_T = static_cast<T>(sprite_height);
-//  const T sprite_width_T = static_cast<T>(sprite_width);
-//
-//  const T img_height_T = static_cast<T>(img_height);
-//  const T img_width_T = static_cast<T>(img_width);
-//
-//  const T zero = static_cast<T>(0.0);
-//  const T one = static_cast<T>(1.0);
-//
-//  CUDA_1D_KERNEL_LOOP(index, output_size) {
-//    const int pixel_id = index / n_channels;
-//    const int batch_id = index / img_batch_stride;
-//    const int index_in_batch = index % img_batch_stride;
-//    const int img_y = index_in_batch / img_row_stride;
-//    const int index_in_row = index_in_batch % img_row_stride;
-//    const int img_x = index_in_row / n_channels;
-//    const int chan = index_in_row % n_channels;
-//
-//    const T img_y_T = static_cast<T>(img_y);
-//    const T img_x_T = static_cast<T>(img_x);
-//
-//    T weighted_sum = 0.0;
-//    T importance_sum = 0.0;
-//    int n_writes = counts[pixel_id];
-//    T bg = backgrounds[index];
-//    T bg_sum = 0.0;
-//    T alpha = 0.0;
-//
-//    for(int i = 0; i < counts[pixel_id]; ++i) {
-//      const int sprite_id = affecting[pixel_id * max_affecting + i];
-//
-//      const T scale_y = scales[batch_id * scales_batch_stride + sprite_id * 2];
-//      const T scale_x = scales[batch_id * scales_batch_stride + sprite_id * 2 + 1];
-//
-//      const T offset_y = offsets[batch_id * offsets_batch_stride + sprite_id * 2];
-//      const T offset_x = offsets[batch_id * offsets_batch_stride + sprite_id * 2 + 1];
-//
-//      // The pixel location represented in the sprites's co-ordinate frame
-//      const T y = -0.5 + sprite_height_T * ((img_y_T + 0.5) / img_height_T - offset_y) / scale_y;
-//      const T x = -0.5 + sprite_width_T * ((img_x_T + 0.5) / img_width_T - offset_x) / scale_x;
-//
-//      const int fx = std::floor(static_cast<float>(x));
-//      const int fy = std::floor(static_cast<float>(y));
-//
-//      const int cx = fx + 1;
-//      const int cy = fy + 1;
-//
-//      const T dx = static_cast<T>(cx) - x;
-//      const T dy = static_cast<T>(cy) - y;
-//
-//      const T alpha_fxfy = (fx >= 0 && fy >= 0)
-//                           ? GET_ALPHA_POINT(fx, fy)
-//                           : zero;
-//      const T alpha_cxcy = (cx <= sprite_width - 1 && cy <= sprite_height - 1)
-//                           ? GET_ALPHA_POINT(cx, cy)
-//                           : zero;
-//      const T alpha_fxcy = (fx >= 0 && cy <= sprite_height - 1)
-//                           ? GET_ALPHA_POINT(fx, cy)
-//                           : zero;
-//      const T alpha_cxfy = (cx <= sprite_width - 1 && fy >= 0)
-//                           ? GET_ALPHA_POINT(cx, fy)
-//                           : zero;
-//      const T alpha = dx * dy * alpha_fxfy +
-//                      (one - dx) * (one - dy) * alpha_cxcy +
-//                      dx * (one - dy) * alpha_fxcy +
-//                      (one - dx) * dy * alpha_cxfy;
-//
-//      const T importance_fxfy = (fx >= 0 && fy >= 0)
-//                         ? GET_IMPORTANCE_POINT(fx, fy)
-//                         : zero;
-//      const T importance_cxcy = (cx <= sprite_width - 1 && cy <= sprite_height - 1)
-//                         ? GET_IMPORTANCE_POINT(cx, cy)
-//                         : zero;
-//      const T importance_fxcy = (fx >= 0 && cy <= sprite_height - 1)
-//                         ? GET_IMPORTANCE_POINT(fx, cy)
-//                         : zero;
-//      const T importance_cxfy = (cx <= sprite_width - 1 && fy >= 0)
-//                         ? GET_IMPORTANCE_POINT(cx, fy)
-//                         : zero;
-//      const T importance = dx * dy * importance_fxfy +
-//                           (one - dx) * (one - dy) * importance_cxcy +
-//                           dx * (one - dy) * importance_fxcy +
-//                           (one - dx) * dy * importance_cxfy;
-//
-//      bg_sum += importance * (1-alpha);
-//
-//      const T img_fxfy = (fx >= 0 && fy >= 0)
-//                         ? GET_SPRITE_POINT(fx, fy)
-//                         : bg;
-//      const T img_cxcy = (cx <= sprite_width - 1 && cy <= sprite_height - 1)
-//                         ? GET_SPRITE_POINT(cx, cy)
-//                         : bg;
-//      const T img_fxcy = (fx >= 0 && cy <= sprite_height - 1)
-//                         ? GET_SPRITE_POINT(fx, cy)
-//                         : bg;
-//      const T img_cxfy = (cx <= sprite_width - 1 && fy >= 0)
-//                         ? GET_SPRITE_POINT(cx, fy)
-//                         : bg;
-//      const T interp = dx * dy * img_fxfy +
-//                       (one - dx) * (one - dy) * img_cxcy +
-//                       dx * (one - dy) * img_fxcy +
-//                       (one - dx) * dy * img_cxfy;
-//
-//      const T value = alpha * interp + (1-alpha) * bg;
-//      weighted_sum += importance * value;
-//      importance_sum += importance;
-//    } // sprite_id - forward pass
-
 
 template <typename T>
 __global__ void RenderSpritesGrad2DKernel(const T *const * __restrict__ sprites,
@@ -1031,8 +892,8 @@ __global__ void RenderSpritesGrad2DKernel(const T *const * __restrict__ sprites,
     T importance_sum = 0.0;
     int n_writes = counts[pixel_id];
     T bg = backgrounds[index];
-    T _alpha;
-    T bg_sum = 0;
+    T _alpha = 0.0;
+    T bg_sum = 0.0;
 
     for(int i = 0; i < counts[pixel_id]; ++i) {
       FORWARD_PASS_LOOP_BODY
@@ -1191,120 +1052,6 @@ struct RenderSpritesGrad2DFunctor<GPUDevice, T>{
                    const int img_height,
                    const int img_width,
                    const int n_channels){
-
-    // const T *const * sprites_p = &sprites[0];
-    // const T *const * scales_p = &scales[0];
-    // const T *const * offsets_p = &offsets[0];
-
-    // ::tensorflow::CudaLaunchConfig config;
-
-    // const int n_flights = sprites.size();
-
-    // std::vector<int> n_sprites(n_flights);
-    // std::vector<int> sprite_height(n_flights);
-    // std::vector<int> sprite_width(n_flights);
-    // std::vector<int> sprites_batch_stride(n_flights);
-    // std::vector<int> sprites_sprite_stride(n_flights);
-    // std::vector<int> sprites_row_stride(n_flights);
-    // std::vector<int> scales_batch_stride(n_flights);
-
-    // int n_sprites_per_batch = 0;
-
-    // for(int i=0; i < n_flights; i++){
-    //   const int n = shapes[4*i];
-    //   const int h = shapes[4*i+1];
-    //   const int w = shapes[4*i+2];
-    //   const int c = shapes[4*i+3];
-
-    //   n_sprites_per_batch += n;
-
-    //   n_sprites[i] = n;
-    //   sprite_height[i] = h;
-    //   sprite_width[i] = w;
-
-    //   sprites_batch_stride[i] = n * h * w * c;
-    //   sprites_sprite_stride[i] = h * w * c;
-    //   sprites_row_stride[i] = w * c;
-
-    //   scales_batch_stride[i] = 2 * n;
-    // }
-
-    // int* sprite_height_p = &sprite_height[0];
-    // int* sprite_width_p = &sprite_width[0];
-    // int* sprites_batch_stride_p = &sprites_batch_stride[0];
-    // int* sprites_sprite_stride_p = &sprites_sprite_stride[0];
-    // int* sprites_row_stride_p = &sprites_row_stride[0];
-    // int* scales_batch_stride_p = &scales_batch_stride[0];
-
-    // std::vector<int> pairs(2*n_sprites_per_batch);
-    // int pair_id = 0;
-    // for(int i=0; i < n_flights; i++){
-    //   for(int j=0; j < n_sprites[i]; j++){
-    //     pairs[2*pair_id] = i;
-    //     pairs[2*pair_id+1] = j;
-    //     pair_id++;
-    //   }
-    // }
-    // int* pairs_p = &pairs[0];
-
-    // const int total_n_sprites = batch_size * n_sprites_per_batch;
-    // const int total_n_pixels = batch_size * img_height * img_width;
-
-    // TensorShape counts_shape = {batch_size, img_height, img_width};
-    // Tensor counts_tensor;
-    // OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, counts_shape, &counts_tensor));
-
-    // int* counts = counts_tensor.flat<int>().data();
-
-    // // --- set counts to zero ---
-
-    // config = ::tensorflow::GetCudaLaunchConfig(total_n_pixels, d);
-    // ::tensorflow::SetZero
-    //     <<<config.block_count, config.thread_per_block, 0, d.stream()>>>(total_n_pixels, counts);
-
-    // // --- for each pixel, count number of sprites that affect it ---
-    // // The -1 indicates that we should just count.
-
-    // config = ::tensorflow::GetCudaLaunchConfig(total_n_sprites, d);
-    // // index_affecting_sprites<T>
-    // //     <<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
-    // //         scales_p, offsets_p, pairs_p, nullptr, counts,
-    // //         scales_batch_stride_p, sprite_height_p, sprite_width_p,
-    // //         total_n_sprites, n_sprites_per_batch, img_height, img_width, -1);
-
-    // // --- get max of counts so we know how much space to allocate for array `affecting` ---
-
-    // const int maxBlocks = 64;
-    // const int maxThreads = 256;
-
-    // TensorShape temp_shape = {maxBlocks};
-    // Tensor temp_tensor;
-    // OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, temp_shape, &temp_tensor));
-    // int* temp = temp_tensor.flat<int>().data();
-
-    // const int max_affecting = reduce_max(d, total_n_pixels, maxThreads, maxBlocks, counts, temp);
-
-    // // --- set counts to zero again ---
-
-    // config = ::tensorflow::GetCudaLaunchConfig(total_n_pixels, d);
-    // ::tensorflow::SetZero
-    //     <<<config.block_count, config.thread_per_block, 0, d.stream()>>>(total_n_pixels, counts);
-
-    // // --- for each pixel, find the indices of the sprites that affect it ---
-
-    // TensorShape affecting_shape = {batch_size, img_height, img_width, max_affecting};
-    // Tensor affecting_tensor;
-    // OP_REQUIRES_OK(ctx, ctx->allocate_temp(DT_INT32, affecting_shape, &affecting_tensor));
-
-    // int* affecting = affecting_tensor.flat<int>().data();
-
-    // config = ::tensorflow::GetCudaLaunchConfig(total_n_sprites, d);
-    // // index_affecting_sprites<T>
-    // //     <<<config.block_count, config.thread_per_block, 0, d.stream()>>>(
-    // //         scales_p, offsets_p, pairs_p, affecting, counts,
-    // //         scales_batch_stride_p, sprite_height_p, sprite_width_p,
-    // //         total_n_sprites, n_sprites_per_batch, img_height, img_width, max_affecting);
-
     FUNCTOR_SETUP
 
     // --- set gradients to 0 ---
@@ -1335,17 +1082,17 @@ struct RenderSpritesGrad2DFunctor<GPUDevice, T>{
 
     Tensor grad_sprites_t;
     T** grad_sprites_d;
-    allocate_temp_array<T*>(ctx, &grad_sprites_d, grad_sprites.size(), &grad_sprites_t);
+    allocate_temp_array<T*>(ctx, &grad_sprites_d, n_flights, &grad_sprites_t);
     cudaMemcpy(grad_sprites_d, &grad_sprites[0], sizeof(T*)*n_flights, cudaMemcpyHostToDevice);
 
     Tensor grad_scales_t;
     T** grad_scales_d;
-    allocate_temp_array<T*>(ctx, &grad_scales_d, grad_scales.size(), &grad_scales_t);
+    allocate_temp_array<T*>(ctx, &grad_scales_d, n_flights, &grad_scales_t);
     cudaMemcpy(grad_scales_d, &grad_scales[0], sizeof(T*)*n_flights, cudaMemcpyHostToDevice);
 
     Tensor grad_offsets_t;
     T** grad_offsets_d;
-    allocate_temp_array<T*>(ctx, &grad_offsets_d, grad_offsets.size(), &grad_offsets_t);
+    allocate_temp_array<T*>(ctx, &grad_offsets_d, n_flights, &grad_offsets_t);
     cudaMemcpy(grad_offsets_d, &grad_offsets[0], sizeof(T*)*n_flights, cudaMemcpyHostToDevice);
 
     // --- compute the image ---

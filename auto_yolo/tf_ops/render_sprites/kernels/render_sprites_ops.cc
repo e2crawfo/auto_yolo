@@ -66,7 +66,6 @@ struct RenderSprites2DFunctor<CPUDevice, T>{
     std::vector<int> sprites_sprite_stride(n_flights);
     std::vector<int> sprites_row_stride(n_flights);
     std::vector<int> scales_batch_stride(n_flights);
-    std::vector<int> offsets_batch_stride(n_flights);
 
     int n_sprites_per_batch = 0;
 
@@ -89,7 +88,6 @@ struct RenderSprites2DFunctor<CPUDevice, T>{
       sprites_row_stride[i] = w * c;
 
       scales_batch_stride[i] = 2 * n;
-      offsets_batch_stride[i] = 2 * n;
     }
 
     // image-level info
@@ -146,7 +144,6 @@ struct RenderSprites2DFunctor<CPUDevice, T>{
           const T _bottom = sprite_height_T[flight_id];
 
           const int sbs = scales_batch_stride[flight_id];
-          const int obs = offsets_batch_stride[flight_id];
 
           const T h = sprite_height_T[flight_id];
           const T w = sprite_width_T[flight_id];
@@ -155,8 +152,8 @@ struct RenderSprites2DFunctor<CPUDevice, T>{
             const T scale_y = scales[flight_id][batch_id * sbs + sprite_id * 2];
             const T scale_x = scales[flight_id][batch_id * sbs + sprite_id * 2 + 1];
 
-            const T offset_y = offsets[flight_id][batch_id * obs + sprite_id * 2];
-            const T offset_x = offsets[flight_id][batch_id * obs + sprite_id * 2 + 1];
+            const T offset_y = offsets[flight_id][batch_id * sbs + sprite_id * 2];
+            const T offset_x = offsets[flight_id][batch_id * sbs + sprite_id * 2 + 1];
 
             const T left = -0.5 + img_width_T * ((_left + 0.5) * scale_x / w + offset_x);
             const T right = -0.5 + img_width_T * ((_right + 0.5) * scale_x / w + offset_x);
@@ -203,7 +200,6 @@ struct RenderSprites2DFunctor<CPUDevice, T>{
               const int sprite_id = idx_pair.second;
 
               const int sbs = scales_batch_stride[flight_id];
-              const int obs = offsets_batch_stride[flight_id];
 
               const T h = sprite_height_T[flight_id];
               const T w = sprite_width_T[flight_id];
@@ -211,8 +207,8 @@ struct RenderSprites2DFunctor<CPUDevice, T>{
               const T scale_y = scales[flight_id][batch_id * sbs + sprite_id * 2];
               const T scale_x = scales[flight_id][batch_id * sbs + sprite_id * 2 + 1];
 
-              const T offset_y = offsets[flight_id][batch_id * obs + sprite_id * 2];
-              const T offset_x = offsets[flight_id][batch_id * obs + sprite_id * 2 + 1];
+              const T offset_y = offsets[flight_id][batch_id * sbs + sprite_id * 2];
+              const T offset_x = offsets[flight_id][batch_id * sbs + sprite_id * 2 + 1];
 
               // The pixel location represented in the sprites's co-ordinate frame
               const T y = -0.5 + h * ((img_y_T + 0.5) / img_height_T - offset_y) / scale_y;
@@ -537,7 +533,6 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
     std::vector<int> sprites_sprite_stride(n_flights);
     std::vector<int> sprites_row_stride(n_flights);
     std::vector<int> scales_batch_stride(n_flights);
-    std::vector<int> offsets_batch_stride(n_flights);
 
     int n_sprites_per_batch = 0;
 
@@ -560,7 +555,6 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
       sprites_row_stride[i] = w * c;
 
       scales_batch_stride[i] = 2 * n;
-      offsets_batch_stride[i] = 2 * n;
 
       // Set gradients to 0, because the kernel incrementally updates the tensor entries by adding partial contributions.
       // (Except for grad_backgrounds, which is only set once)
@@ -657,7 +651,7 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
                                        const T value) {
 
         grad_offsets[flight_id]
-                    [batch_id * offsets_batch_stride[flight_id] +
+                    [batch_id * scales_batch_stride[flight_id] +
                      sprite_id * 2] += value;
       };
 
@@ -667,7 +661,7 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
                                        const T value) {
 
         grad_offsets[flight_id]
-                    [batch_id * offsets_batch_stride[flight_id] +
+                    [batch_id * scales_batch_stride[flight_id] +
                      sprite_id * 2 + 1] += value;
       };
 
@@ -688,7 +682,6 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
           const T _bottom = sprite_height_T[flight_id];
 
           const int sbs = scales_batch_stride[flight_id];
-          const int obs = offsets_batch_stride[flight_id];
 
           const T h = sprite_height_T[flight_id];
           const T w = sprite_width_T[flight_id];
@@ -697,8 +690,8 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
             const T scale_y = scales[flight_id][batch_id * sbs + sprite_id * 2];
             const T scale_x = scales[flight_id][batch_id * sbs + sprite_id * 2 + 1];
 
-            const T offset_y = offsets[flight_id][batch_id * obs + sprite_id * 2];
-            const T offset_x = offsets[flight_id][batch_id * obs + sprite_id * 2 + 1];
+            const T offset_y = offsets[flight_id][batch_id * sbs + sprite_id * 2];
+            const T offset_x = offsets[flight_id][batch_id * sbs + sprite_id * 2 + 1];
 
             const T left = -0.5 + img_width_T * ((_left + 0.5) * scale_x / w + offset_x);
             const T right = -0.5 + img_width_T * ((_right + 0.5) * scale_x / w + offset_x);
@@ -745,7 +738,6 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
               const int sprite_id = idx_pair.second;
 
               const int sbs = scales_batch_stride[flight_id];
-              const int obs = offsets_batch_stride[flight_id];
 
               const T h = sprite_height_T[flight_id];
               const T w = sprite_width_T[flight_id];
@@ -753,8 +745,8 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
               const T scale_y = scales[flight_id][batch_id * sbs + sprite_id * 2];
               const T scale_x = scales[flight_id][batch_id * sbs + sprite_id * 2 + 1];
 
-              const T offset_y = offsets[flight_id][batch_id * obs + sprite_id * 2];
-              const T offset_x = offsets[flight_id][batch_id * obs + sprite_id * 2 + 1];
+              const T offset_y = offsets[flight_id][batch_id * sbs + sprite_id * 2];
+              const T offset_x = offsets[flight_id][batch_id * sbs + sprite_id * 2 + 1];
 
               // The pixel location represented in the sprites's co-ordinate frame
               const T y = -0.5 + h * ((img_y_T + 0.5) / img_height_T - offset_y) / scale_y;
@@ -820,11 +812,13 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
               const int flight_id = idx_pair.first;
               const int sprite_id = idx_pair.second;
 
-              const T scale_y = scales[flight_id][batch_id * scales_batch_stride[flight_id] + sprite_id * 2];
-              const T scale_x = scales[flight_id][batch_id * scales_batch_stride[flight_id] + sprite_id * 2 + 1];
+              const int sbs = scales_batch_stride[flight_id];
 
-              const T offset_y = offsets[flight_id][batch_id * offsets_batch_stride[flight_id] + sprite_id * 2];
-              const T offset_x = offsets[flight_id][batch_id * offsets_batch_stride[flight_id] + sprite_id * 2 + 1];
+              const T scale_y = scales[flight_id][batch_id * sbs + sprite_id * 2];
+              const T scale_x = scales[flight_id][batch_id * sbs + sprite_id * 2 + 1];
+
+              const T offset_y = offsets[flight_id][batch_id * sbs + sprite_id * 2];
+              const T offset_x = offsets[flight_id][batch_id * sbs + sprite_id * 2 + 1];
 
               const T y = -0.5 + sprite_height_T[flight_id] * ((img_y_T + 0.5) / img_height_T - offset_y) / scale_y;
               const T x = -0.5 + sprite_width_T[flight_id] * ((img_x_T + 0.5) / img_width_T - offset_x) / scale_x;
@@ -915,11 +909,13 @@ struct RenderSpritesGrad2DFunctor<CPUDevice, T>{
                   const int flight_id = idx_pair.first;
                   const int sprite_id = idx_pair.second;
 
-                  const T scale_y = scales[flight_id][batch_id * scales_batch_stride[flight_id] + sprite_id * 2];
-                  const T scale_x = scales[flight_id][batch_id * scales_batch_stride[flight_id] + sprite_id * 2 + 1];
+                  const int sbs = scales_batch_stride[flight_id];
 
-                  const T offset_y = offsets[flight_id][batch_id * offsets_batch_stride[flight_id] + sprite_id * 2];
-                  const T offset_x = offsets[flight_id][batch_id * offsets_batch_stride[flight_id] + sprite_id * 2 + 1];
+                  const T scale_y = scales[flight_id][batch_id * sbs + sprite_id * 2];
+                  const T scale_x = scales[flight_id][batch_id * sbs + sprite_id * 2 + 1];
+
+                  const T offset_y = offsets[flight_id][batch_id * sbs + sprite_id * 2];
+                  const T offset_x = offsets[flight_id][batch_id * sbs + sprite_id * 2 + 1];
 
                   const T y = -0.5 + sprite_height_T[flight_id] * ((img_y_T + 0.5) / img_height_T - offset_y) / scale_y;
                   const T x = -0.5 + sprite_width_T[flight_id] * ((img_x_T + 0.5) / img_width_T - offset_x) / scale_x;
@@ -1275,28 +1271,27 @@ class RenderSpritesGradOp : public ::tensorflow::OpKernel {
     //   grad_offsets.push_back(_grad_offsets->flat<T>().data());
     // }
 
-    // Execute kernel only for nonempty output; otherwise Eigen crashes on GPU.
-    // functor::RenderSpritesGrad2DFunctor<Device, T>()(ctx,
-    //                                                  ctx->eigen_device<Device>(),
+    functor::RenderSpritesGrad2DFunctor<Device, T>()(ctx,
+                                                     ctx->eigen_device<Device>(),
 
-    //                                                  sprite_shapes,
+                                                     sprite_shapes,
 
-    //                                                  sprites,
-    //                                                  scales,
-    //                                                  offsets,
-    //                                                  backgrounds.flat<T>().data(),
+                                                     sprites,
+                                                     scales,
+                                                     offsets,
+                                                     backgrounds.flat<T>().data(),
 
-    //                                                  grad_output.flat<T>().data(),
+                                                     grad_output.flat<T>().data(),
 
-    //                                                  grad_sprites,
-    //                                                  grad_scales,
-    //                                                  grad_offsets,
-    //                                                  grad_backgrounds->flat<T>().data(),
+                                                     grad_sprites,
+                                                     grad_scales,
+                                                     grad_offsets,
+                                                     grad_backgrounds->flat<T>().data(),
 
-    //                                                  batch_size,
-    //                                                  img_height,
-    //                                                  img_width,
-    //                                                  n_channels);
+                                                     batch_size,
+                                                     img_height,
+                                                     img_width,
+                                                     n_channels);
   }
 
  private:
