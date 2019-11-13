@@ -9,13 +9,11 @@ from dps import cfg
 from dps.utils import Param
 from dps.utils.tf import (
     build_scheduled_value, FIXED_COLLECTION, ScopedFunction,
-    tf_shape, apply_object_wise, tf_binomial_coefficient
+    tf_shape, apply_object_wise
 )
 
 from auto_yolo.tf_ops import render_sprites, resampler_edge
-from auto_yolo.models.core import (
-    concrete_binary_pre_sigmoid_sample, concrete_binary_sample_kl, tf_safe_log,
-    coords_to_image_space)
+from auto_yolo.models.core import concrete_binary_pre_sigmoid_sample, coords_to_image_space
 
 Normal = tfp.distributions.Normal
 
@@ -27,14 +25,14 @@ class ObjectLayer(ScopedFunction):
     noisy = Param()
     eval_noisy = Param()
     edge_resampler = Param()
-    obj_concrete_temp = Param(help="Higher values -> smoother")
     obj_temp = Param(help="Higher values -> more uniform")
+    obj_concrete_temp = Param(help="Higher values -> smoother")
 
     def __init__(self, scope=None, **kwargs):
         super().__init__(scope=scope, **kwargs)
         self.training_wheels = build_scheduled_value(self.training_wheels, "training_wheels")
-        self.obj_concrete_temp = build_scheduled_value(self.obj_concrete_temp, "obj_concrete_temp")
         self.obj_temp = build_scheduled_value(self.obj_temp, "obj_temp")
+        self.obj_concrete_temp = build_scheduled_value(self.obj_concrete_temp, "obj_concrete_temp")
 
     def std_nonlinearity(self, std_logit):
         # return tf.exp(std)
@@ -53,196 +51,24 @@ class ObjectLayer(ScopedFunction):
             + (1 - self.float_is_training) * tf.to_float(self.eval_noisy)
         )
 
-    def _compute_obj_kl(self, tensors, existing_objects=None, simple=False):
-        # --- compute obj_kl ---
-        if simple:
-            prior = self._independent_prior()
-            return concrete_binary_sample_kl(
-                tensors["obj_pre_sigmoid"],
-                tensors["obj_log_odds"], self.obj_concrete_temp,
-                prior["obj_log_odds"], self.obj_concrete_temp)
-
-        obj_pre_sigmoid = tensors["obj_pre_sigmoid"]
-        obj_log_odds = tensors["obj_log_odds"]
-        obj_prob = tensors["obj_prob"]
-        obj = tensors["obj"]
-        batch_size, n_objects, _ = tf_shape(obj)
-
-        max_n_objects = n_objects
-
-        if existing_objects is not None:
-            _, n_existing_objects, _ = tf_shape(existing_objects)
-            existing_objects = tf.reshape(existing_objects, (batch_size, n_existing_objects))
-            max_n_objects += n_existing_objects
-
-        count_support = tf.range(max_n_objects+1, dtype=tf.float32)
-
-        if self.count_prior_dist is not None:
-            if self.count_prior_dist is not None:
-                assert len(self.count_prior_dist) == (max_n_objects + 1)
-            count_distribution = tf.constant(self.count_prior_dist, dtype=tf.float32)
-        else:
-            count_prior_prob = tf.nn.sigmoid(self.count_prior_log_odds)
-            count_distribution = count_prior_prob ** count_support
-
-        normalizer = tf.reduce_sum(count_distribution)
-        count_distribution = count_distribution / tf.maximum(normalizer, 1e-6)
-        count_distribution = tf.tile(count_distribution[None, :], (batch_size, 1))
-
-        if existing_objects is not None:
-            count_so_far = tf.reduce_sum(tf.round(existing_objects), axis=1, keepdims=True)
-
-            count_distribution = (
-                count_distribution
-                * tf_binomial_coefficient(count_support, count_so_far)
-                * tf_binomial_coefficient(max_n_objects - count_support, n_existing_objects - count_so_far)
-            )
-
-            normalizer = tf.reduce_sum(count_distribution, axis=1, keepdims=True)
-            count_distribution = count_distribution / tf.maximum(normalizer, 1e-6)
-        else:
-            count_so_far = tf.zeros((batch_size, 1), dtype=tf.float32)
-
-        obj_kl = []
-        for i in range(n_objects):
-            p_z_given_Cz_raw = (count_support[None, :] - count_so_far) / (max_n_objects - i)
-            p_z_given_Cz = tf.clip_by_value(p_z_given_Cz_raw, 0.0, 1.0)
-
-            # Doing this instead of 1 - p_z_given_Cz seems to be more numerically stable.
-            inv_p_z_given_Cz_raw = (max_n_objects - i - count_support[None, :] + count_so_far) / (max_n_objects - i)
-            inv_p_z_given_Cz = tf.clip_by_value(inv_p_z_given_Cz_raw, 0.0, 1.0)
-
-            p_z = tf.reduce_sum(count_distribution * p_z_given_Cz, axis=1, keepdims=True)
-
-            if self.use_concrete_kl:
-                prior_log_odds = tf_safe_log(p_z) - tf_safe_log(1-p_z)
-                _obj_kl = concrete_binary_sample_kl(
-                    obj_pre_sigmoid[:, i, :],
-                    obj_log_odds[:, i, :], self.obj_concrete_temp,
-                    prior_log_odds, self.obj_concrete_temp,
-                )
-            else:
-                prob = obj_prob[:, i, :]
-
-                _obj_kl = (
-                    prob * (tf_safe_log(prob) - tf_safe_log(p_z))
-                    + (1-prob) * (tf_safe_log(1-prob) - tf_safe_log(1-p_z))
-                )
-
-            obj_kl.append(_obj_kl)
-
-            sample = tf.to_float(obj[:, i, :] > 0.5)
-            mult = sample * p_z_given_Cz + (1-sample) * inv_p_z_given_Cz
-            raw_count_distribution = mult * count_distribution
-            normalizer = tf.reduce_sum(raw_count_distribution, axis=1, keepdims=True)
-            normalizer = tf.maximum(normalizer, 1e-6)
-
-            # invalid = tf.logical_and(p_z_given_Cz_raw > 1, count_distribution > 1e-8)
-            # float_invalid = tf.cast(invalid, tf.float32)
-            # diagnostic = tf.stack(
-            #     [float_invalid, p_z_given_Cz, count_distribution, mult, raw_count_distribution], axis=-1)
-
-            # assert_op = tf.Assert(
-            #     tf.reduce_all(tf.logical_not(invalid)),
-            #     [invalid, diagnostic, count_so_far, sample, tf.constant(i, dtype=tf.float32)],
-            #     summarize=100000)
-
-            count_distribution = raw_count_distribution / normalizer
-            count_so_far += sample
-
-            # this avoids buildup of inaccuracies that can cause problems in computing p_z_given_Cz_raw
-            count_so_far = tf.round(count_so_far)
-
-        obj_kl = tf.reshape(tf.concat(obj_kl, axis=1), (batch_size, n_objects, 1))
-
-        return obj_kl
-
 
 class ObjectRenderer(ScopedFunction):
-    object_shape = Param()
-
     color_logit_scale = Param()
     alpha_logit_scale = Param()
     alpha_logit_bias = Param()
-    anchor_box = Param()
     importance_temp = Param()
 
-    def __init__(self, scope=None, **kwargs):
-        self.anchor_box = np.array(self.anchor_box)
-        super().__init__(scope=scope, **kwargs)
-
-    def _call(self, objects, background, is_training, appearance_only=False):
-        if not self.initialized:
-            self.image_depth = tf_shape(background)[-1]
-
-        self.maybe_build_subnet("object_decoder")
-
-        # --- compute sprite appearance from attr using object decoder ---
-
-        appearance_logit = apply_object_wise(
-            self.object_decoder, objects.attr,
-            output_size=self.object_shape + (self.image_depth+1,),
-            is_training=is_training)
-
-        appearance_logit = appearance_logit * ([self.color_logit_scale] * self.image_depth + [self.alpha_logit_scale])
-        appearance_logit = appearance_logit + ([0.] * self.image_depth + [self.alpha_logit_bias])
-
-        appearance = tf.nn.sigmoid(tf.clip_by_value(appearance_logit, -10., 10.))
-
-        if appearance_only:
-            return dict(appearance=appearance)
-
-        appearance_for_output = appearance
-
-        batch_size, *obj_leading_shape, _, _, _ = tf_shape(appearance)
-        n_objects = np.prod(obj_leading_shape)
-        appearance = tf.reshape(
-            appearance, (batch_size, n_objects, *self.object_shape, self.image_depth+1))
-
-        obj_colors, obj_alpha = tf.split(appearance, [self.image_depth, 1], axis=-1)
-
-        obj_alpha *= tf.reshape(objects.obj, (batch_size, n_objects, 1, 1, 1))
-
-        z = tf.reshape(objects.z, (batch_size, n_objects, 1, 1, 1))
-
-        # We use a minimum value to handle case where none of objects want to use a large value.
-        obj_importance = tf.maximum(obj_alpha * z / self.importance_temp, 0.01)
-
-        object_maps = tf.concat([obj_colors, obj_alpha, obj_importance], axis=-1)
-
-        *_, image_height, image_width, _ = tf_shape(background)
-
-        yt, xt, ys, xs = coords_to_image_space(
-            objects.yt, objects.xt, objects.ys, objects.xs,
-            (image_height, image_width), self.anchor_box, top_left=True)
-
-        scales = tf.concat([ys, xs], axis=-1)
-        scales = tf.reshape(scales, (batch_size, n_objects, 2))
-
-        offsets = tf.concat([yt, xt], axis=-1)
-        offsets = tf.reshape(offsets, (batch_size, n_objects, 2))
-
-        # --- Compose images ---
-
-        output = render_sprites.render_sprites(
-            [object_maps],
-            [scales],
-            [offsets],
-            background
-        )
-
-        return dict(
-            appearance=appearance_for_output,
-            output=output)
-
-
-class MultiscaleObjectRenderer(ObjectRenderer):
-    object_shape = None
-    anchor_box = None
-
     def __init__(self, anchor_boxes, object_shapes, scope=None, **kwargs):
-        self.anchor_boxes = anchor_boxes
-        self.object_shapes = object_shapes
+
+        anchor_boxes = np.array(anchor_boxes)
+        if anchor_boxes.ndim == 1:
+            anchor_boxes = [anchor_boxes]
+        self.anchor_boxes = [tuple(s) for s in anchor_boxes]
+
+        object_shapes = np.array(object_shapes)
+        if object_shapes.ndim == 1:
+            object_shapes = [object_shapes]
+        self.object_shapes = [tuple(s) for s in object_shapes]
 
         super().__init__(scope=scope, **kwargs)
 
@@ -250,62 +76,81 @@ class MultiscaleObjectRenderer(ObjectRenderer):
         if not self.initialized:
             self.image_depth = tf_shape(background)[-1]
 
-        self.maybe_build_subnet("object_decoder")
+        if isinstance(objects, dict):
+            objects = [objects]
 
-        # --- compute sprite appearance from attr using object decoder ---
+        _object_maps = []
+        _scales = []
+        _offsets = []
+        _appearance = []
 
-        appearance_logit = apply_object_wise(
-            self.object_decoder, objects.attr,
-            output_size=self.object_shape + (self.image_depth+1,),
-            is_training=is_training)
+        for i, obj in enumerate(objects):
+            anchor_box = self.anchor_boxes[i]
+            object_shape = self.object_shapes[i]
 
-        appearance_logit = appearance_logit * ([self.color_logit_scale] * self.image_depth + [self.alpha_logit_scale])
-        appearance_logit = appearance_logit + ([0.] * self.image_depth + [self.alpha_logit_bias])
+            object_decoder = self.maybe_build_subnet(
+                "object_decoder_for_flight_{}".format(i), builder_name='build_object_decoder')
 
-        appearance = tf.nn.sigmoid(tf.clip_by_value(appearance_logit, -10., 10.))
+            # --- compute sprite appearance from attr using object decoder ---
+
+            appearance_logit = apply_object_wise(
+                object_decoder, obj.attr,
+                output_size=object_shape + (self.image_depth+1,),
+                is_training=is_training)
+
+            appearance_logit = appearance_logit * ([self.color_logit_scale] * self.image_depth + [self.alpha_logit_scale])
+            appearance_logit = appearance_logit + ([0.] * self.image_depth + [self.alpha_logit_bias])
+
+            appearance = tf.nn.sigmoid(tf.clip_by_value(appearance_logit, -10., 10.))
+            _appearance.append(appearance)
+
+            if appearance_only:
+                continue
+
+            batch_size, *obj_leading_shape, _, _, _ = tf_shape(appearance)
+            n_objects = np.prod(obj_leading_shape)
+            appearance = tf.reshape(
+                appearance, (batch_size, n_objects, *object_shape, self.image_depth+1))
+
+            obj_colors, obj_alpha = tf.split(appearance, [self.image_depth, 1], axis=-1)
+
+            obj_alpha *= tf.reshape(obj.obj, (batch_size, n_objects, 1, 1, 1))
+
+            z = tf.reshape(obj.z, (batch_size, n_objects, 1, 1, 1))
+            obj_importance = tf.maximum(obj_alpha * z / self.importance_temp, 0.01)
+
+            object_maps = tf.concat([obj_colors, obj_alpha, obj_importance], axis=-1)
+
+            *_, image_height, image_width, _ = tf_shape(background)
+
+            yt, xt, ys, xs = coords_to_image_space(
+                obj.yt, obj.xt, obj.ys, obj.xs,
+                (image_height, image_width), anchor_box, top_left=True)
+
+            scales = tf.concat([ys, xs], axis=-1)
+            scales = tf.reshape(scales, (batch_size, n_objects, 2))
+
+            offsets = tf.concat([yt, xt], axis=-1)
+            offsets = tf.reshape(offsets, (batch_size, n_objects, 2))
+
+            _object_maps.append(object_maps)
+            _scales.append(scales)
+            _offsets.append(offsets)
 
         if appearance_only:
-            return dict(appearance=appearance)
-
-        appearance_for_output = appearance
-
-        batch_size, *obj_leading_shape, _, _, _ = tf_shape(appearance)
-        n_objects = np.prod(obj_leading_shape)
-        appearance = tf.reshape(
-            appearance, (batch_size, n_objects, *self.object_shape, self.image_depth+1))
-
-        obj_colors, obj_alpha = tf.split(appearance, [self.image_depth, 1], axis=-1)
-
-        obj_alpha *= tf.reshape(objects.obj, (batch_size, n_objects, 1, 1, 1))
-
-        z = tf.reshape(objects.z, (batch_size, n_objects, 1, 1, 1))
-        obj_importance = tf.maximum(obj_alpha * z / self.importance_temp, 0.01)
-
-        object_maps = tf.concat([obj_colors, obj_alpha, obj_importance], axis=-1)
-
-        *_, image_height, image_width, _ = tf_shape(background)
-
-        yt, xt, ys, xs = coords_to_image_space(
-            objects.yt, objects.xt, objects.ys, objects.xs,
-            (image_height, image_width), self.anchor_box, top_left=True)
-
-        scales = tf.concat([ys, xs], axis=-1)
-        scales = tf.reshape(scales, (batch_size, n_objects, 2))
-
-        offsets = tf.concat([yt, xt], axis=-1)
-        offsets = tf.reshape(offsets, (batch_size, n_objects, 2))
+            return dict(appearance=_appearance)
 
         # --- Compose images ---
 
         output = render_sprites.render_sprites(
-            object_maps,
-            scales,
-            offsets,
+            _object_maps,
+            _scales,
+            _offsets,
             background
         )
 
         return dict(
-            appearance=appearance_for_output,
+            appearance=_appearance,
             output=output)
 
 
@@ -330,9 +175,6 @@ class GridObjectLayer(ObjectLayer):
     attr_prior_mean = Param()
     attr_prior_std = Param()
 
-    use_concrete_kl = Param()
-    count_prior_log_odds = Param()
-    count_prior_dist = Param()
     n_objects_per_cell = Param()
 
     edge_weights = None
@@ -344,11 +186,6 @@ class GridObjectLayer(ObjectLayer):
         self.grid_offset = np.zeros(2) if grid_offset is None else grid_offset
 
         self.B = self.n_objects_per_cell
-
-        if isinstance(self.count_prior_dist, str):
-            self.count_prior_dist = eval(self.count_prior_dist)
-
-        self.count_prior_log_odds = build_scheduled_value(self.count_prior_log_odds, "count_prior_log_odds")
 
         self.yx_prior_mean = build_scheduled_value(self.yx_prior_mean, "yx_prior_mean")
         self.yx_prior_std = build_scheduled_value(self.yx_prior_std, "yx_prior_std")
@@ -373,11 +210,10 @@ class GridObjectLayer(ObjectLayer):
             width_logit_std=self.hw_prior_std,
             attr_std=self.attr_prior_std,
             z_logit_std=self.z_prior_std,
-
-            obj_log_odds=self.count_prior_log_odds,
         )
 
-    def compute_kl(self, tensors, prior=None, do_obj=True):
+    def compute_kl(self, tensors, prior=None):
+        """ Computes all KL terms except obj. """
         if prior is None:
             prior = self._independent_prior()
 
@@ -396,9 +232,6 @@ class GridObjectLayer(ObjectLayer):
             z_kl=normal_kl("z_logit"),
             attr_kl=normal_kl("attr")
         )
-
-        if do_obj:
-            kl['obj_kl'] = self._compute_obj_kl(tensors)
 
         return kl
 

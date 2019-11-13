@@ -16,11 +16,14 @@ class YoloAir_Network(VariationalAutoencoder):
     n_backbone_features = Param()
     n_objects_per_cell = Param()
     anchor_box = Param()
+    object_shape = Param()
     conv_object_layer = Param()
+    build_obj_kl = Param()
 
     backbone = None
     object_layer = None
     object_renderer = None
+    obj_kl = None
 
     _eval_funcs = None
 
@@ -60,13 +63,18 @@ class YoloAir_Network(VariationalAutoencoder):
                 self.object_layer = GridObjectLayer(self.pixels_per_cell, scope="objects")
 
         if self.object_renderer is None:
-            self.object_renderer = ObjectRenderer(scope="renderer")
+            self.object_renderer = ObjectRenderer(self.anchor_box, self.object_shape, scope="renderer")
 
         objects = self.object_layer(self.inp, backbone_output, self.is_training)
         self._tensors.update(objects)
 
         kl_tensors = self.object_layer.compute_kl(objects)
         self._tensors.update(kl_tensors)
+
+        if self.obj_kl is None:
+            self.obj_kl = self.build_obj_kl()
+
+        self._tensors['obj_kl'] = self.obj_kl(self._tensors)
 
         render_tensors = self.object_renderer(objects, self._tensors["background"], self.is_training)
         self._tensors.update(render_tensors)
@@ -94,12 +102,6 @@ class YoloAir_Network(VariationalAutoencoder):
 
             n_objects=pred_n_objects,
             obj=obj,
-            on_cell_y_avg=tf.reduce_sum(self._tensors["cell_y"] * obj, axis=(1, 2)) / pred_n_objects,
-            on_cell_x_avg=tf.reduce_sum(self._tensors["cell_x"] * obj, axis=(1, 2)) / pred_n_objects,
-            on_height_avg=tf.reduce_sum(self._tensors["height"] * obj, axis=(1, 2)) / pred_n_objects,
-            on_width_avg=tf.reduce_sum(self._tensors["width"] * obj, axis=(1, 2)) / pred_n_objects,
-            on_z_avg=tf.reduce_sum(self._tensors["z"] * obj, axis=(1, 2)) / pred_n_objects,
-
             attr=self._tensors["attr"],
         )
 

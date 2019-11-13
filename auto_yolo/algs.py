@@ -9,6 +9,7 @@ from dps.utils.tf import (
 )
 
 from auto_yolo.models import core, simple, baseline, ground_truth, yolo_air, air, nem, networks
+from auto_yolo.models.obj_kl import IndependentObjKL, SimpleObjKL, SequentialObjKL
 
 
 alg_config = Config(
@@ -26,7 +27,7 @@ alg_config = Config(
     stopping_criteria="loss_reconstruction,min",
     threshold=-np.inf,
     load_path=-1,
-    start_tensorboard=5,
+    start_tensorboard=20,
 
     max_steps=int(3e5),
     patience=50000,
@@ -149,9 +150,22 @@ yolo_air_config = alg_config.copy(
     n_lookback=1,
     conv_object_layer=False,
 
-    use_concrete_kl=False,
+    build_obj_kl=SimpleObjKL,
     obj_concrete_temp=1.0,
     obj_temp=1.0,
+
+    IndependentObjKL=dict(
+        prior_log_odds=1.0,
+    ),
+    SimpleObjKL=dict(
+        exp_rate=0.0125,
+        # exp_rate="Exp(start=0.0125, end=.125, decay_rate=0.1, decay_steps=1000)",
+    ),
+    SequentialObjKL=dict(
+        use_concrete_kl=False,
+        count_prior_dist=None,
+    ),
+
     object_shape=(14, 14),
 
     min_hw=0.0,
@@ -165,10 +179,10 @@ yolo_air_config = alg_config.copy(
 
     color_logit_scale=2.0,
     alpha_logit_scale=0.1,
-    alpha_logit_bias=5.0,
+    alpha_logit_bias=0.0,
+    # alpha_logit_bias=5.0,
 
     training_wheels="Exp(1.0, 0.0, decay_rate=0.0, decay_steps=1000, staircase=True)",
-    count_prior_dist=None,
     noise_schedule="Exp(0.001, 0.0, 1000, 0.1)",
 
     # Found through hyper parameter search

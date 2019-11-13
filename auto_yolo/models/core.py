@@ -38,6 +38,15 @@ def concrete_binary_pre_sigmoid_sample(log_odds, temperature, eps=10e-10):
     return (log_odds + noise) / temperature
 
 
+def log_bin_concrete_pdf(log_odds, pre_sigmoid_sample, temp, eps=10e-10):
+    return (
+        tf.log(temp + eps)
+        - pre_sigmoid_sample * temp
+        + log_odds
+        - 2.0 * tf.log(1.0 + tf.exp(-pre_sigmoid_sample*temp + log_odds) + eps)
+    )
+
+
 def concrete_binary_sample_kl(posterior_pre_sigmoid_sample,
                               posterior_log_odds, posterior_temperature,
                               prior_log_odds, prior_temperature,
@@ -52,25 +61,13 @@ def concrete_binary_sample_kl(posterior_pre_sigmoid_sample,
     https://www.tensorflow.org/probability/api_docs/python/tfp/distributions/RelaxedBernoulli
 
     """
-    y = posterior_pre_sigmoid_sample
+    log_posterior_pdf = log_bin_concrete_pdf(
+        posterior_log_odds, posterior_pre_sigmoid_sample, posterior_temperature, eps=eps)
 
-    y_times_prior_temp = y * prior_temperature
-    log_prior = (
-        tf.log(prior_temperature + eps)
-        - y_times_prior_temp
-        + prior_log_odds
-        - 2.0 * tf.log(1.0 + tf.exp(-y_times_prior_temp + prior_log_odds) + eps)
-    )
+    log_prior_pdf = log_bin_concrete_pdf(
+        prior_log_odds, posterior_pre_sigmoid_sample, prior_temperature, eps=eps)
 
-    y_times_posterior_temp = y * posterior_temperature
-    log_posterior = (
-        tf.log(posterior_temperature + eps)
-        - y_times_posterior_temp
-        + posterior_log_odds
-        - 2.0 * tf.log(1.0 + tf.exp(-y_times_posterior_temp + posterior_log_odds) + eps)
-    )
-
-    return log_posterior - log_prior
+    return log_posterior_pdf - log_prior_pdf
 
 
 def tf_safe_log(value, replacement_value=-100.0):
