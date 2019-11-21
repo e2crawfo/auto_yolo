@@ -58,9 +58,9 @@ class YoloAir_Network(VariationalAutoencoder):
 
         if self.object_layer is None:
             if self.conv_object_layer:
-                self.object_layer = ConvGridObjectLayer(self.pixels_per_cell, scope="objects")
+                self.object_layer = ConvGridObjectLayer(pixels_per_cell=self.pixels_per_cell, scope="objects")
             else:
-                self.object_layer = GridObjectLayer(self.pixels_per_cell, scope="objects")
+                self.object_layer = GridObjectLayer(pixels_per_cell=self.pixels_per_cell, scope="objects")
 
         if self.object_renderer is None:
             self.object_renderer = ObjectRenderer(self.anchor_box, self.object_shape, scope="renderer")
@@ -82,7 +82,6 @@ class YoloAir_Network(VariationalAutoencoder):
         # --- specify values to record ---
 
         obj = self._tensors["obj"]
-        pred_n_objects = self._tensors["pred_n_objects"]
 
         self.record_tensors(
             batch_size=self.batch_size,
@@ -100,9 +99,10 @@ class YoloAir_Network(VariationalAutoencoder):
             width_std=self._tensors["width_logit_std"],
             z_std=self._tensors["z_logit_std"],
 
-            n_objects=pred_n_objects,
             obj=obj,
             attr=self._tensors["attr"],
+
+            pred_n_objects=self._tensors["pred_n_objects"],
         )
 
         # --- losses ---
@@ -143,7 +143,7 @@ class YoloAir_Network(VariationalAutoencoder):
 
 
 class YoloAir_RenderHook(RenderHook):
-    fetches = "obj z inp output appearance n_objects normalized_box glimpse"
+    fetches = "obj z inp output appearance normalized_box glimpse"
 
     def __call__(self, updater):
         network = updater.network
@@ -318,7 +318,7 @@ class YoloAir_RenderHook(RenderHook):
 
 
 class YoloAir_ComparisonRenderHook(RenderHook):
-    fetches = "obj inp output appearance n_objects normalized_box"
+    fetches = "obj inp output appearance normalized_box"
 
     show_zero_boxes = True
 
@@ -367,7 +367,7 @@ class YoloAir_ComparisonRenderHook(RenderHook):
 
 
 class YoloAir_PaperSetRenderHook(RenderHook):
-    fetches = "obj z inp output appearance n_objects normalized_box glimpse"
+    fetches = "obj z inp output appearance normalized_box glimpse"
     do_annotations = True
 
     def __call__(self, updater):

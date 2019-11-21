@@ -32,18 +32,19 @@ def normal_vae(mean, std, prior_mean, prior_std):
     return sample, kl
 
 
-def concrete_binary_pre_sigmoid_sample(log_odds, temperature, eps=10e-10):
+def concrete_binary_pre_sigmoid_sample(log_odds, temp, eps=10e-10):
     u = tf.random_uniform(tf.shape(log_odds), minval=0, maxval=1)
     noise = tf.log(u + eps) - tf.log(1.0 - u + eps)
-    return (log_odds + noise) / temperature
+    return (noise + log_odds) / temp
 
 
-def log_bin_concrete_pdf(log_odds, pre_sigmoid_sample, temp, eps=10e-10):
+def logistic_log_pdf(log_odds, x, temp, eps=10e-10):
+    """ In notation from Concrete paper, mu==log(alpha)==log_odds==, lambda==temp """
     return (
         tf.log(temp + eps)
-        - pre_sigmoid_sample * temp
+        - x * temp
         + log_odds
-        - 2.0 * tf.log(1.0 + tf.exp(-pre_sigmoid_sample*temp + log_odds) + eps)
+        - 2.0 * tf.log(1.0 + tf.exp(-x*temp + log_odds) + eps)
     )
 
 
@@ -61,13 +62,13 @@ def concrete_binary_sample_kl(posterior_pre_sigmoid_sample,
     https://www.tensorflow.org/probability/api_docs/python/tfp/distributions/RelaxedBernoulli
 
     """
-    log_posterior_pdf = log_bin_concrete_pdf(
+    posterior_log_pdf = logistic_log_pdf(
         posterior_log_odds, posterior_pre_sigmoid_sample, posterior_temperature, eps=eps)
 
-    log_prior_pdf = log_bin_concrete_pdf(
+    prior_log_pdf = logistic_log_pdf(
         prior_log_odds, posterior_pre_sigmoid_sample, prior_temperature, eps=eps)
 
-    return log_posterior_pdf - log_prior_pdf
+    return posterior_log_pdf - prior_log_pdf
 
 
 def tf_safe_log(value, replacement_value=-100.0):

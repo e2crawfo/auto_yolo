@@ -144,8 +144,8 @@ yolo_air_config = alg_config.copy(
     build_object_encoder=lambda scope: MLP(n_units=[256, 128], scope=scope),
     build_object_decoder=lambda scope: MLP(n_units=[128, 256], scope=scope),
 
-    n_backbone_features=100,
-    n_passthrough_features=100,
+    n_backbone_features=128,
+    n_passthrough_features=0,
 
     n_lookback=1,
     conv_object_layer=False,

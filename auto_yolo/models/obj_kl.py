@@ -3,7 +3,7 @@ import tensorflow as tf
 from dps.utils import Parameterized, Param
 from dps.utils.tf import tf_shape, tf_binomial_coefficient, build_scheduled_value
 
-from auto_yolo.models.core import concrete_binary_sample_kl, tf_safe_log, log_bin_concrete_pdf
+from auto_yolo.models.core import concrete_binary_sample_kl, tf_safe_log, logistic_log_pdf
 
 
 class ObjKL(Parameterized):
@@ -33,7 +33,7 @@ class IndependentObjKL(ObjKL):
 
 class SimpleObjKL(ObjKL):
     """ For the prior, we assume that the sum of the concretes are governed by an exponential distribution
-        parameterized by `exp_rate` (> 0). As the exponential distribution puts much of it's mass near
+        parameterized by `exp_rate` (> 0). As the exponential distribution puts much of its mass near
         0, this encourages the network to use small values for the sum of the concretes.
 
         A larger value for exp_rate puts more mass near 0, amounting to stronger encouragement for the sum
@@ -50,22 +50,24 @@ class SimpleObjKL(ObjKL):
         super().__init__(**kwargs)
 
     def __call__(self, tensors):
+        batch_size = tf_shape(tensors["obj"])[0]
+
         exp_rate = self.exp_rate
         assert_exp_rate_gt_zero = tf.Assert(exp_rate >= 0, [exp_rate], name='assert_exp_rate_gt_zero')
 
         with tf.control_dependencies([assert_exp_rate_gt_zero]):
-            log_posterior_pdf = log_bin_concrete_pdf(
+            posterior_log_pdf = logistic_log_pdf(
                 tensors["obj_log_odds"], tensors["obj_pre_sigmoid"], self.obj_concrete_temp)
+            posterior_log_pdf = tf.reduce_sum(tf.reshape(posterior_log_pdf, (batch_size, -1)), axis=1)
 
         # This is different from the true log prior pdf by a constant factor,
         # namely the log of the normalization constant for the prior.
-        batch_size = tf_shape(tensors["obj"])[0]
         concrete_sum = tf.reduce_sum(tf.reshape(tensors["obj"], (batch_size, -1)), axis=1)
 
         # prior_pdf = exp_rate * tf.exp(-exp_rate * concrete_sum)
-        log_prior_pdf = -exp_rate * concrete_sum
+        prior_log_pdf = -exp_rate * concrete_sum
 
-        return log_posterior_pdf - log_prior_pdf
+        return posterior_log_pdf - prior_log_pdf
 
 
 class SequentialObjKL(ObjKL):

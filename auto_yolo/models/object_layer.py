@@ -18,40 +18,6 @@ from auto_yolo.models.core import concrete_binary_pre_sigmoid_sample, coords_to_
 Normal = tfp.distributions.Normal
 
 
-class ObjectLayer(ScopedFunction):
-    object_shape = Param()
-    A = Param()
-    training_wheels = Param()
-    noisy = Param()
-    eval_noisy = Param()
-    edge_resampler = Param()
-    obj_temp = Param(help="Higher values -> more uniform")
-    obj_concrete_temp = Param(help="Higher values -> smoother")
-
-    def __init__(self, scope=None, **kwargs):
-        super().__init__(scope=scope, **kwargs)
-        self.training_wheels = build_scheduled_value(self.training_wheels, "training_wheels")
-        self.obj_temp = build_scheduled_value(self.obj_temp, "obj_temp")
-        self.obj_concrete_temp = build_scheduled_value(self.obj_concrete_temp, "obj_concrete_temp")
-
-    def std_nonlinearity(self, std_logit):
-        # return tf.exp(std)
-        return (
-            self._noisy * 2 * tf.nn.sigmoid(tf.clip_by_value(std_logit, -10, 10))
-            + (1 - self._noisy) * tf.zeros_like(std_logit)
-        )
-
-    def z_nonlinearity(self, z_logit):
-        return tf.nn.sigmoid(tf.clip_by_value(z_logit, -10, 10))
-
-    @property
-    def _noisy(self):
-        return (
-            self.float_is_training * tf.to_float(self.noisy)
-            + (1 - self.float_is_training) * tf.to_float(self.eval_noisy)
-        )
-
-
 class ObjectRenderer(ScopedFunction):
     color_logit_scale = Param()
     alpha_logit_scale = Param()
@@ -76,7 +42,9 @@ class ObjectRenderer(ScopedFunction):
         if not self.initialized:
             self.image_depth = tf_shape(background)[-1]
 
+        single = False
         if isinstance(objects, dict):
+            single = True
             objects = [objects]
 
         _object_maps = []
@@ -137,6 +105,9 @@ class ObjectRenderer(ScopedFunction):
             _scales.append(scales)
             _offsets.append(offsets)
 
+        if single:
+            _appearance = _appearance[0]
+
         if appearance_only:
             return dict(appearance=_appearance)
 
@@ -152,6 +123,40 @@ class ObjectRenderer(ScopedFunction):
         return dict(
             appearance=_appearance,
             output=output)
+
+
+class ObjectLayer(ScopedFunction):
+    object_shape = Param()
+    A = Param()
+    training_wheels = Param()
+    noisy = Param()
+    eval_noisy = Param()
+    edge_resampler = Param()
+    obj_temp = Param(help="Higher values -> more uniform")
+    obj_concrete_temp = Param(help="Higher values -> smoother")
+
+    def __init__(self, scope=None, **kwargs):
+        super().__init__(scope=scope, **kwargs)
+        self.training_wheels = build_scheduled_value(self.training_wheels, "training_wheels")
+        self.obj_temp = build_scheduled_value(self.obj_temp, "obj_temp")
+        self.obj_concrete_temp = build_scheduled_value(self.obj_concrete_temp, "obj_concrete_temp")
+
+    def std_nonlinearity(self, std_logit):
+        # return tf.exp(std)
+        return (
+            self._noisy * 2 * tf.nn.sigmoid(tf.clip_by_value(std_logit, -10, 10))
+            + (1 - self._noisy) * tf.zeros_like(std_logit)
+        )
+
+    def z_nonlinearity(self, z_logit):
+        return tf.nn.sigmoid(tf.clip_by_value(z_logit, -10, 10))
+
+    @property
+    def _noisy(self):
+        return (
+            self.float_is_training * tf.to_float(self.noisy)
+            + (1 - self.float_is_training) * tf.to_float(self.eval_noisy)
+        )
 
 
 class GridObjectLayer(ObjectLayer):
@@ -542,7 +547,6 @@ class GridObjectLayer(ObjectLayer):
 
         # --- misc ---
 
-        objects.n_objects = tf.fill((self.batch_size,), self.HWB)
         objects.pred_n_objects = tf.reduce_sum(objects.obj, axis=(1, 2))
         objects.pred_n_objects_hard = tf.reduce_sum(tf.round(objects.obj), axis=(1, 2))
 
@@ -556,6 +560,10 @@ class ConvGridObjectLayer(GridObjectLayer):
 
     """
     n_lookback = None
+
+    def __init__(self, *args, flatten=False, **kwargs):
+        self.flatten = flatten
+        super().__init__(*args, **kwargs)
 
     def _call(self, inp, inp_features, is_training, is_posterior=True, prop_state=None):
         print("\n" + "-" * 10 + " ConvGridObjectLayer({}, is_posterior={}) ".format(self.name, is_posterior) + "-" * 10)
@@ -676,20 +684,22 @@ class ConvGridObjectLayer(GridObjectLayer):
 
         # --- final ---
 
-        _objects = AttrDict()
-        for k, v in objects.items():
-            _, _, _, *trailing_dims = tf_shape(v)
-            _objects[k] = tf.reshape(v, (self.batch_size, self.HWB, *trailing_dims))
-        objects = _objects
-
         if prop_state is not None:
-            objects.prop_state = tf.tile(prop_state[0:1, None], (self.batch_size, self.HWB, 1))
-            objects.prior_prop_state = tf.tile(prop_state[0:1, None], (self.batch_size, self.HWB, 1))
+            objects.prop_state = tf.tile(prop_state[0:1, None, None, :], (self.batch_size, H, W, 1))
+            objects.prior_prop_state = tf.tile(prop_state[0:1, None, None, :], (self.batch_size, H, W, 1))
+
+        if self.flatten:
+            _objects = AttrDict()
+            for k, v in objects.items():
+                _, _, _, *trailing_dims = tf_shape(v)
+                _objects[k] = tf.reshape(v, (self.batch_size, self.HWB, *trailing_dims))
+            objects = _objects
 
         # --- misc ---
 
-        objects.n_objects = tf.fill((self.batch_size,), self.HWB)
-        objects.pred_n_objects = tf.reduce_sum(objects.obj, axis=(1, 2))
-        objects.pred_n_objects_hard = tf.reduce_sum(tf.round(objects.obj), axis=(1, 2))
+        flat_objects = tf.reshape(objects.obj, (self.batch_size, -1))
+
+        objects.pred_n_objects = tf.reduce_sum(flat_objects, axis=1)
+        objects.pred_n_objects_hard = tf.reduce_sum(tf.round(flat_objects), axis=1)
 
         return objects
