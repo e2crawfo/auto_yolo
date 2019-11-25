@@ -25,7 +25,7 @@ but with significant code improvements.
    auto_yolo was developed with tensorflow 1.13.2 and CUDA 10.0; no guarantees that it will work
    with other versions, though it probably will.
 
-2. sh install.sh
+2. `sh install.sh`
 
 3. Install a version of `tensorflow_probability` that matches your version of tensorflow (0.6 works for tensorflow 1.13, increment by 0.1 for each 0.1 increment of tf version).
 
