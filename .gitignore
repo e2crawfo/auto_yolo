@@ -1,6 +1,7 @@
 # auto_yolo-specific
 plots/plots
 *.sh
+!install.sh
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
