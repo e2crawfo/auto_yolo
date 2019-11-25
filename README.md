@@ -3,13 +3,14 @@ This repository contains code for running experiments from the following paper:
 Spatially Invariant Unsupervised Object Detection with Convolutional Neural Networks.  
 Eric Crawford and Joelle Pineau.  
 *AAAI (2019).*
-
+```
 @inproceedings{crawford2019spatially,  
-  title={Spatiial Invariant UNsupervised Object Detection with Convolutional Neural Networks},  
+  title={Spatiial Invariant Unsupervised Object Detection with Convolutional Neural Networks},  
   author={Crawford, Eric and Pineau, Joelle},  
   booktitle={Thirty-Third AAAI Conference on Artificial Intelligence},  
   year={2019}
 }
+```
 
 This repository and the companion repository `dps` are both likely to undergo
 further development in the future. In general, we will attempt to keep the
