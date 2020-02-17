@@ -38,7 +38,11 @@ class ObjectRenderer(ScopedFunction):
 
         super().__init__(scope=scope, **kwargs)
 
-    def _call(self, objects, background, is_training, appearance_only=False):
+    def _call(self, objects, background, is_training, appearance_only=False, mask_only=False):
+        """ If mask_only==True, then we ignore the provided background, using a black blackground instead,
+            and also ignore the computed appearance, using all-white appearances instead.
+
+        """
         if not self.initialized:
             self.image_depth = tf_shape(background)[-1]
 
@@ -82,6 +86,9 @@ class ObjectRenderer(ScopedFunction):
 
             obj_colors, obj_alpha = tf.split(appearance, [self.image_depth, 1], axis=-1)
 
+            if mask_only:
+                obj_colors = tf.ones_like(obj_colors)
+
             obj_alpha *= tf.reshape(obj.obj, (batch_size, n_objects, 1, 1, 1))
 
             z = tf.reshape(obj.z, (batch_size, n_objects, 1, 1, 1))
@@ -110,6 +117,9 @@ class ObjectRenderer(ScopedFunction):
 
         if appearance_only:
             return dict(appearance=_appearance)
+
+        if mask_only:
+            background = tf.zeros_like(background)
 
         # --- Compose images ---
 

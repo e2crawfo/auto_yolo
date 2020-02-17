@@ -1,7 +1,7 @@
 import argparse
 
 from auto_yolo import envs
-from dps.updater import DummyUpdater
+from dps.tf.updater import DummyUpdater
 
 readme = "yolo_air ablation experiment on transfer setting"
 

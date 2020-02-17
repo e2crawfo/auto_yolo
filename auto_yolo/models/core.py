@@ -6,12 +6,11 @@ import matplotlib.pyplot as plt
 from matplotlib import animation
 
 from dps import cfg
-from dps.updater import Updater as _Updater
 from dps.utils import Param, square_subplots
 from dps.utils.tf import (
     build_gradient_train_op, apply_mask_and_group_at_front,
     build_scheduled_value, FIXED_COLLECTION)
-from dps.updater import DataManager, Evaluator, TensorRecorder
+from dps.tf.updater import DataManager, Evaluator, TensorRecorder, VideoUpdater as _VideoUpdater
 from dps.train import Hook
 
 
@@ -306,101 +305,18 @@ class AP:
             iou_threshold=self.iou_threshold)
 
 
-class Updater(_Updater):
-    optimizer_spec = Param()
-    lr_schedule = Param()
-    noise_schedule = Param()
-    max_grad_norm = Param()
-    grad_n_record_groups = Param(None)
-
-    def __init__(self, env, scope=None, **kwargs):
-        self.obs_shape = env.obs_shape
-        *other, self.image_height, self.image_width, self.image_depth = self.obs_shape
-        self.n_frames = other[0] if other else 0
-        self.network = cfg.build_network(env, self, scope="network")
-
-        super(Updater, self).__init__(env, scope=scope, **kwargs)
-
-    def trainable_variables(self, for_opt):
-        return self.network.trainable_variables(for_opt)
-
-    def _update(self, batch_size):
-        if cfg.get('no_gradient', False):
-            return dict(train=dict())
-
-        feed_dict = self.data_manager.do_train()
-
-        sess = tf.get_default_session()
-        _, record, train_record = sess.run(
-            [self.train_op, self.recorded_tensors, self.train_records], feed_dict=feed_dict)
-        record.update(train_record)
-
-        return dict(train=record)
-
+class VideoUpdater(_VideoUpdater):
     def _evaluate(self, _batch_size, mode):
-        result = self.evaluator.eval(self.recorded_tensors, self.data_manager, mode)
+        result = super()._evaluate(_batch_size, mode)
 
         if "MOT:mota" in result and "prior_MOT:mota" in result:
             result['mota_post_prior_sum'] = result["MOT:mota"] + result["prior_MOT:mota"]
 
         return result
 
-    def _build_graph(self):
-        self.data_manager = DataManager(datasets=self.env.datasets)
-        self.data_manager.build_graph()
 
-        data = self.data_manager.iterator.get_next()
-        self.inp = data["image"]
-        network_outputs = self.network(data, self.data_manager.is_training)
-
-        network_tensors = network_outputs["tensors"]
-        network_recorded_tensors = network_outputs["recorded_tensors"]
-        network_losses = network_outputs["losses"]
-
-        self.tensors = network_tensors
-
-        self.recorded_tensors = recorded_tensors = dict(global_step=tf.train.get_or_create_global_step())
-
-        # --- loss ---
-
-        self.loss = tf.constant(0., tf.float32)
-        for name, tensor in network_losses.items():
-            self.loss += tensor
-            recorded_tensors['loss_' + name] = tensor
-        recorded_tensors['loss'] = self.loss
-
-        # --- train op ---
-
-        if cfg.do_train and not cfg.get('no_gradient', False):
-            tvars = self.trainable_variables(for_opt=True)
-
-            self.train_op, self.train_records = build_gradient_train_op(
-                self.loss, tvars, self.optimizer_spec, self.lr_schedule,
-                self.max_grad_norm, self.noise_schedule, grad_n_record_groups=self.grad_n_record_groups)
-
-        sess = tf.get_default_session()
-        for k, v in getattr(sess, 'scheduled_values', None).items():
-            if k in recorded_tensors:
-                recorded_tensors['scheduled_' + k] = v
-            else:
-                recorded_tensors[k] = v
-
-        # --- recorded values ---
-
-        intersection = recorded_tensors.keys() & network_recorded_tensors.keys()
-        assert not intersection, "Key sets have non-zero intersection: {}".format(intersection)
-        recorded_tensors.update(network_recorded_tensors)
-
-        intersection = recorded_tensors.keys() & self.network.eval_funcs.keys()
-        assert not intersection, "Key sets have non-zero intersection: {}".format(intersection)
-
-        if self.network.eval_funcs:
-            eval_funcs = self.network.eval_funcs
-        else:
-            eval_funcs = {}
-
-        # For running functions, during evaluation, that are not implemented in tensorflow
-        self.evaluator = Evaluator(eval_funcs, network_tensors, self)
+# For backwards compart with external imports
+Updater = VideoUpdater
 
 
 class EvalHook(Hook):

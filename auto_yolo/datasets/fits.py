@@ -72,8 +72,9 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     from astropy.utils.data import get_pkg_data_filename
 
-    # image_file = get_pkg_data_filename('galactic_center/gc_2mass_k.fits')
-    image_file = get_pkg_data_filename('tutorials/FITS-images/HorseHead.fits')
+    image_file = '/home/eric/Downloads/abell_2744_RGB.fits'
+    # image_file = get_pkg_data_filename('tutorials/FITS-images/HorseHead.fits')
+
     image_data = fits.getdata(image_file, ext=0)
 
     plt.figure()
@@ -85,7 +86,8 @@ if __name__ == "__main__":
 
     dset = FITSDataset(
         fits_file=image_file, postprocessing='tile_pad',
-        n_samples_per_image=n, tile_shape=(200, 200),
+        n_samples_per_image=n,
+        tile_shape=(1000, 1000),
         force_memmap=False,
     )
     print(dset.depth)

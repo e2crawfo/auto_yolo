@@ -50,7 +50,9 @@ class YoloAir_Network(VariationalAutoencoder):
         assert isinstance(self.backbone, GridConvNet)
 
         inp = self._tensors["inp"]
-        backbone_output, n_grid_cells, grid_cell_size = self.backbone(inp, self.n_backbone_features, self.is_training)
+        backbone_output = self.backbone(inp, self.n_backbone_features, self.is_training)
+        n_grid_cells = self.backbone.layer_info[-1]['n_grid_cells']
+        grid_cell_size = self.backbone.layer_info[-1]['grid_cell_size']
 
         self.H, self.W = [int(i) for i in n_grid_cells]
         self.HWB = self.H * self.W * self.B

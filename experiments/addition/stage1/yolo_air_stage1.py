@@ -1,5 +1,5 @@
 from auto_yolo import envs
-from dps.updater import DummyUpdater
+from dps.tf.updater import DummyUpdater
 
 readme = "Running first stage (representation learning) for yolo_air on addition task."
 
