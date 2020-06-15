@@ -3,10 +3,9 @@ import tensorflow_probability as tfp
 import numpy as np
 import sonnet as snt
 import itertools
-from orderedattrdict import AttrDict
 
 from dps import cfg
-from dps.utils import Param
+from dps.utils import Param, AttrDict
 from dps.utils.tf import (
     build_scheduled_value, FIXED_COLLECTION, ScopedFunction,
     tf_shape, apply_object_wise
