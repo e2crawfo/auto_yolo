@@ -2,6 +2,8 @@
 plots/plots
 *.sh
 !install.sh
+auto_yolo/tf_ops/render_sprites/third_party/
+auto_yolo/tf_ops/resampler_edge/third_party/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

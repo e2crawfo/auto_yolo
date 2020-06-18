@@ -1,6 +1,6 @@
 # Check tensorflow version.
 
-MAX_VERSION=1.13
+MAX_VERSION=1.14
 VALID_TF_VERSION=$(python -c "import tensorflow as tf; from pkg_resources import parse_version; print(parse_version(tf.VERSION) < parse_version('$MAX_VERSION'))")
 
 if [ $VALID_TF_VERSION != "True" ]; then

@@ -9,10 +9,9 @@ from dps.datasets.base import Environment
 from dps.datasets.shapes import ShapesDataset, BlueXAboveRedCircle, SetThreeAttr
 from dps.datasets.clevr import ClevrDataset
 from dps.datasets.atari import StaticAtariDataset
-from dps.utils import Config
+from dps.utils import Config, get_default_config
 from dps.train import training_loop
 from dps.hyper import build_and_submit
-from dps.config import DEFAULT_CONFIG
 
 import auto_yolo.algs as alg_module
 from auto_yolo.models.core import EvalHook
@@ -34,7 +33,7 @@ def run_experiment(
 
     args, _ = parser.parse_known_args()
 
-    _config = DEFAULT_CONFIG.copy()
+    _config = get_default_config()
 
     env_kwargs = env_kwargs or {}
 

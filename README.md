@@ -22,9 +22,9 @@ but with significant code improvements.
 
 ### Installation
 1. [Install tensorflow](https://www.tensorflow.org/install/) with [GPU support](https://www.tensorflow.org/install/gpu).
-   auto_yolo was developed with tensorflow 1.13.2 and CUDA 10.0; no guarantees that it will work
+   auto_yolo was developed with tensorflow 1.13.2 and CUDA 10.0; we cannot guarantee that it will work
    with other versions. In particular, versions of tensorflow >= 1.14 introduce changes to the process of building custom
-   tensorflow ops (of which this repo has 2) which the repo has not yet been adapted to.
+   tensorflow ops (of which this repo has 2) which this repo has not yet adapted to.
 
 2. `sh install.sh`
 
